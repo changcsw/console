@@ -69,26 +69,38 @@
   - `game_id`
   - `game_secret`
 - 默认创建 `GLOBAL` 市场
+- 一个游戏允许同时选择多个 `market`
 
 完成标准：
 - 游戏主数据可增删改查
 - 法务链接支持默认、按市场、按语言覆盖
 
-## 阶段 5：渠道与渠道包
+## 阶段 5：渠道与渠道包 / GameMarketChannel 实例
 
 - 实现：
   - `GET /api/admin/games/{gameId}/channels`
   - `POST /api/admin/games/{gameId}/channels`
+  - `GET /api/admin/games/{gameId}/market-channels`
+  - `POST /api/admin/games/{gameId}/markets/{market}/channels`
+  - `POST /api/admin/game-market-channels/{id}/hide`
+  - `POST /api/admin/game-market-channels/{id}/unhide`
   - `GET /api/admin/game-channels/{gameChannelId}`
   - `PATCH /api/admin/game-channels/{gameChannelId}`
   - `POST /api/admin/game-channels/{gameChannelId}/packages`
   - `GET /api/admin/game-channels/{gameChannelId}/packages`
   - `PATCH /api/admin/channel-packages/{packageId}`
 - 新增渠道时应用渠道策略默认值
+- 复制创建时仅复制普通字段，`secret/file` 必须清空
+- `CN` 仅允许国内渠道；非 `CN` 仅允许非国内渠道
+- 手动隐藏后必须同时失效：
+  - 配置快照
+  - 同步
+  - 客户端最终配置
 
 完成标准：
 - 游戏下可管理渠道和渠道包
 - `inherit_channel_config` 生效
+- 默认列表展示当前游戏所有 market 的所有渠道实例，并支持按 market 过滤
 
 ## 阶段 6：自有账号认证与渠道登录
 
@@ -124,6 +136,11 @@
 ## 阶段 8：收银台模板和汇率提醒
 
 - 实现价格模板、版本、价格行、发布
+- 模板版本生命周期固定为：
+  - `draft`
+  - `published`
+  - `archived`
+- `published` 不允许原地编辑，但必须支持直接复制为新的 `draft`
 - 实现汇率同步运行记录
 - 默认模式必须是人工确认，不允许默认自动应用
 
@@ -165,6 +182,17 @@
   - `sync/execute`
   - `sync-jobs`
 - 差异按 section 组织
+- `sync/execute` 必须显式传 `selected_sections`
+- 当前 section 固定枚举：
+  - `game`
+  - `markets`
+  - `legal`
+  - `channels`
+  - `packages`
+  - `products`
+  - `cashier`
+  - `payments`
+  - `config`
 - 敏感字段预览时必须脱敏
 - 执行同步前必须再次校验目标 hash
 
@@ -190,4 +218,3 @@
 - 不要绕过 `currency_specs`
 - 不要绕过同步预览直接写 production
 - 不要存明文密钥
-

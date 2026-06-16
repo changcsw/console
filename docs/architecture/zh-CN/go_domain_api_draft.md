@@ -42,6 +42,7 @@ internal/
 至少统一这些类型：
 
 - `Environment`
+- `Market`
 - `LoginMode`
 - `PaymentMode`
 - `ConfigStatus`
@@ -63,14 +64,17 @@ internal/
 - 商品
 - 收银台绑定
 
-### GameChannel 聚合
+### GameMarketChannel 聚合
 
 负责：
-- 选中的渠道
-- 渠道策略
-- 渠道登录配置
-- 渠道 IAP 配置
-- 包列表
+- 游戏在某个 `market` 下的单个渠道实例
+- 可见性与兼容性校验
+- 手动隐藏 / 恢复显示
+- 登录配置、IAP 配置、包列表等后续子能力入口
+- 运行时是否进入：
+  - 配置快照
+  - 同步范围
+  - 客户端最终配置
 
 ### Product 聚合
 
@@ -144,6 +148,10 @@ internal/
 
 - `GET /api/admin/games/{gameId}/channels`
 - `POST /api/admin/games/{gameId}/channels`
+- `GET /api/admin/games/{gameId}/market-channels`
+- `POST /api/admin/games/{gameId}/markets/{market}/channels`
+- `POST /api/admin/game-market-channels/{id}/hide`
+- `POST /api/admin/game-market-channels/{id}/unhide`
 - `GET /api/admin/game-channels/{gameChannelId}`
 - `PATCH /api/admin/game-channels/{gameChannelId}`
 - `POST /api/admin/game-channels/{gameChannelId}/packages`
@@ -182,6 +190,7 @@ internal/
 - `POST /api/admin/cashier/templates`
 - `GET /api/admin/cashier/templates/{templateId}`
 - `POST /api/admin/cashier/templates/{templateId}/versions`
+- `POST /api/admin/cashier/templates/{templateId}/versions/{version}/copy-to-draft`
 - `GET /api/admin/cashier/templates/{templateId}/versions/{version}/rows`
 - `PUT /api/admin/cashier/templates/{templateId}/versions/{version}/rows`
 - `POST /api/admin/cashier/templates/{templateId}/versions/{version}/publish`
@@ -219,6 +228,22 @@ internal/
 - `POST /api/admin/games/{gameId}/sync/execute`
 - `GET /api/admin/games/{gameId}/sync-jobs`
 
+`sync/execute` 请求体必须显式包含：
+
+- `selected_sections`
+
+当前固定枚举：
+
+- `game`
+- `markets`
+- `legal`
+- `channels`
+- `packages`
+- `products`
+- `cashier`
+- `payments`
+- `config`
+
 ## 模板类字段统一语义
 
 所有模板表里的四个 JSON 都沿用统一含义：
@@ -238,6 +263,26 @@ internal/
 4. 根据 `rounding_mode` 做归一化
 5. 最终统一存成 `*_amount_minor`
 
+## 已确认的业务规则补充
+
+- `market` 当前固定取值：
+  - `GLOBAL`
+  - `JP`
+  - `KR`
+  - `SEA`
+  - `HMT`
+  - `CN`
+- 一个游戏可同时拥有多个 `market`
+- `CN` 仅允许国内渠道；非 `CN` 仅允许非国内渠道
+- 海外具体 market 的运行时配置合并顺序为：
+  - 游戏级默认
+  - `GLOBAL`
+  - 具体 market
+- 具体 market 覆盖 `GLOBAL`
+- 支付路由中空字段按 `*` 通配处理
+- 同一游戏同一 `pay_way` 下，生效中的 `priority` 不允许重复
+- 归一化后的支付路由选择器组合不允许重复
+
 ## Repository 接口建议
 
 建议仓储接口保持窄，不要把跨表编排逻辑塞进 repository。
@@ -252,4 +297,3 @@ internal/
 - `SyncRepository`
 
 跨表编排、差异计算、模板驱动校验，都应放在应用服务层。
-

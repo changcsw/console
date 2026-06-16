@@ -16,6 +16,12 @@
 - 后端：Go + PostgreSQL
 - 环境：`develop`、`sandbox`、`production`
 - `sandbox -> production`：在线差异预览 + 确认同步
+- `market` 当前固定枚举：`GLOBAL / JP / KR / SEA / HMT / CN`
+- 一个游戏可以同时选择多个 `market`，默认 `GLOBAL`
+- 渠道管理按 `GameMarketChannel` 实例建模：
+  - 默认展示当前游戏下所有 market 的所有渠道实例
+  - `CN` 仅显示国内渠道
+  - 非 `CN` market 仅显示非国内渠道
 - 登录分两层：
   - 后台管理员登录
   - 游戏玩家登录/认证配置
@@ -36,3 +42,18 @@
 - 前端骨架：[apps/admin-web](/Users/csw/gitproject/console/apps/admin-web)
 - Agent 提示词：[docs/agents](/Users/csw/gitproject/console/docs/agents)
 
+## 本轮已固化的关键规则
+
+- 海外 market 生成运行时配置时：
+  - 先取游戏级默认
+  - 再取 `GLOBAL`
+  - 最后取具体 market
+  - 具体 market 覆盖 `GLOBAL`
+- `CN` 不加载 `GLOBAL` 渠道实例
+- 渠道被手动隐藏后：
+  - 不进入配置快照
+  - 不参与同步
+  - 不进入客户端最终配置
+- 模板版本生命周期固定为：`draft / published / archived`
+- `published` 允许直接复制出新的 `draft`，但不允许原地编辑
+- `sync/execute` 必须显式传 `selected_sections`

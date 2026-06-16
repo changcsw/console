@@ -96,6 +96,16 @@
 完成标准：
 - 新增渠道时能清楚看到该渠道的登录/支付策略
 - 包管理可在详情页闭环完成
+- 渠道实例默认展示当前游戏所有 market 的所有渠道
+- 支持按 market 过滤
+- 行内必须可见：
+  - `config_status`
+  - hidden / incompatible 状态
+  - snapshot / sync / runtime 生效标识
+- 支持：
+  - 空白创建
+  - 从其它 market 复制创建
+  - 隐藏 / 恢复显示
 
 ## 阶段 5：自有账号认证与渠道登录
 
@@ -132,6 +142,7 @@
   - 版本列表
   - 价格矩阵
   - 汇率同步审核
+- `published` 版本必须提供 “复制为 draft” 的直接入口
 - 游戏详情里的收银台 Tab：
   - 绑定模板
   - 模板版本
@@ -163,6 +174,17 @@
   - 发布
   - `Sync to Production`
 - `sandbox` 环境才显示同步动作
+- 同步抽屉必须支持勾选 `selected_sections`
+- 当前固定枚举：
+  - `game`
+  - `markets`
+  - `legal`
+  - `channels`
+  - `packages`
+  - `products`
+  - `cashier`
+  - `payments`
+  - `config`
 - 差异抽屉必须高亮：
   - 新增
   - 修改
@@ -186,4 +208,3 @@
 - 所有模板驱动表单用统一渲染机制
 - 环境标识始终可见
 - `production` 视图里不允许出现可执行的 `Sync to Production`
-
