@@ -16,10 +16,12 @@
     </PageCard>
 
     <PageCard title="详情页规划" description="建议在真实开发时落成 tabs 结构。">
-      <el-tabs>
+      <el-tabs class="detail-tabs">
         <el-tab-pane label="基础信息" />
         <el-tab-pane label="市场与法务" />
-        <el-tab-pane label="渠道" />
+        <el-tab-pane label="渠道">
+          <ChannelInstancesTab game-id="100001" />
+        </el-tab-pane>
         <el-tab-pane label="渠道包" />
         <el-tab-pane label="商品" />
         <el-tab-pane label="自有账号认证" />
@@ -36,6 +38,7 @@
 import { ref } from "vue";
 import PageCard from "@/components/page/PageCard.vue";
 import PageStatusTag from "@/components/page/PageStatusTag.vue";
+import ChannelInstancesTab from "@/views/games/detail/ChannelInstancesTab.vue";
 
 const rows = ref([
   {
@@ -56,5 +59,8 @@ const rows = ref([
   gap: 12px;
   margin-bottom: 16px;
 }
-</style>
 
+.detail-tabs {
+  margin-top: -8px;
+}
+</style>
