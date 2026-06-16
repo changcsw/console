@@ -25,11 +25,14 @@
         <el-table-column prop="roundingMode" label="舍入规则" min-width="140" />
       </el-table>
     </PageCard>
+
+    <TemplateVersionsTab template-id="template-1" />
   </div>
 </template>
 
 <script setup lang="ts">
 import PageCard from "@/components/page/PageCard.vue";
+import TemplateVersionsTab from "@/views/cashier/templates/TemplateVersionsTab.vue";
 
 const currencyRows = [
   { currencyCode: "USD", decimalPlaces: 2, minAmountMinor: 1, roundingMode: "half_up" },
@@ -52,4 +55,3 @@ const currencyRows = [
   color: var(--text-subtle);
 }
 </style>
-

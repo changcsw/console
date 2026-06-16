@@ -28,7 +28,21 @@
         <el-tab-pane label="渠道登录" />
         <el-tab-pane label="IAP" />
         <el-tab-pane label="收银台" />
-        <el-tab-pane label="同步记录" />
+        <el-tab-pane label="同步记录">
+          <div class="sync-panel">
+            <div>
+              <strong>Section 级同步</strong>
+              <p>同步时显式选择 game / markets / channels / payments / config 等 section。</p>
+            </div>
+            <button class="sync-button" type="button" @click="syncDrawerOpen = true">打开同步抽屉</button>
+          </div>
+          <SyncSectionDrawer
+            :open="syncDrawerOpen"
+            game-id="100001"
+            :preview="syncPreview"
+            @close="syncDrawerOpen = false"
+          />
+        </el-tab-pane>
       </el-tabs>
     </PageCard>
   </div>
@@ -39,6 +53,7 @@ import { ref } from "vue";
 import PageCard from "@/components/page/PageCard.vue";
 import PageStatusTag from "@/components/page/PageStatusTag.vue";
 import ChannelInstancesTab from "@/views/games/detail/ChannelInstancesTab.vue";
+import SyncSectionDrawer from "@/views/games/detail/components/SyncSectionDrawer.vue";
 
 const rows = ref([
   {
@@ -49,6 +64,13 @@ const rows = ref([
     status: "active"
   }
 ]);
+
+const syncDrawerOpen = ref(false);
+const syncPreview = [
+  { section: "channels" as const },
+  { section: "payments" as const },
+  { section: "config" as const }
+];
 </script>
 
 <style scoped>
@@ -62,5 +84,39 @@ const rows = ref([
 
 .detail-tabs {
   margin-top: -8px;
+}
+
+.sync-panel {
+  align-items: center;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+}
+
+.sync-panel p {
+  color: var(--text-subtle);
+  margin: 6px 0 0;
+}
+
+.sync-button {
+  background: var(--brand);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 10px 16px;
+}
+
+@media (max-width: 960px) {
+  .sync-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 </style>
