@@ -3,6 +3,7 @@ package command
 import "github.com/csw/console/services/admin-api/internal/domain/channel"
 
 type HideMarketChannelCommand struct {
+	ID       string
 	Operator string
 }
 

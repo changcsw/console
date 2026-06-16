@@ -57,3 +57,25 @@ func TestApplyHideMarketChannelMarksItemHidden(t *testing.T) {
 		t.Fatal("hidden item should be excluded from runtime config")
 	}
 }
+
+func TestApplyUnhideMarketChannelRestoresRuntimeEligibility(t *testing.T) {
+	item := &channel.GameMarketChannel{
+		Hidden:       true,
+		HiddenBy:     "ops@example.com",
+		ConfigStatus: common.ConfigStatusValid,
+	}
+
+	ApplyUnhideMarketChannel(item)
+
+	if item.Hidden {
+		t.Fatal("expected item to be visible again")
+	}
+
+	if item.HiddenBy != "" {
+		t.Fatalf("expected hidden operator to be cleared, got %s", item.HiddenBy)
+	}
+
+	if !item.IncludedInRuntimeConfig() {
+		t.Fatal("visible valid item should return to runtime config")
+	}
+}

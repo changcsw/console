@@ -8,9 +8,13 @@ import (
 
 	"github.com/csw/console/services/admin-api/internal/app/command"
 	"github.com/csw/console/services/admin-api/internal/app/dto"
+	appquery "github.com/csw/console/services/admin-api/internal/app/query"
+	domainchannel "github.com/csw/console/services/admin-api/internal/domain/channel"
+	"github.com/csw/console/services/admin-api/internal/domain/common"
 	"github.com/csw/console/services/admin-api/internal/domain/game"
 	"github.com/csw/console/services/admin-api/internal/domain/sync"
 	"github.com/csw/console/services/admin-api/internal/infra/config"
+	channelshttp "github.com/csw/console/services/admin-api/internal/transport/http/channels"
 	syncapi "github.com/csw/console/services/admin-api/internal/transport/http/sync"
 )
 
@@ -18,6 +22,7 @@ type Server struct {
 	mux *http.ServeMux
 }
 
+type marketChannelScaffoldService struct{}
 type sectionSyncScaffoldService struct{}
 
 func New(cfg config.Config) *http.Server {
@@ -30,6 +35,11 @@ func New(cfg config.Config) *http.Server {
 }
 
 func (s *Server) registerRoutes(cfg config.Config) {
+	marketChannelHandler := channelshttp.NewHandler(
+		marketChannelScaffoldService{},
+		marketChannelScaffoldService{},
+		marketChannelScaffoldService{},
+	)
 	sectionSyncHandler := syncapi.NewSectionSyncHandler(sectionSyncScaffoldService{})
 
 	s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -73,10 +83,29 @@ func (s *Server) registerRoutes(cfg config.Config) {
 	s.mux.HandleFunc("/api/admin/games/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/admin/games/")
 		switch {
+		case strings.HasSuffix(path, "/market-channels"):
+			marketChannelHandler.ListMarketChannels(w, r)
+		case strings.Contains(path, "/markets/") && strings.HasSuffix(path, "/channels"):
+			marketChannelHandler.CreateMarketChannel(w, r)
 		case strings.HasSuffix(path, "/sync/preview"):
 			sectionSyncHandler.Preview(w, r)
 		case strings.HasSuffix(path, "/sync/execute"):
 			sectionSyncHandler.Execute(w, r)
+		default:
+			writeJSON(w, http.StatusNotImplemented, map[string]string{
+				"message": "route scaffolded but not implemented",
+				"path":    r.URL.Path,
+			})
+		}
+	})
+
+	s.mux.HandleFunc("/api/admin/game-market-channels/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/api/admin/game-market-channels/")
+		switch {
+		case strings.HasSuffix(path, "/hide"):
+			marketChannelHandler.HideMarketChannel(w, r)
+		case strings.HasSuffix(path, "/unhide"):
+			marketChannelHandler.UnhideMarketChannel(w, r)
 		default:
 			writeJSON(w, http.StatusNotImplemented, map[string]string{
 				"message": "route scaffolded but not implemented",
@@ -120,4 +149,83 @@ func (sectionSyncScaffoldService) Preview(_ context.Context, cmd command.Preview
 func (sectionSyncScaffoldService) Execute(_ context.Context, cmd command.ExecuteSectionSyncCommand) error {
 	_, err := sync.ParseSections(cmd.SelectedSections, true)
 	return err
+}
+
+func (marketChannelScaffoldService) Create(_ context.Context, cmd command.CreateMarketChannelCommand) (domainchannel.GameMarketChannel, error) {
+	source := domainchannel.GameMarketChannel{}
+	if strings.TrimSpace(cmd.CopyFromMarket) != "" {
+		source = domainchannel.GameMarketChannel{
+			GameID:       cmd.GameID,
+			Market:       cmd.CopyFromMarket,
+			ChannelID:    cmd.ChannelID,
+			NormalConfig: map[string]any{"copiedFromMarket": cmd.CopyFromMarket},
+		}
+	}
+
+	return command.BuildCreatedMarketChannel(command.CreateMarketChannelCommand{
+		GameID:         cmd.GameID,
+		Market:         cmd.Market,
+		ChannelID:      cmd.ChannelID,
+		Region:         cmd.Region,
+		CopyFromMarket: cmd.CopyFromMarket,
+		Source:         source,
+	}), nil
+}
+
+func (marketChannelScaffoldService) List(_ context.Context, q appquery.ListMarketChannelsQuery) ([]dto.GameMarketChannelListItem, error) {
+	items := []dto.GameMarketChannelListItem{
+		{
+			ID:                      domainchannel.BuildGameMarketChannelID(q.GameID, string(common.MarketGlobal), "google"),
+			GameID:                  q.GameID,
+			Market:                  string(common.MarketGlobal),
+			ChannelID:               "google",
+			ConfigStatus:            common.ConfigStatusValid,
+			IncludedInSnapshot:      true,
+			IncludedInSync:          true,
+			IncludedInRuntimeConfig: true,
+		},
+		{
+			ID:                      domainchannel.BuildGameMarketChannelID(q.GameID, string(common.MarketJP), "google"),
+			GameID:                  q.GameID,
+			Market:                  string(common.MarketJP),
+			ChannelID:               "google",
+			ConfigStatus:            common.ConfigStatusInvalid,
+			IncludedInSnapshot:      true,
+			IncludedInSync:          true,
+			IncludedInRuntimeConfig: false,
+		},
+	}
+
+	return appquery.FilterMarketChannels(q, items), nil
+}
+
+func (marketChannelScaffoldService) Hide(_ context.Context, cmd command.HideMarketChannelCommand) (domainchannel.GameMarketChannel, error) {
+	item := scaffoldMarketChannelFromID(cmd.ID)
+	command.ApplyHideMarketChannel(cmd, &item)
+	return item, nil
+}
+
+func (marketChannelScaffoldService) Unhide(_ context.Context, cmd command.UnhideMarketChannelCommand) (domainchannel.GameMarketChannel, error) {
+	item := scaffoldMarketChannelFromID(cmd.ID)
+	item.Hidden = true
+	item.HiddenBy = "admin"
+	command.ApplyUnhideMarketChannel(&item)
+	return item, nil
+}
+
+func scaffoldMarketChannelFromID(id string) domainchannel.GameMarketChannel {
+	parts := strings.SplitN(id, ":", 3)
+	item := domainchannel.GameMarketChannel{
+		ID:           id,
+		ConfigStatus: common.ConfigStatusValid,
+	}
+
+	if len(parts) != 3 {
+		return item
+	}
+
+	item.GameID = parts[0]
+	item.Market = parts[1]
+	item.ChannelID = parts[2]
+	return item
 }
