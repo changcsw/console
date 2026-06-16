@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+
+# logs
+*.log
+
+# env
+.env
+.env.local
+.env.*.local
+
+# frontend
+node_modules/
+dist/
+.vite/
+coverage/
+
+# backend
+bin/
+tmp/
+vendor/
+
+# IDE
+.cursor/
+.idea/
+.vscode/
