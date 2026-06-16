@@ -5,6 +5,7 @@
       <span>渠道 ID</span>
       <span>配置状态</span>
       <span>生效范围</span>
+      <span>操作</span>
     </div>
 
     <div v-if="filteredItems.length === 0" class="instance-table__empty">当前筛选下暂无渠道实例</div>
@@ -22,6 +23,18 @@
         :included-in-snapshot="item.includedInSnapshot"
         :included-in-sync="item.includedInSync"
       />
+      <div class="instance-table__actions">
+        <button class="action-button" type="button" @click="emit('copy', item)">复制</button>
+        <button
+          v-if="!item.hidden"
+          class="action-button action-button--danger"
+          type="button"
+          @click="emit('hide', item.id)"
+        >
+          隐藏
+        </button>
+        <button v-else class="action-button" type="button" @click="emit('unhide', item.id)">恢复显示</button>
+      </div>
     </article>
   </div>
 </template>
@@ -41,6 +54,12 @@ const props = withDefaults(
     selectedMarket: ""
   }
 );
+
+const emit = defineEmits<{
+  copy: [item: GameMarketChannelListItem];
+  hide: [id: string];
+  unhide: [id: string];
+}>();
 
 const filteredItems = computed(() => {
   if (!props.selectedMarket) {
@@ -62,7 +81,7 @@ const filteredItems = computed(() => {
 .instance-table__row {
   display: grid;
   gap: 12px;
-  grid-template-columns: 110px 180px minmax(220px, 1fr) minmax(260px, 1.2fr);
+  grid-template-columns: 110px 180px minmax(220px, 1fr) minmax(260px, 1.2fr) 160px;
 }
 
 .instance-table__head {
@@ -88,6 +107,30 @@ const filteredItems = computed(() => {
   font-weight: 700;
 }
 
+.instance-table__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.action-button {
+  background: #ffffff;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  color: var(--text-main);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+}
+
+.action-button--danger {
+  border-color: rgba(180, 35, 24, 0.18);
+  color: var(--danger);
+}
+
 .instance-table__empty {
   border: 1px dashed var(--panel-border);
   border-radius: var(--radius-md);
@@ -103,6 +146,10 @@ const filteredItems = computed(() => {
 
   .instance-table__row {
     grid-template-columns: 1fr;
+  }
+
+  .instance-table__actions {
+    justify-content: flex-start;
   }
 }
 </style>
