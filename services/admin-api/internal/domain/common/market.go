@@ -15,6 +15,15 @@ func (m Market) IsCN() bool {
 	return m == MarketCN
 }
 
+func (m Market) IsKnown() bool {
+	switch m {
+	case MarketGlobal, MarketJP, MarketKR, MarketSEA, MarketHMT, MarketCN:
+		return true
+	default:
+		return false
+	}
+}
+
 func (m Market) UsesGlobalFallback() bool {
 	return m == MarketJP || m == MarketKR || m == MarketSEA || m == MarketHMT
 }
