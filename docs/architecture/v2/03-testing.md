@@ -145,8 +145,8 @@ cases:
 
 ### 5.2 跨栈 e2e + 截图（Playwright）
 - **真实页面截图**：关键页面/抽屉在关键状态下 `page.screenshot()`，存 `tests/frontend/screenshots/`。
-- **trace**：失败用例开启 `trace: on-first-retry`，trace 存 `tests/reports/`。
-- **HTML report**：`playwright-report` 输出到 `tests/reports/playwright/`。
+- **trace**：失败用例保留 `trace`（`retain-on-failure`），与失败 artifacts 一并存 `tests/reports/playwright-artifacts/`。
+- **HTML report**：输出到 `tests/reports/playwright-html/`，机器可读结果到 `tests/reports/playwright-results.json`。
 - **可视回归**：与 `tests/frontend/visual-baseline/` 比对（`toHaveScreenshot`），基线随设计变更显式更新。
 - **必跑主线**（对齐 `02-operation-flow`）：
   - 登录 → 环境徽标展示（`production` 视图**不出现** `Sync to Production`，硬验证 `00` §9 红线）。
@@ -172,7 +172,7 @@ scripts/regression/run.sh
   5. 前端：
        - vitest run（L4，输出到 tests/reports/frontend-unit/）
        - 启动前后端 → Playwright（L5）跑 tests/frontend/e2e，采集截图/trace/HTML
-       - 输出到 tests/reports/playwright/、tests/frontend/screenshots/
+       - 输出到 tests/reports/playwright-html/、tests/reports/playwright-results.json、tests/frontend/screenshots/
   6. 汇总：聚合各产物，生成 tests/reports/summary.{md,json}
        （通过/失败计数、按模块分组、失败用例与维度、截图/trace 链接）
   7. 退出码：任一层失败则非 0
@@ -188,8 +188,9 @@ scripts/regression/run.sh
 | `summary.md` / `summary.json` | 总览：按模块的通过/失败、覆盖维度、失败明细 | 回归脚本聚合 |
 | `backend/junit.xml` · `coverage.out` | 后端用例结果与覆盖率 | go test / harness |
 | `frontend-unit/` | vitest 结果 | vitest |
-| `playwright/index.html` | e2e HTML report | Playwright |
-| `*.trace.zip` | 失败用例 trace | Playwright |
+| `playwright-html/index.html` | e2e HTML report | Playwright |
+| `playwright-results.json` | e2e 机器可读结果（供 summary 引用） | Playwright |
+| `playwright-artifacts/**/trace.zip` | 失败用例 trace 与 artifacts | Playwright |
 | `../frontend/screenshots/` | 真实页面截图 | Playwright |
 
 ---
@@ -218,3 +219,11 @@ scripts/regression/run.sh
 ```
 
 > 关联维护（`CONVENTIONS §3.3`）：各模块 front-matter `impacts` 含 `testing`，本文 `depends_on` 列出各模块，双向一致。
+
+---
+
+## 9. 实现状态（harness 已落地，模块场景增量补充）
+
+- **已落地**：`tests/` 目录树、`docker-compose.yml`（Postgres）、`scripts/regression/*`（`lib.sh`/`db.sh`/`backend.sh`/`frontend.sh`/`run.sh`/`summarize.sh`）、后端 scenario harness（`services/admin-api/internal/testkit/scenario`，进程内 httptest + manifest 加载/点路径断言/入口测试）、前端 Playwright（截图 / trace / HTML report / 视觉基线）、贯穿现有 scaffold 的 smoke 切片。
+- **增量补充**：各模块 S1–S10 完整场景 YAML 与 `expect.db` 断言，随对应模块连库实现后按 `tests/backend/scenarios/README.md` 的 schema 追加；`tests/fixtures/{common,sandbox,production}` 按 env 灌入实体样本。
+- **运行**：全量 `sh scripts/regression/run.sh`（需 docker + golang-migrate）；快路径 `WITH_DB=0 sh scripts/regression/run.sh`（仅进程内场景 + 前端，不依赖 docker/migrate）。前端浏览器二进制需在本机可运行的环境下安装（`pnpm exec playwright install chromium`）。
