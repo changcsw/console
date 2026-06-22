@@ -27,3 +27,11 @@ vendor/
 
 # local worktrees
 .worktrees/
+
+# test artifacts
+tests/reports/*
+!tests/reports/.gitkeep
+tests/frontend/screenshots/*
+!tests/frontend/screenshots/.gitkeep
+apps/admin-web/playwright-report/
+apps/admin-web/test-results/
