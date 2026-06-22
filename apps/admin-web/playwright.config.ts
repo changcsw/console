@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 5173;
+// 专用 e2e 端口（避开本地默认 5173，可能被其它 dev server 占用）。
+const PORT = Number(process.env.E2E_PORT ?? 5187);
 
 export default defineConfig({
   testDir: "../../tests/frontend/e2e",
@@ -23,9 +24,10 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
-    command: "pnpm dev",
+    // 强制独立端口 + strictPort，避免复用到其它项目的 5173 dev server。
+    command: `pnpm exec vite --port ${PORT} --strictPort`,
     url: `http://127.0.0.1:${PORT}`,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });
