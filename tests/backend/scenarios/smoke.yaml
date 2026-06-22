@@ -1,0 +1,51 @@
+module: smoke
+cases:
+  - name: healthz_ok
+    dimension: S1
+    request:
+      method: GET
+      path: /healthz
+    expect:
+      status: 200
+      jsonContains:
+        status: ok
+
+  - name: me_returns_identity
+    dimension: S1
+    request:
+      method: GET
+      path: /api/admin/me
+    expect:
+      status: 200
+      jsonContains:
+        displayName: Admin
+
+  - name: games_list_ok
+    dimension: S1
+    request:
+      method: GET
+      path: /api/admin/games
+    expect:
+      status: 200
+
+  - name: sync_preview_valid_section_ok
+    dimension: S1
+    request:
+      method: POST
+      path: /api/admin/games/100001/sync/preview
+      body:
+        selected_sections: ["channels"]
+    expect:
+      status: 200
+      jsonContains:
+        targetEnv: production
+
+  - name: sync_preview_unknown_section_rejected
+    dimension: S4
+    request:
+      method: POST
+      path: /api/admin/games/100001/sync/preview
+      body:
+        selected_sections: ["marketing"]
+    expect:
+      status: 400
