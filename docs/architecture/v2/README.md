@@ -16,7 +16,7 @@
 ## 阅读顺序
 
 1. [00 · 公共部分](./00-common.md) —— 跨模块契约：枚举/默认值、模板四件套（含 `scope`）、currency 归一化、密文/文件、状态机、统一 API 约定、审计、红线、D1–D7。
-2. [01 · 整体项目结构](./01-structure.md) —— 技术栈、三环境模型、monorepo、前后端分层目录、迁移/seed、模块依赖总览、数据流。
+2. [01 · 整体项目结构](./01-structure.md) —— 技术栈、三环境 schema 模型、monorepo、前后端分层目录、迁移/seed、模块依赖总览、数据流。
 3. [02 · 操作主线](./02-operation-flow.md) —— 平台管理员 / 游戏管理员两条端到端操作线与「下一步」规则。
 4. [03 · 测试体系](./03-testing.md) —— 测试分层、与代码对齐的测试目录、后端接口场景矩阵标准维度、前端 Playwright 截图、统一 fixtures / 回归入口 / 报告产物。
 
@@ -56,7 +56,7 @@
 
 详见 [00 · 公共部分 §1](./00-common.md)。
 
-- D1 单库 + 业务表统一加 `env` 列
+- D1 单库 + 每环境独立 schema（`develop`/`sandbox`/`production` 各一套同名业务表，平台数据在 `platform` schema，业务表不带 `env` 列）
 - D2 `game_channels` 加 `market_code`，即 GameMarketChannel 落地表
 - D3 `channels` 加 `region`（domestic/overseas）
 - D4 配置快照 per-game，`config_json` 按 market 分区

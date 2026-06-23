@@ -14,7 +14,7 @@ children: []
 # 22 · 审计日志（Audit Logs）
 
 > 本文是 `audit`「审计日志」的架构设计文档。它同时承担两个角色：
-> 1. **横切写入规范**：定义"所有有意义写操作如何统一落审计"的全局约束，被 10–20 所有写操作模块强制调用；
+> 1. **横切写入规范**：定义"所有有意义写操作如何统一落审计"的全局约束，被 `auth`～`sync`（`10`～`21`）等所有写操作模块强制调用；
 > 2. **查询页**：定义后台「审计日志」页的数据模型、后端 API、应用服务与前端交互。
 >
 > 本文默认遵循 `../../00-common.md`（特别是 **§8 审计**、§7 分页与包络、§7.5 权限码 `audit.read`）与 `../../01-structure.md`（目录分层、`transport/http/audit/`、`middleware/` 审计中间件）。与公共契约冲突处一律以 `00` 为准；本文只在其基础上追加审计私有约定。
@@ -32,7 +32,7 @@ children: []
 1. **统一写入规范（写侧）**
    - 提供整个后台**唯一**的审计写入入口（`AuditService.Write` + 审计中间件）。
    - 规定"哪些操作必须写审计""写什么字段""`action` 如何命名""`detail_json` 记录什么、如何脱敏"。
-   - 被 10（鉴权 RBAC）、11（游戏主数据）、12（渠道实例）、13（自有账号认证）、14（渠道登录）、15（商品与 IAP）、16（收银台模板）、17（游戏级收银台）、18（支付路由）、19（配置快照）、20（同步）等**所有产生有意义写操作的模块调用**。
+   - 被 `auth`（鉴权 RBAC）、`game`（游戏主数据）、`channel`（渠道实例）、`account-auth`（自有账号认证）、`channel-login`（渠道登录）、`feature-plugin`（功能插件）、`product`（商品与 IAP）、`cashier-template`（收银台模板）、`game-cashier`（游戏级收银台）、`payment`（支付路由）、`snapshot`（配置快照）、`sync`（同步）等**所有产生有意义写操作的模块调用**。
    - 同步执行（`sync`）除写 `sync_jobs / sync_job_items` 外，**必须**额外写一条 `sync.execute` 审计（见 `01` §8 数据流第 6 步）。
 
 2. **审计查询页（读侧）**
@@ -164,14 +164,14 @@ type AuditService interface {
 
 ## 3. 数据模型（逐表逐字段）
 
-### 3.1 表：`audit_logs`（平台级表，但每行带 `env`）
+### 3.1 表：`audit_logs`（位于共享 `platform` schema，每行带 `env` 过滤列）
 
-`audit_logs` 在 `00` §2.2 中归类为**平台级表**（不按 env 分物理库/不参与 env 唯一键前置），**但每一行带 `env` 字段**用于"记录该操作发生在哪个环境"。这与"业务表用 env 区分物理行"语义不同：审计的 env 是**操作上下文标记**，不是对象身份的一部分。
+`audit_logs` 在 `00` §2.2 中归类为**平台级表**，位于共享 `platform` schema（全环境一份，不随环境拆 schema），**但每一行带 `env` 字段**用于"记录该操作发生在哪个环境"。这与"游戏维度业务对象用 schema 区分环境（同名表分布在 develop/sandbox/production 三个 schema）"语义不同：审计是**事件流水**，每条记录是独立事件、不存在"跨环境同一对象"，因此无需按 env 拆 schema；`env` 仅作**过滤维度**（操作上下文标记），便于在一张表里跨环境统一查询审计。
 
-DDL（来自 `migrations/000001_init.up.sql`，原样，本文不改列）：
+DDL（业务含义不变，建在 `platform` schema）：
 
 ```sql
-CREATE TABLE IF NOT EXISTS audit_logs (
+CREATE TABLE IF NOT EXISTS platform.audit_logs (
   id BIGSERIAL PRIMARY KEY,
   actor_id BIGINT NOT NULL,
   action VARCHAR(64) NOT NULL,
@@ -275,28 +275,28 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_resource
 
 | 模块 | `action` 样例 | 说明 |
 | --- | --- | --- |
-| 10 鉴权/RBAC | `admin_user.create` / `admin_user.update` / `admin_user.disable` / `role.create` / `role.update` / `role.delete` / `role.assign_permission` / `user.assign_role` | 管理员、角色、权限分配 |
-| 10 认证（可选） | `auth.login` / `auth.logout` / `auth.token_refresh` | 见 §11，本期可不开启 |
-| 11 游戏主数据 | `game.create` / `game.update` / `game.enable` / `game.disable` / `game.delete` / `game_market.create` / `game_market.update` / `game_legal_link.update` | 游戏与 market/法务链接 |
-| 12 渠道实例 | `game_channel.create` / `game_channel.update` / `game_channel.enable` / `game_channel.disable` / `game_channel.hide` / `game_channel.unhide` / `channel_package.create` / `channel_package.update` / `channel_package.delete` | 渠道实例（含隐藏） |
-| 13 自有账号认证 | `game_account_auth_config.update` / `game_account_auth_config.enable` / `game_account_auth_config.disable` | 账号认证配置 |
-| 14 渠道登录 | `game_channel_login_config.update` / `game_channel_login_config.enable` | 渠道登录配置 |
-| 15 商品与 IAP | `product.create` / `product.update` / `product.delete` / `product.enable` / `channel_product.update` / `game_channel_iap_config.update` / `channel_package_iap_override.update` | 商品与 IAP 覆盖 |
-| 16 收银台模板 | `cashier_price_template.create` / `cashier_price_template.update` / `cashier_price_template_version.create` / `cashier_price_template_version.copy` / `cashier_price_template_version.publish` / `cashier_price_template_version.archive` / `cashier_price_row.update` | 价格模板与版本生命周期 |
-| 16/17 汇率 | `fx.preview` / `fx.approve` / `fx.reject` / `fx.ignore` / `fx.apply` | 汇率同步运行审核（`cashier_fx_sync_runs`） |
-| 17 游戏级收银台 | `game_cashier_profile.apply` / `game_cashier_profile.update` / `game_cashier_price_override.create` / `game_cashier_price_override.update` / `game_cashier_price_override.delete` | 游戏收银台 profile 与价格覆盖 |
-| 18 支付路由 | `payment_route.create` / `payment_route.update` / `payment_route.delete` / `payment_route.enable` / `payment_route.disable` / `pay_way.update` / `cashier_provider.update` / `cashier_merchant_account.create` / `cashier_merchant_account.update` | 支付路由与商户账号 |
-| 19 配置快照 | `game_config_snapshot.create` / `game_config_snapshot.publish` | 快照生成与发布 |
-| 20 同步 | `sync.execute` | sandbox→production 同步执行（强制审计） |
+| auth 鉴权/RBAC | `admin_user.create` / `admin_user.update` / `admin_user.disable` / `role.create` / `role.update` / `role.delete` / `role.assign_permission` / `user.assign_role` | 管理员、角色、权限分配 |
+| auth 认证（可选） | `auth.login` / `auth.logout` / `auth.token_refresh` | 见 §11，本期可不开启 |
+| game 游戏主数据 | `game.create` / `game.update` / `game.enable` / `game.disable` / `game.delete` / `game_market.create` / `game_market.update` / `game_legal_link.update` | 游戏与 market/法务链接 |
+| channel 渠道实例 | `game_channel.create` / `game_channel.update` / `game_channel.enable` / `game_channel.disable` / `game_channel.hide` / `game_channel.unhide` / `channel_package.create` / `channel_package.update` / `channel_package.delete` | 渠道实例（含隐藏） |
+| account-auth 自有账号认证 | `game_account_auth_config.update` / `game_account_auth_config.enable` / `game_account_auth_config.disable` | 账号认证配置 |
+| channel-login 渠道登录 | `game_channel_login_config.update` / `game_channel_login_config.enable` | 渠道登录配置 |
+| product 商品与 IAP | `product.create` / `product.update` / `product.delete` / `product.enable` / `channel_product.update` / `game_channel_iap_config.update` / `channel_package_iap_override.update` | 商品与 IAP 覆盖 |
+| cashier-template 收银台模板 | `cashier_price_template.create` / `cashier_price_template.update` / `cashier_price_template_version.create` / `cashier_price_template_version.copy` / `cashier_price_template_version.publish` / `cashier_price_template_version.archive` / `cashier_price_row.update` | 价格模板与版本生命周期 |
+| cashier-template 汇率 | `fx.preview` / `fx.approve` / `fx.reject` / `fx.ignore` / `fx.apply` | 汇率同步运行审核（`cashier_fx_sync_runs`） |
+| game-cashier 游戏级收银台 | `game_cashier_profile.apply` / `game_cashier_profile.update` / `game_cashier_price_override.create` / `game_cashier_price_override.update` / `game_cashier_price_override.delete` | 游戏收银台 profile 与价格覆盖 |
+| payment 支付路由 | `payment_route.create` / `payment_route.update` / `payment_route.delete` / `payment_route.enable` / `payment_route.disable` / `pay_way.update` / `cashier_provider.update` / `cashier_merchant_account.create` / `cashier_merchant_account.update` | 支付路由与商户账号 |
+| snapshot 配置快照 | `snapshot.generate` / `snapshot.publish` | 快照生成与发布 |
+| sync 同步 | `sync.execute` | sandbox→production 同步执行（强制审计） |
 | 基础数据/字典 | `channel.update` / `account_auth_type.update` / `currency_spec.update` / `billing_subject.update` | 平台级基础数据维护 |
 
 > 任务点名的关键样例已全部覆盖：`game.create`、`game.update`、`channel.hide`（本文落地为 `game_channel.hide`，因隐藏作用于"游戏-渠道实例"而非平台级 `channels`；若有平台级 `channel.disable` 亦写 `channel.disable`）、`cashier.publish`（本文落地为 `cashier_price_template_version.publish`）、`sync.execute`、`fx.approve`。
 
 ### 4.3 `resource_type` 穷尽清单
 
-`resource_type` 通常等于 `action` 的 `resource` 段。完整候选（与 DB 表/聚合对齐）：
+`resource_type` 通常等于 `action` 的 `resource` 段。完整候选（与 DB 表/聚合对齐）。"游戏维度业务对象" = 该表按环境分布在三个 env schema（`develop`/`sandbox`/`production`）；"否" = 平台级共享表（`platform` schema）：
 
-| `resource_type` | 对应业务/表 | 是否带 env 业务对象 |
+| `resource_type` | 对应业务/表 | 游戏维度业务对象（每环境 schema） |
 | --- | --- | --- |
 | `admin_user` | `admin_users` | 否（平台级） |
 | `role` | `admin_roles` | 否 |
@@ -534,7 +534,7 @@ Authorization: Bearer <accessToken>
             "ip": "10.1.2.3",
             "requestId": "req_8f3a2c",
             "method": "POST",
-            "path": "/api/admin/sync/execute"
+            "path": "/api/admin/games/{gameId}/sync/execute"
           }
         },
         "createdAt": "2026-06-17T08:32:10Z"
@@ -820,21 +820,22 @@ type AuditPage struct {
 
 ### 9.2 下游（谁依赖审计）
 
-审计被**所有产生有意义写操作的模块**调用（10–20），关系如 `01` §7 依赖图所示"[审计 21] 横切所有写操作"。每个模块的写用例都必须在其命令服务中调用 `AuditService.Write`：
+审计被**所有产生有意义写操作的模块**调用（`auth`～`sync`），关系如 `01` §7 依赖图所示"`audit` 横切所有写操作"。每个模块的写用例都必须在其命令服务中调用 `AuditService.Write`：
 
 | 调用方模块 | 触发审计的典型写操作 |
 | --- | --- |
-| 10 鉴权/RBAC | 管理员/角色/权限变更、角色分配 |
-| 11 游戏主数据 | game / market / legal link 的 CUD |
-| 12 渠道实例 | game_channel / package 的 CUD、hide/unhide |
-| 13/14 登录认证配置 | account_auth / login config 更新 |
-| 15 商品与 IAP | product / channel_product / iap config 更新 |
-| 16 收银台模板 | 模板/版本 publish/copy/archive、price row 更新 |
-| 17 游戏级收银台 | profile apply、price override CUD、汇率 approve/apply |
-| 18 支付路由 | route / merchant account 的 CUD |
-| 19 配置快照 | snapshot create / publish |
-| 20 同步 | **sync.execute（强制，`01` §8 第 6 步）** |
-| 22 Dashboard | 只读聚合，不写审计（可消费审计做"最近操作"卡片） |
+| auth 鉴权/RBAC | 管理员/角色/权限变更、角色分配 |
+| game 游戏主数据 | game / market / legal link 的 CUD |
+| channel 渠道实例 | game_channel / package 的 CUD、hide/unhide |
+| account-auth / channel-login 登录认证配置 | account_auth / login config 更新 |
+| feature-plugin 功能插件 | plugin config / package plugin override 更新 |
+| product 商品与 IAP | product / channel_product / iap config 更新 |
+| cashier-template 收银台模板 | 模板/版本 publish/copy/archive、price row 更新、汇率 approve |
+| game-cashier 游戏级收银台 | profile apply、price override CUD |
+| payment 支付路由 | route / merchant account 的 CUD |
+| snapshot 配置快照 | snapshot generate / publish |
+| sync 同步 | **sync.execute（强制，`01` §8 第 6 步）** |
+| dashboard 总览 | 只读聚合，不写审计（可消费审计做"最近操作"卡片） |
 
 ### 9.3 与 `dashboard`
 

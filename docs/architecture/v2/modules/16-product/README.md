@@ -32,11 +32,11 @@ children: []
 
 | 实体 | 中文 | 落地表 | env |
 | --- | --- | --- | --- |
-| Product（逻辑商品 / 商品主数据） | 游戏维度的商品基准定义 | `products` | 带 env（D1） |
-| ChannelProduct（包级商品映射 / 覆盖） | 某个渠道包对某商品的 `product_id`/`price_id` 覆盖关系 | `channel_products` | 带 env（D1） |
-| ChannelIapTemplate（渠道 IAP 模板） | 平台级模板四件套，定义渠道侧 IAP 参数表单 | `channel_iap_templates` | **不带 env**（平台级） |
-| GameChannelIapConfig（渠道 IAP 配置） | 某游戏渠道实例的 IAP 参数配置实例 | `game_channel_iap_configs` | 带 env（D1） |
-| ChannelPackageIapOverride（包级 IAP 覆盖） | 某渠道包对渠道 IAP 配置的覆盖实例 | `channel_package_iap_overrides` | 带 env（D1） |
+| Product（逻辑商品 / 商品主数据） | 游戏维度的商品基准定义 | `products` | 每环境独立 schema（D1，不带 env 列） |
+| ChannelProduct（包级商品映射 / 覆盖） | 某个渠道包对某商品的 `product_id`/`price_id` 覆盖关系 | `channel_products` | 每环境独立 schema（D1，不带 env 列） |
+| ChannelIapTemplate（渠道 IAP 模板） | 平台级模板四件套，定义渠道侧 IAP 参数表单 | `channel_iap_templates` | **平台级共享 schema `platform`**（不带 env） |
+| GameChannelIapConfig（渠道 IAP 配置） | 某游戏渠道实例的 IAP 参数配置实例 | `game_channel_iap_configs` | 每环境独立 schema（D1，不带 env 列） |
+| ChannelPackageIapOverride（包级 IAP 覆盖） | 某渠道包对渠道 IAP 配置的覆盖实例 | `channel_package_iap_overrides` | 每环境独立 schema（D1，不带 env 列） |
 
 ---
 
@@ -86,7 +86,7 @@ children: []
 
 ```text
 Product (聚合根, 对应 products 行)
-├── 逻辑商品身份: (env, gameId, productId)
+├── 逻辑商品身份: (gameId, productId)   ← env 由所在 schema 决定，业务表不带 env 列
 ├── 基准属性:
 │     productName
 │     baseAmountMinor + baseCurrency   ← 金额必须按 00 §5 归一化
@@ -99,14 +99,14 @@ Product (聚合根, 对应 products 行)
 
 聚合不变量（invariants）：
 
-1. `product_id` 在 `(env, game_id)` 内唯一。
+1. `product_id` 在 `(game_id)` 内唯一（每环境 schema 内，不前置 env）。
 2. `base_amount_minor` 必须是已按 `base_currency` 的 `currency_specs` 归一化后的整数最小单位值，且 `>= min_amount_minor`。
-3. 包级映射的 `product_id_ref` 与 `package_id_ref` 必须同 env；商品所属游戏与包所属游戏渠道必须落在同一 `env`（跨 env 引用非法）。
+3. 包级映射的 `product_id_ref` 与 `package_id_ref` 必然落在同一环境 schema（= 同 env）——同 schema 内普通外键即可保证一致，无需任何 env 一致性校验或跨 env 引用判断。
 4. 覆盖模式为 `override` 时，对应的 `*_override` 字段不得为空字符串；为 `default` 时，对应 `*_override` 字段必须为空字符串（写入时归一化清空）。
 
 ### 2.2 ChannelProduct（包级映射实体）
 
-- 身份：`(env, package_id_ref, product_id_ref)`。
+- 身份：`(package_id_ref, product_id_ref)`（每环境 schema 内）。
 - 表达"某包对某商品"的覆盖意图，本身不存最终生效值，只存"模式 + 覆盖候选值"。最终生效值由 §5.2 的解析逻辑在读取/快照时计算。
 - 两组覆盖维度**完全正交**：可以只覆盖 `product_id`、只覆盖 `price_id`、都覆盖、都不覆盖。
 
@@ -115,12 +115,12 @@ Product (聚合根, 对应 products 行)
 ```text
 ChannelIapTemplate (平台级, channel_iap_templates)
         │  定义 form_schema/secret_fields/file_fields/validation_rules
-        │  按 channel + template_version, 受 VersionStatus 版本生命周期约束(00 §3.3)
+        │  按 channel + template_version (简单模板表, 取 enabled 最新版本, 00 §4.4.1)
         ▼
-GameChannelIapConfig (渠道实例配置, game_channel_iap_configs, 带 env)
+GameChannelIapConfig (渠道实例配置, game_channel_iap_configs, 每环境独立 schema, 不带 env 列)
         │  config_json 按模板四件套填写; config_status: empty/invalid/valid
         ▼
-ChannelPackageIapOverride (包级覆盖, channel_package_iap_overrides, 带 env)
+ChannelPackageIapOverride (包级覆盖, channel_package_iap_overrides, 每环境独立 schema, 不带 env 列)
            对个别包覆盖渠道 IAP 配置(同样模板驱动, config_status)
 ```
 
@@ -131,15 +131,14 @@ ChannelPackageIapOverride (包级覆盖, channel_package_iap_overrides, 带 env)
 
 ## 3. 数据模型（逐表逐字段）
 
-> 约定：以下"v2 变更"列标注本期需要的迁移动作；`env` 列与唯一键前置 env 均依据 D1（见 `00` §2.2）。所有金额列均为整数最小单位（minor），写入路径强制走 `00` §5 归一化。
+> 约定：以下"v2 变更"列标注本期需要的迁移动作；业务表均为**每环境独立 schema、不带 `env` 列**，唯一键不前置 env（依据 D1，见 `00` §2.2）。所有金额列均为整数最小单位（minor），写入路径强制走 `00` §5 归一化。
 
-### 3.1 `products`（商品主数据，**带 env**）
+### 3.1 `products`（商品主数据，**每环境独立 schema，不带 env 列**）
 
 | 列 | 类型 | 默认 | 约束/说明 | v2 变更 |
 | --- | --- | --- | --- | --- |
 | `id` | BIGSERIAL | — | PK | — |
-| `env` | VARCHAR(16) | — | `NOT NULL`，`CHECK (env IN ('develop','sandbox','production'))`，取当前运行环境 | **新增（D1）** |
-| `game_id_ref` | BIGINT | — | `NOT NULL REFERENCES games(id)`；同 env | — |
+| `game_id_ref` | BIGINT | — | `NOT NULL REFERENCES games(id)`（同 schema 普通外键） | — |
 | `product_id` | VARCHAR(128) | — | `NOT NULL`，**IAP 商品 ID 基准**（商店内购 SKU） | — |
 | `product_name` | VARCHAR(128) | — | `NOT NULL`，商品展示名 | — |
 | `base_amount_minor` | BIGINT | — | `NOT NULL`，基准金额（最小单位），**必须按 `base_currency` 归一化后写入** | — |
@@ -148,21 +147,20 @@ ChannelPackageIapOverride (包级覆盖, channel_package_iap_overrides, 带 env)
 | `enabled` | BOOLEAN | `TRUE` | `NOT NULL` | — |
 | `created_at` | TIMESTAMPTZ | `NOW()` | `NOT NULL` | — |
 | `updated_at` | TIMESTAMPTZ | `NOW()` | `NOT NULL` | — |
-| 唯一键 | — | — | 现 `UNIQUE(game_id_ref, product_id)` → **改为 `UNIQUE(env, game_id_ref, product_id)`** | **改键（D1）** |
+| 唯一键 | — | — | `UNIQUE(game_id_ref, product_id)`（每环境 schema 内，不前置 env） | — |
 
 字段释义补充：
 
 - `product_id` 与 `price_id` 是两个不同维度，长度上限不同（128 vs 64），不可互填。
 - `base_amount_minor + base_currency` 是"商品基准定价"，用于展示/对账/快照基线；真正向玩家收钱的金额由 `price_id` 指向的收银台价格行决定（含税分国家），二者通过 `price_id` 关联但不强一致。
 
-### 3.2 `channel_products`（包级映射 / 覆盖，**带 env**）
+### 3.2 `channel_products`（包级映射 / 覆盖，**每环境独立 schema，不带 env 列**）
 
 | 列 | 类型 | 默认 | 约束/说明 | v2 变更 |
 | --- | --- | --- | --- | --- |
 | `id` | BIGSERIAL | — | PK | — |
-| `env` | VARCHAR(16) | — | `NOT NULL`，`CHECK env IN (...)`，当前运行环境 | **新增（D1）** |
-| `product_id_ref` | BIGINT | — | `NOT NULL REFERENCES products(id)`；同 env | — |
-| `package_id_ref` | BIGINT | — | `NOT NULL REFERENCES channel_packages(id)`；同 env | — |
+| `product_id_ref` | BIGINT | — | `NOT NULL REFERENCES products(id)`（同 schema 普通外键） | — |
+| `package_id_ref` | BIGINT | — | `NOT NULL REFERENCES channel_packages(id)`（同 schema 普通外键） | — |
 | `product_id_mode` | VARCHAR(16) | `default` | `NOT NULL`，`CHECK IN ('default','override')`，**IAP 商品 ID 覆盖模式** | 补 `DEFAULT 'default'` |
 | `product_id_override` | VARCHAR(128) | `''` | `NOT NULL`，仅 `product_id_mode='override'` 时有效（IAP 商品 ID 覆盖值） | — |
 | `price_id_mode` | VARCHAR(16) | `default` | `NOT NULL`，`CHECK IN ('default','override')`，**收银台价格档覆盖模式** | 补 `DEFAULT 'default'` |
@@ -170,7 +168,7 @@ ChannelPackageIapOverride (包级覆盖, channel_package_iap_overrides, 带 env)
 | `enabled` | BOOLEAN | `TRUE` | `NOT NULL`，该商品是否在此包内启用 | — |
 | `created_at` | TIMESTAMPTZ | `NOW()` | `NOT NULL` | — |
 | `updated_at` | TIMESTAMPTZ | `NOW()` | `NOT NULL` | — |
-| 唯一键 | — | — | 现 `UNIQUE(package_id_ref, product_id_ref)` → **改为 `UNIQUE(env, package_id_ref, product_id_ref)`** | **改键（D1）** |
+| 唯一键 | — | — | `UNIQUE(package_id_ref, product_id_ref)`（每环境 schema 内，不前置 env） | — |
 
 两组 mode + override 默认语义（强约束）：
 
@@ -183,7 +181,7 @@ ChannelPackageIapOverride (包级覆盖, channel_package_iap_overrides, 带 env)
 | --- | --- | --- | --- |
 | `id` | BIGSERIAL | — | PK |
 | `channel_id_ref` | BIGINT | — | `NOT NULL REFERENCES channels(id)` |
-| `template_version` | VARCHAR(32) | — | `NOT NULL`，受 `00` §3.3 VersionStatus 生命周期约束 |
+| `template_version` | VARCHAR(32) | — | `NOT NULL`；简单模板表（`00` §4.4.1），无 `status` 列，取 `enabled` 最新版本 |
 | `form_schema_json` | JSONB | `[]` | 模板四件套：渲染字段定义（`00` §4.1） |
 | `secret_fields_json` | JSONB | `[]` | 模板四件套：密文字段（`00` §4.2、§6.1） |
 | `file_fields_json` | JSONB | `[]` | 模板四件套：文件字段（`00` §4.2、§6.2） |
@@ -195,13 +193,12 @@ ChannelPackageIapOverride (包级覆盖, channel_package_iap_overrides, 带 env)
 
 > 该表是平台级基础数据（见 `00` §2.2 不带 env 清单），全环境共享同一套模板定义；模板内容维护由基础数据/模板管理后台负责（模块 system），本模块只**消费**模板渲染表单与校验。
 
-### 3.4 `game_channel_iap_configs`（渠道 IAP 配置实例，**带 env**）
+### 3.4 `game_channel_iap_configs`（渠道 IAP 配置实例，**每环境独立 schema，不带 env 列**）
 
 | 列 | 类型 | 默认 | 约束/说明 | v2 变更 |
 | --- | --- | --- | --- | --- |
 | `id` | BIGSERIAL | — | PK | — |
-| `env` | VARCHAR(16) | — | `NOT NULL`，`CHECK env IN (...)`，当前运行环境 | **新增（D1）** |
-| `game_channel_id_ref` | BIGINT | — | `NOT NULL REFERENCES game_channels(id)`；同 env | — |
+| `game_channel_id_ref` | BIGINT | — | `NOT NULL REFERENCES game_channels(id)`（同 schema 普通外键） | — |
 | `enabled` | BOOLEAN | `FALSE` | `NOT NULL`，注意默认 **false**（默认未启用） | — |
 | `config_json` | JSONB | `{}` | 按 `channel_iap_templates` 四件套填写；密文位脱敏存储 | — |
 | `config_status` | VARCHAR(16) | `empty` | `NOT NULL`，`CHECK IN ('empty','invalid','valid')`（`00` §3.4） | — |
@@ -209,15 +206,14 @@ ChannelPackageIapOverride (包级覆盖, channel_package_iap_overrides, 带 env)
 | `last_check_message` | VARCHAR(255) | `''` | `NOT NULL`，最近校验消息 | — |
 | `created_at` | TIMESTAMPTZ | `NOW()` | `NOT NULL` | — |
 | `updated_at` | TIMESTAMPTZ | `NOW()` | `NOT NULL` | — |
-| 唯一键 | — | — | 现 `UNIQUE(game_channel_id_ref)` → **改为 `UNIQUE(env, game_channel_id_ref)`** | **改键（D1）** |
+| 唯一键 | — | — | `UNIQUE(game_channel_id_ref)`（每环境 schema 内，不前置 env） | — |
 
-### 3.5 `channel_package_iap_overrides`（包级 IAP 覆盖实例，**带 env**）
+### 3.5 `channel_package_iap_overrides`（包级 IAP 覆盖实例，**每环境独立 schema，不带 env 列**）
 
 | 列 | 类型 | 默认 | 约束/说明 | v2 变更 |
 | --- | --- | --- | --- | --- |
 | `id` | BIGSERIAL | — | PK | — |
-| `env` | VARCHAR(16) | — | `NOT NULL`，`CHECK env IN (...)`，当前运行环境 | **新增（D1）** |
-| `package_id_ref` | BIGINT | — | `NOT NULL REFERENCES channel_packages(id)`；同 env | — |
+| `package_id_ref` | BIGINT | — | `NOT NULL REFERENCES channel_packages(id)`（同 schema 普通外键） | — |
 | `enabled` | BOOLEAN | `FALSE` | `NOT NULL`，默认 **false** | — |
 | `config_json` | JSONB | `{}` | 按渠道 IAP 模板四件套填写；密文脱敏 | — |
 | `config_status` | VARCHAR(16) | `empty` | `NOT NULL`，`CHECK IN ('empty','invalid','valid')` | — |
@@ -225,11 +221,11 @@ ChannelPackageIapOverride (包级覆盖, channel_package_iap_overrides, 带 env)
 | `last_check_message` | VARCHAR(255) | `''` | `NOT NULL` | — |
 | `created_at` | TIMESTAMPTZ | `NOW()` | `NOT NULL` | — |
 | `updated_at` | TIMESTAMPTZ | `NOW()` | `NOT NULL` | — |
-| 唯一键 | — | — | 现 `UNIQUE(package_id_ref)` → **改为 `UNIQUE(env, package_id_ref)`** | **改键（D1）** |
+| 唯一键 | — | — | `UNIQUE(package_id_ref)`（每环境 schema 内，不前置 env） | — |
 
 ### 3.6 IAP 配置 / 覆盖的 config_status 与四件套关系
 
-- `config_json` 的可填字段、哪些是 secret、哪些是 file、校验规则全部来自 `channel_iap_templates` 对应渠道当前 `published` 版本的四件套。
+- `config_json` 的可填字段、哪些是 secret、哪些是 file、校验规则全部来自 `channel_iap_templates` 对应渠道 `enabled=TRUE` 的最新 `template_version` 的四件套。
 - `config_status` 推导（写入后由服务端统一计算，见 §5.4）：
   - 未填任何字段 → `empty`。
   - 已填部分但缺必填/缺 secret/缺 file 或校验未过 → `invalid`。
@@ -248,9 +244,10 @@ ChannelPackageIapOverride (包级覆盖, channel_package_iap_overrides, 带 env)
 | --- | --- | --- | --- |
 | `OverrideMode` | `default` / `override` | `default` | `channel_products.product_id_mode`、`channel_products.price_id_mode` |
 | `ConfigStatus` | `empty` / `invalid` / `valid` | `empty` | `game_channel_iap_configs.config_status`、`channel_package_iap_overrides.config_status` |
-| `Environment` | `develop` / `sandbox` / `production` | `develop`（运行环境） | 各带 env 表的 `env` |
-| `VersionStatus`（仅约束模板） | `draft` / `published` / `archived` | `draft` | `channel_iap_templates`（经模板管理后台） |
+| `Environment` | `develop` / `sandbox` / `production` | `develop`（运行环境） | 决定各业务表落在哪个环境 schema（业务表不带 env 列） |
 | `RoundingMode`（金额归一化引用） | `half_up` / `floor` / `ceil` / `truncate` | `half_up` | 来自 `currency_specs.rounding_mode` |
+
+> `channel_iap_templates` 为**简单模板表**（`00` §4.4.1），无 `status` 列，不走 `VersionStatus` 三态机；运行时取 `enabled=TRUE` 的最新 `template_version`。
 
 ### 4.2 默认值清单（逐列）
 
@@ -272,7 +269,7 @@ ChannelPackageIapOverride (包级覆盖, channel_package_iap_overrides, 带 env)
 | `channel_package_iap_overrides.enabled` | `FALSE` | **默认未启用** |
 | `channel_package_iap_overrides.config_status` | `empty` | — |
 | `channel_package_iap_overrides.config_json` | `{}` | — |
-| 所有 `env` | 当前运行环境（`APP_ENV`） | 前端不可指定（`00` §2.1） |
+| 运行环境（无 env 列） | 写操作落当前运行环境对应 schema | 前端不可指定/跨 schema 写（`00` §2.1） |
 | 所有 `created_at/updated_at` | `NOW()` | — |
 
 ---
@@ -325,7 +322,7 @@ effectivePriceId =
 - `product_id_mode=override` ⇒ `product_id_override` 必填非空，否则 `VALIDATION_FAILED`。
 - `price_id_mode=default` ⇒ 强制 `price_id_override=''`。
 - `price_id_mode=override` ⇒ `price_id_override` 必填非空，否则 `VALIDATION_FAILED`。
-- 引用的 `product_id_ref` 必须属于该包所在游戏（同 game、同 env），否则 `VALIDATION_FAILED`/`CONFLICT`。
+- 引用的 `product_id_ref` 必须属于该包所在游戏（同 game；父子行天然同 schema=同 env），否则 `VALIDATION_FAILED`/`CONFLICT`。
 - `price_id_override` 是否必须存在于某价格模板的价格行：**本期不做强外键校验**（价格档可能后建），列为未决问题（见 §11）；仅做格式校验。
 
 ### 5.4 IAP 配置与包级覆盖的关系
@@ -347,7 +344,7 @@ effectiveIapConfig(package) =
 
 ### 5.5 与 env / 同步的关系
 
-- 所有带 env 表写入取当前运行环境（`00` §2.1），前端不可指定 env。
+- 所有业务表写操作落当前运行环境对应 schema（`00` §2.1），前端不可指定/跨 schema 写。
 - `sync` 域中本模块涉及 `SyncSection=products`（`00` §3.1）。同步 diff 比对的是"解析后的生效值"（§5.2/§5.4 的派生结果）与原始行，密文字段 `masked`。
 - 被禁用/无效的商品、包映射、IAP 配置不进快照、不参与同步、不进客户端最终配置。
 
@@ -362,7 +359,7 @@ effectiveIapConfig(package) =
 
 ## 6. 后端 API（逐接口完整 DTO + 校验 + 示例 JSON）
 
-> 全部遵循 `00` §7 统一约定：前缀 `/api/admin`、`Authorization: Bearer`、camelCase、统一响应包络 `{ "data": ... }` / `{ "error": ... }`、写操作作用于当前运行 env、分页 `page/pageSize`。下列接口默认需要登录。
+> 全部遵循 `00` §7 统一约定：前缀 `/api/admin`、`Authorization: Bearer`、camelCase、统一响应包络 `{ "data": ... }` / `{ "error": ... }`、写操作落当前运行环境对应 schema、分页 `page/pageSize`。下列接口默认需要登录。
 
 权限码（`resource.action`，`00` §7.5）：
 
@@ -419,7 +416,7 @@ effectiveIapConfig(package) =
 
 | 字段 | 类型 | 必填 | 校验 |
 | --- | --- | --- | --- |
-| `productId` | string | 是 | 1–128 字符；`(env, gameId)` 内唯一，重复 → `CONFLICT` |
+| `productId` | string | 是 | 1–128 字符；`(gameId)` 内唯一（每环境 schema 内），重复 → `CONFLICT` |
 | `productName` | string | 是 | 1–128 字符 |
 | `baseCurrency` | string | 是 | 命中 `currency_specs` 且 `enabled`，否则 `CURRENCY_NOT_SUPPORTED` |
 | `baseAmountMinor` | integer | 二选一 | 与 `baseAmount` 二选一；整数 minor，`>= min_amount_minor` |
@@ -472,7 +469,7 @@ POST /api/admin/games/honkai/products
 
 ### 6.3 `PATCH /api/admin/products/{productId}`（更新商品）
 
-> 路径 `{productId}` 为业务 `product_id`，定位行用 `(env, gameId, productId)`；`gameId` 由商品归属推导（或要求 query `gameId`，实现统一二选一，建议带 `gameId` query 以避免歧义）。
+> 路径 `{productId}` 为业务 `product_id`，定位行用 `(gameId, productId)`（在当前环境 schema 内）；`gameId` 由商品归属推导（或要求 query `gameId`，实现统一二选一，建议带 `gameId` query 以避免歧义）。
 
 - 权限：`product.write`。
 - 请求 DTO（均可选，部分更新）：`productName`、`baseAmount`/`baseAmountMinor`、`baseCurrency`、`priceId`、`enabled`。
@@ -543,7 +540,7 @@ PATCH /api/admin/products/gem_60?gameId=honkai
 
 | 字段 | 类型 | 必填 | 校验 |
 | --- | --- | --- | --- |
-| `productId` | string | 是 | 必须是该包所属 game 下已存在商品（同 env），否则 `VALIDATION_FAILED` |
+| `productId` | string | 是 | 必须是该包所属 game 下已存在商品（同 game、同 schema），否则 `VALIDATION_FAILED` |
 | `enabled` | boolean | 否 | 默认 `true` |
 | `productIdMode` | enum | 否 | `default`/`override`，默认 `default` |
 | `productIdOverride` | string | 条件 | `productIdMode=override` 时必填非空（≤128）；否则强制 `''` |
@@ -595,7 +592,7 @@ PUT /api/admin/channel-packages/5001/products
 ### 6.6 `GET /api/admin/game-channels/{gameChannelId}/iap-config`（读渠道 IAP 配置）
 
 - 权限：`product.read`。
-- 返回：该游戏渠道实例的 IAP 配置实例 + 其渠道的当前 `published` 模板四件套（供前端渲染），密文字段脱敏。
+- 返回：该游戏渠道实例的 IAP 配置实例 + 其渠道 `enabled=TRUE` 的最新 `template_version` 模板四件套（供前端渲染），密文字段脱敏。
 
 响应（200）：
 
@@ -637,7 +634,7 @@ PUT /api/admin/channel-packages/5001/products
 | `configJson` | object | 是 | 按渠道 IAP 模板四件套校验（必填/类型/pattern/format） |
 
 服务端处理：
-1. 取该渠道 `channel_iap_templates` 当前 `published` 版本四件套校验 `configJson`。
+1. 取该渠道 `channel_iap_templates` `enabled=TRUE` 的最新 `template_version` 四件套校验 `configJson`。
 2. secret 字段加密落库、响应脱敏（`00` §6.1）；file 字段存引用（§6.2）。
 3. 计算 `config_status`（§5.4 / `00` §3.4），写 `last_check_at` / `last_check_message`。
 
@@ -726,7 +723,7 @@ PUT /api/admin/channel-packages/5001/iap-override
 职责：
 - 商品 CRUD（`products`），调用 `common/currency` 归一化（§5.1）。
 - 包级映射读写（`channel_products`），含 §5.3 写入归一化、§5.2 生效解析（供查询返回 `effective` 与快照）。
-- 唯一性/外键/同 env 校验。
+- 唯一性/外键校验（父子行天然同 schema=同 env，无需 env 一致性校验）。
 
 依赖仓储：`ProductRepository`（窄仓储：products CRUD + by game 查询）、`ChannelProductRepository`（包级映射 upsert/delete by package）、`ChannelPackageRepository`（只读校验包归属）、`CurrencySpecRepository`（读 currency_specs）。
 
@@ -743,7 +740,7 @@ PUT /api/admin/channel-packages/5001/iap-override
 - 包级 IAP 覆盖读写（`channel_package_iap_overrides`）。
 - 模板四件套校验、密文加解密（`infra/crypto`）、文件引用（`infra/file`）、`config_status` 计算、生效 IAP 配置 merge 解析（§5.4）。
 
-依赖：`GameChannelIapConfigRepository`、`ChannelPackageIapOverrideRepository`、`ChannelIapTemplateRepository`（读 published 模板）、`CryptoService`、`FileService`。
+依赖：`GameChannelIapConfigRepository`、`ChannelPackageIapOverrideRepository`、`ChannelIapTemplateRepository`（读 `enabled` 最新模板）、`CryptoService`、`FileService`。
 
 > 两个服务都不做跨表大编排越界：快照合并由 `snapshot` `ConfigSnapshotService` 消费本模块的"生效解析"结果；同步 diff 由 `sync` `SyncService` 调用。
 
@@ -791,11 +788,11 @@ PUT /api/admin/channel-packages/5001/iap-override
 
 | 公共能力（00 / 01） | 本模块用法 |
 | --- | --- |
-| env 模型（§2，D1） | `products`/`channel_products`/`game_channel_iap_configs`/`channel_package_iap_overrides` 全部加 `env`，唯一键前置 env；`channel_iap_templates` 平台级不带 env |
+| env 模型（§2，D1） | `products`/`channel_products`/`game_channel_iap_configs`/`channel_package_iap_overrides` 每环境独立 schema、不带 env 列，唯一键不前置 env；`channel_iap_templates` 平台级（共享 schema `platform`）不带 env |
 | currency 归一化（§5） | `products.base_amount_minor` 写入强制走读 spec→校验精度→校验下限→舍入→存 minor |
 | 模板四件套（§4） | `channel_iap_templates` 提供 form/secret/file/validation；IAP 配置实例据此渲染与校验 |
 | ConfigStatus（§3.4） | IAP 配置与包级覆盖的 `config_status`，复制清空 secret/file ⇒ `invalid` |
-| VersionStatus（§3.3） | `channel_iap_templates` 模板版本生命周期（由模板管理后台维护） |
+| 模板版本（§4.4.1 简单模板表） | `channel_iap_templates` 无 `status` 列，不走 §3.3 三态机；取 `enabled` 最新 `template_version`（由模板管理后台维护） |
 | 密文/文件（§6） | IAP `config_json` 密文加密落库、响应脱敏；文件存引用 |
 | 统一 API/包络/错误码（§7） | 全部接口遵循 `{data}`/`{error}`、`CURRENCY_NOT_SUPPORTED`/`VALIDATION_FAILED`/`CONFLICT`/`NOT_FOUND` |
 | 审计（§8） | 商品/映射/IAP 写操作写 `audit_logs`，action 与权限码同源 |
@@ -833,8 +830,8 @@ PUT /api/admin/channel-packages/5001/iap-override
 
 ### 10.4 env / 唯一键 / 权限 / 审计
 
-- `(env, game_id, product_id)` 唯一性冲突 → `CONFLICT`。
-- 跨 env 引用（包与商品 env 不一致）→ 拒绝。
+- `(game_id, product_id)` 唯一性冲突（每环境 schema 内）→ `CONFLICT`。
+- 包与商品必然落在同一环境 schema（= 同 env），同 schema 普通外键即保证一致，无需 env 一致性校验。
 - 无 `product.write` 权限 → `FORBIDDEN`。
 - 写操作产生 `audit_logs` 记录且密文脱敏。
 
@@ -842,7 +839,7 @@ PUT /api/admin/channel-packages/5001/iap-override
 
 ## 接口场景矩阵（→ 见 `../../03-testing.md` §4）
 
-> 维度定义见 `03-testing.md §4`（S1 成功 / S2 鉴权401 / S3 权限403 / S4 校验失败 / S5 冲突 / S6 跨env / S7 审计 / S8 脱敏 / S9 分页 / S10 事务回滚）。`✓`=覆盖，`—`=不适用。后端 manifest：`tests/backend/scenarios/product.yaml`；前端 e2e：`tests/frontend/e2e/games.spec.ts`（商品/IAP 页签）。
+> 维度定义见 `03-testing.md §4`（S1 成功 / S2 鉴权401 / S3 权限403 / S4 校验失败 / S5 冲突 / S6 跨env（schema 隔离）：写落当前环境 schema、不允许跨 schema 写 / S7 审计 / S8 脱敏 / S9 分页 / S10 事务回滚）。`✓`=覆盖，`—`=不适用。后端 manifest：`tests/backend/scenarios/product.yaml`；前端 e2e：`tests/frontend/e2e/games.spec.ts`（商品/IAP 页签）。
 
 | 接口 | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | 模块私有维度 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

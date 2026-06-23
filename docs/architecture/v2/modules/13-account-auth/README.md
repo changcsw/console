@@ -14,7 +14,7 @@ children: []
 
 # 13 · 自有账号认证（Account Auth）
 
-> 本模块负责"游戏自有账号体系"的认证方式配置（游客/手机/邮箱/第三方登录等），与 `14-渠道登录`（渠道强制登录）和 `10-后台鉴权`（管理员登录）**底层完全分开**（`00 §9` 红线）。
+> 本模块负责"游戏自有账号体系"的认证方式配置（游客/手机/邮箱/第三方登录等），与 `channel-login`（渠道强制登录）和 `auth`（后台鉴权，管理员登录）**底层完全分开**（`00 §9` 红线）。
 > 阅读前请先读 `../../00-common.md`（模板四件套 §4、ConfigStatus 状态机 §3.4、密文 §6、API 约定 §7）。
 
 ---
@@ -25,7 +25,7 @@ children: []
 - 平台级维护**认证方式主数据** `account_auth_types`（游客、手机、邮箱、Google、Apple…）。
 - 平台级维护**渠道允许的认证方式** `channel_account_auth_types`（某渠道允许哪些、默认勾选哪些）。
 - 平台级维护**认证方式模板** `account_auth_templates`（模板四件套）。
-- 游戏级维护**实际启用与配置** `game_account_auth_configs`（按 env）。
+- 游戏级维护**实际启用与配置** `game_account_auth_configs`（游戏维度业务表，每环境独立 schema）。
 
 ### 1.2 边界
 - 仅面向"游戏自有账号系统"的认证方式配置。
@@ -45,7 +45,7 @@ children: []
 
 ## 3. 数据模型
 
-> `game_account_auth_configs` **带 env**；其余三表为平台级**不带 env**（`00 §2.2`）。
+> `game_account_auth_configs` 为**游戏维度业务表**，在每个环境 schema（`develop`/`sandbox`/`production`）各一份同名同结构表（**不带 `env` 列**，行属于哪个 env 由其所在 schema 决定）；其余三表为平台级共享表，放在共享 schema `platform`（`00 §2.2`）。
 
 ### 3.1 `account_auth_types`（平台级）
 
@@ -101,14 +101,13 @@ seed（来自现有迁移）：
 
 唯一键：`UNIQUE(auth_type_id_ref, template_version)`。
 
-### 3.4 `game_account_auth_configs`（带 env）
+### 3.4 `game_account_auth_configs`（游戏维度业务表，每环境独立 schema，不带 env 列）
 
 | 列 | 类型 | 可空 | 默认 | 约束 |
 | --- | --- | --- | --- | --- |
 | `id` | BIGSERIAL | 否 | — | PK |
-| **`env`** | VARCHAR(16) | 否 | — | **新增**，CHECK in `develop/sandbox/production`（D1） |
-| `game_id_ref` | BIGINT | 否 | — | FK→games(id) |
-| `auth_type_id_ref` | BIGINT | 否 | — | FK→account_auth_types(id) |
+| `game_id_ref` | BIGINT | 否 | — | FK→games(id)（同 schema 普通外键） |
+| `auth_type_id_ref` | BIGINT | 否 | — | FK→platform.account_auth_types(id)（跨 schema 指向平台表） |
 | `enabled` | BOOLEAN | 否 | `FALSE` | |
 | `config_json` | JSONB | 否 | `{}` | 含密文位（加密后） |
 | `config_status` | VARCHAR(16) | 否 | `'empty'` | CHECK in `empty/invalid/valid` |
@@ -116,16 +115,26 @@ seed（来自现有迁移）：
 | `last_check_message` | VARCHAR(255) | 否 | `''` | |
 | `created_at`/`updated_at` | TIMESTAMPTZ | 否 | `NOW()` | |
 
-唯一键（D1）：`UNIQUE(env, game_id_ref, auth_type_id_ref)`。索引：`(env, game_id_ref)`。
+唯一键：`UNIQUE(game_id_ref, auth_type_id_ref)`。索引：`(game_id_ref)`。
 
-**迁移（追加）**：
+**迁移（每环境 schema 各建一份，DDL 同结构）**：
 ```sql
-ALTER TABLE game_account_auth_configs
-  ADD COLUMN env VARCHAR(16) NOT NULL DEFAULT 'develop' CHECK (env IN ('develop','sandbox','production'));
-ALTER TABLE game_account_auth_configs DROP CONSTRAINT IF EXISTS game_account_auth_configs_game_id_ref_auth_type_id_ref_key;
-ALTER TABLE game_account_auth_configs ADD CONSTRAINT gaac_env_game_auth_key
-  UNIQUE (env, game_id_ref, auth_type_id_ref);
+-- 在每个环境 schema（develop/sandbox/production）下建同名同结构表
+CREATE TABLE game_account_auth_configs (
+  id                 BIGSERIAL PRIMARY KEY,
+  game_id_ref        BIGINT NOT NULL REFERENCES games(id),
+  auth_type_id_ref   BIGINT NOT NULL REFERENCES platform.account_auth_types(id),
+  enabled            BOOLEAN NOT NULL DEFAULT FALSE,
+  config_json        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  config_status      VARCHAR(16) NOT NULL DEFAULT 'empty' CHECK (config_status IN ('empty','invalid','valid')),
+  last_check_at      TIMESTAMPTZ,
+  last_check_message VARCHAR(255) NOT NULL DEFAULT '',
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (game_id_ref, auth_type_id_ref)
+);
 ```
+> 业务表→业务表（`games`）用同 schema 普通外键；业务表→平台表（`account_auth_types`）跨 schema 指向 `platform.*`。运行时连接设 `search_path = <当前env>, platform`，仓储 SQL 不写 schema 前缀、不带 env 谓词，环境由 search_path 决定。
 
 ---
 
@@ -214,9 +223,9 @@ ALTER TABLE game_account_auth_configs ADD CONSTRAINT gaac_env_game_auth_key
 ### 6.4 form_schema_json 样例（google）
 ```json
 [
-  { "key": "clientId", "label": "Client ID", "component": "input", "required": true, "order": 10 },
-  { "key": "clientSecret", "label": "Client Secret", "component": "password", "required": true, "order": 20 },
-  { "key": "redirectUri", "label": "Redirect URI", "component": "input", "required": true, "order": 30 }
+  { "key": "clientId", "label": "Client ID", "component": "input", "required": true, "order": 10, "scope": "both" },
+  { "key": "clientSecret", "label": "Client Secret", "component": "password", "required": true, "order": 20, "scope": "server" },
+  { "key": "redirectUri", "label": "Redirect URI", "component": "input", "required": true, "order": 30, "scope": "both" }
 ]
 // secret_fields_json: ["clientSecret"]
 // validation_rules_json: { "clientId": {"minLen":1}, "redirectUri": {"format":"url"} }
@@ -226,7 +235,7 @@ ALTER TABLE game_account_auth_configs ADD CONSTRAINT gaac_env_game_auth_key
 
 ## 7. 应用服务与 command/query
 - `AccountAuthService`：列类型/模板、列渠道允许类型、读写游戏配置（含模板校验、密文加密、状态计算、审计）。
-- 仓储：`AccountAuthTypeRepository`、`ChannelAccountAuthTypeRepository`、`AccountAuthTemplateRepository`、`GameAccountAuthConfigRepository`（按 env）。
+- 仓储：`AccountAuthTypeRepository`、`ChannelAccountAuthTypeRepository`、`AccountAuthTemplateRepository`、`GameAccountAuthConfigRepository`（业务表仓储，SQL 不写 schema 前缀、不带 env 谓词，环境由 `search_path` 决定）。
 - 领域纯规则：`ValidateConfigAgainstTemplate`。
 
 ---
@@ -244,7 +253,7 @@ ALTER TABLE game_account_auth_configs ADD CONSTRAINT gaac_env_game_auth_key
 - 模板四件套（`00 §4`）：表单渲染与校验来源。
 - 密文（`00 §6`）：secret 字段加密与脱敏。
 - 审计：`game.account_auth.update` 写 `audit_logs`。
-- env：游戏级配置按当前运行环境；同步在 `channels` 之外的 game section（本模块归 `channels`/`config` 相关 section，见 `sync` 约定）。
+- env：游戏级配置的写操作落当前运行环境对应 schema（业务表不带 env 列，环境由 schema 决定）；同步在 `channels` 之外的 game section（本模块归 `channels`/`config` 相关 section，见 `sync` 约定）。
 
 ---
 
@@ -252,7 +261,7 @@ ALTER TABLE game_account_auth_configs ADD CONSTRAINT gaac_env_game_auth_key
 
 ## 接口场景矩阵（→ 见 `../../03-testing.md` §4）
 
-> 维度定义见 `03-testing.md §4`（S1 成功 / S2 鉴权401 / S3 权限403 / S4 校验失败 / S5 冲突 / S6 跨env / S7 审计 / S8 脱敏 / S9 分页 / S10 事务回滚）。`✓`=覆盖，`—`=不适用。后端 manifest：`tests/backend/scenarios/account-auth.yaml`；前端 e2e：`tests/frontend/e2e/games.spec.ts`（自有账号认证页签）。
+> 维度定义见 `03-testing.md §4`（S1 成功 / S2 鉴权401 / S3 权限403 / S4 校验失败 / S5 冲突 / S6 跨env（schema 隔离）：写落当前环境 schema、不允许跨 schema 写 / S7 审计 / S8 脱敏 / S9 分页 / S10 事务回滚）。`✓`=覆盖，`—`=不适用。后端 manifest：`tests/backend/scenarios/account-auth.yaml`；前端 e2e：`tests/frontend/e2e/games.spec.ts`（自有账号认证页签）。
 
 | 接口 | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | 模块私有维度 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -268,7 +277,7 @@ ALTER TABLE game_account_auth_configs ADD CONSTRAINT gaac_env_game_auth_key
 - 全字段通过 → `valid` + `lastCheckAt`。
 - `locked` 类型游戏侧不可改。
 - 密文响应脱敏、不回明文。
-- 唯一性：同 `(env, game, authType)` 仅一条。
+- 唯一性：同一环境 schema 内同 `(game, authType)` 仅一条。
 
 ---
 

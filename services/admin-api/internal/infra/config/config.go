@@ -15,7 +15,7 @@ func MustLoad() Config {
 	return Config{
 		AppName:            getEnv("APP_NAME", "admin-api"),
 		Environment:        getEnv("APP_ENV", "develop"),
-		HTTPAddress:        getEnv("HTTP_ADDRESS", ":8080"),
+		HTTPAddress:        getEnv("HTTP_ADDRESS", ":18080"),
 		PostgresDSN:        getEnv("POSTGRES_DSN", ""),
 		SandboxPostgresDSN: getEnv("SANDBOX_POSTGRES_DSN", ""),
 		ProductionDSN:      getEnv("PRODUCTION_POSTGRES_DSN", ""),
@@ -28,4 +28,3 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
-

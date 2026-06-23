@@ -24,19 +24,19 @@ children: []
 
 | 编号 | 决策 | 结论 |
 | --- | --- | --- |
-| D1 | 多环境数据模型 | **单库 + 业务表统一加 `env` 列**。同一逻辑对象在不同 env 下是不同物理行。`sandbox -> production` 同步在同库内按 `env` 做 diff / upsert。 |
-| D2 | 渠道实例的 market 维度 | `game_channels` 增加 `market_code`，唯一键改为 `(env, game_id_ref, market_code, channel_id_ref)`，**该表本身即 `GameMarketChannel` 落地表**，不再分两层。 |
+| D1 | 多环境数据模型 | **单库 + 每环境独立 schema**。三个环境各有一个 PostgreSQL schema（`develop` / `sandbox` / `production`），其中放置**同名、同结构**的"游戏维度业务表"；同一逻辑对象在不同 env 下是**不同 schema 下同名表的不同物理行**。平台级共享数据放在共享 schema `platform`。运行时由 `search_path = <当前env>, platform` 路由。业务表**不带 `env` 列**。`sandbox -> production` 同步在**同库内跨 schema**（读 `sandbox.*` 与 `production.*`）做 diff / upsert。 |
+| D2 | 渠道实例的 market 维度 | `game_channels` 增加 `market_code`，唯一键为 `(game_id_ref, market_code, channel_id_ref)`，**该表本身即 `GameMarketChannel` 落地表**，不再分两层。 |
 | D3 | 渠道国内/非国内属性 | `channels` 增加 `region`（`domestic` / `overseas`），并在 seed 中固化。 |
 | D4 | 配置快照粒度 | 快照 **per-game 一份**，`config_json` 内部按 `market` 分区，每个 market 存放"已按合并规则解析后的最终配置"。 |
 | D5 | 鉴权 | JWT（access + refresh）+ RBAC，权限码格式 `resource.action`；支持密码登录与飞书回调；本地 dev 允许 mock。 |
-| D6 | 同步基线一致性 | `sync/execute` 必须携带 `sync/preview` 返回的 `baseline_token`（含 `target_hash_before`）；执行前服务端复核目标环境 hash，不一致则拒绝并要求重新预览。 |
+| D6 | 同步基线一致性 | `sync/execute` 必须携带 `sync/preview` 返回的 `baseline_token`（含 `target_hash_before`）；执行前服务端复核目标 schema hash，不一致则拒绝并要求重新预览。 |
 | D7 | 后端技术栈 | `chi`（路由）+ `pgx`（数据库）+ `golang-migrate`（迁移）。详见 `01-structure.md`。 |
 
 ---
 
-## 2. 多环境模型（env）
+## 2. 多环境模型（schema-per-env）
 
-### 2.1 环境枚举
+### 2.1 环境枚举与 schema 映射
 
 ```text
 Environment = develop | sandbox | production
@@ -46,23 +46,36 @@ Environment = develop | sandbox | production
 - `sandbox`：预发布/联调环境，是同步的**源**。
 - `production`：正式环境，是同步的**目标**，禁止盲写。
 
-默认值约定：
+每个环境对应一个**同名 PostgreSQL schema**，"游戏维度业务表"在每个环境 schema 下各有一份同名、同结构的物理表：
+
+```text
+develop.games      sandbox.games      production.games
+develop.game_channels   sandbox.game_channels   production.game_channels
+...（其余业务表同理，三套同名结构）
+```
+
+平台级共享数据集中在一个共享 schema **`platform`**（全环境只有一份）。
+
+默认值与运行时约定：
 
 - 服务启动时由配置项 `APP_ENV` 指定当前运行环境；缺省 `develop`。
-- 所有写入业务数据的请求，`env` 取**当前运行环境**，不允许前端任意指定（避免越权写 production）。
-- 仅 `sync` 域允许显式声明 `source_env=sandbox`、`target_env=production`。
+- 每个数据库连接按当前运行环境设置 `search_path = <当前env>, platform`：业务表自动落到当前环境 schema，平台表落到 `platform`。仓储层 SQL **不写 schema 前缀、不带 `env` 谓词**，环境由连接的 `search_path` 决定。
+- **连接最小权限化（加固 `search_path` 风险，强约束）**：`search_path` 只是路由、不是安全边界。必须配套「**每环境独立连接池**（建连时一次性钉死 `search_path`，不在请求层逐次 `SET`）+ **每环境最小权限 DB 角色**（`app_<env>` 对其它环境 schema 连 `USAGE` 都不授）」，使误连/误查/误写在权限层直接 `permission denied`；禁止用默认 `public` / 超级用户跑业务请求。落地细节与授权脚本见 `01` §4.4。
+- 写业务数据的请求一律落**当前运行环境对应的 schema**，前端不能指定/跨 schema 写（避免越权写 production）。
+- 仅 `sync` 域允许**同时访问两个环境 schema**（显式声明 `source_env=sandbox`、`target_env=production`，用 schema 限定名跨 schema 读写，且用专用最小权限角色 `app_sync`，见 `01` §4.4）。
 
-### 2.2 env 落库规则（D1）
+### 2.2 表的归属规则（D1）
 
-- **所有"游戏维度业务表"必须带 `env VARCHAR(16) NOT NULL`**，取值受 `CHECK (env IN ('develop','sandbox','production'))` 约束。
-- 受影响的表（在各模块文档中逐表标注）：`games`、`game_markets`、`game_legal_links`、`game_channels`、`channel_packages`、`game_account_auth_configs`、`game_channel_login_configs`、`game_channel_plugin_configs`、`channel_package_plugin_overrides`、`products`、`channel_products`、`game_channel_iap_configs`、`channel_package_iap_overrides`、`game_cashier_profiles`、`game_cashier_price_overrides`、`payment_routes`、`game_config_snapshots`。
-- **不带 env 的"平台级基础数据/字典/模板表"**（全环境共享一套）：`channels`、`channel_policies`、`account_auth_types`、`channel_account_auth_types`、`account_auth_templates`、`channel_login_templates`、`channel_iap_templates`、`feature_plugins`、`feature_plugin_templates`、`channel_feature_plugins`、`cashier_providers`、`cashier_provider_templates`、`pay_ways`、`currency_specs`、`billing_subjects`、`cashier_merchant_accounts`、`cashier_price_templates`、`cashier_price_template_versions`、`cashier_price_rows`、`cashier_fx_sync_runs`、`admin_*`。
-- **特例 `audit_logs`：有 `env` 列，但不是"游戏维度业务表"**。它的 `env` 仅用于**记录该操作发生在哪个运行环境**（便于按环境过滤审计），因此：
-  - **不**把 `env` 前置进唯一键（审计是追加流水，无业务唯一键）；
-  - **不**参与 `sandbox -> production` 同步 diff（审计不被同步，目标环境的审计独立产生）；
-  - 同步域跨 env 任务记录表 `sync_jobs` / `sync_job_items` 同理：不带 `env` 列，其环境维度由 `source_env` / `target_env` 字段显式表达（见 `sync` §3）。
-- **唯一约束统一前置 `env`**：凡是"游戏维度业务表"，原唯一键前都要补 `env`。例：`games` 由 `UNIQUE(game_id)` 改为 `UNIQUE(env, game_id)`（`audit_logs` 不适用本条）。
-- 跨表引用"游戏维度业务表"时，被引用行与引用行的 `env` 必须一致，**优先用复合唯一键 +（同 env）复合外键**在 DB 层强制保证：被引用表暴露含 `env` 的复合唯一键（如 `game_channels UNIQUE(env, game_id_ref, market_code, channel_id_ref)`），引用表用 `FOREIGN KEY (env, game_channel_id_ref) REFERENCES game_channels(env, ...)` 形式的**复合外键**绑定同 env。仅在 PG 复合外键确实不可行的少数场景，才降级为应用层 env 一致性校验，并在该表数据模型小节**显式注明降级原因**（见 `01` §4）。
+- **"游戏维度业务表"** 放在**每个环境 schema**（`develop` / `sandbox` / `production`）下，各一份同名同结构表，**不带 `env` 列**——"行属于哪个 env"由它所在的 schema 决定。
+- 受影响的表（在各模块文档中逐表标注，均为每环境一份）：`games`、`game_markets`、`game_legal_links`、`game_channels`、`channel_packages`、`game_account_auth_configs`、`game_channel_login_configs`、`game_channel_plugin_configs`、`channel_package_plugin_overrides`、`products`、`channel_products`、`game_channel_iap_configs`、`channel_package_iap_overrides`、`game_cashier_profiles`、`game_cashier_price_overrides`、`payment_routes`、`game_config_snapshots`。
+- **"平台级基础数据/字典/模板表"** 放在共享 schema **`platform`**（全环境共享一套）：`channels`、`channel_policies`、`account_auth_types`、`channel_account_auth_types`、`account_auth_templates`、`channel_login_templates`、`channel_iap_templates`、`feature_plugins`、`feature_plugin_templates`、`channel_feature_plugins`、`cashier_providers`、`cashier_provider_templates`、`pay_ways`、`currency_specs`、`billing_subjects`、`cashier_merchant_accounts`、`cashier_price_templates`、`cashier_price_template_versions`、`cashier_price_rows`、`cashier_fx_sync_runs`、`admin_*`。
+- **跨环境协调表也在 `platform`**（天然需要同时引用两个环境）：
+  - `sync_jobs` / `sync_job_items` / `sync_consumed_tokens`：不带 `env` 列，其环境维度由 `source_env` / `target_env` 字段显式表达（值即 schema 名，见 `sync` §3）。
+  - **特例 `audit_logs`：放在 `platform`，保留 `env VARCHAR(16) NOT NULL` 作为纯过滤列**。审计记录的是"事件"（不是跨环境同一对象的物理行），`env` 仅标记该操作**发生在哪个运行环境**，便于跨环境统一查询审计；它不前置唯一键、不参与同步 diff（`production` 的审计在 production 本地产生，不由 sandbox 同步而来）。
+- **唯一约束不再前置 `env`**：每个环境 schema 内自成体系，唯一性天然按 schema 隔离。例：`games` 直接 `UNIQUE(game_id)`（不再 `UNIQUE(env, game_id)`）。
+- **外键规则**：
+  - 业务表→业务表（同一环境 schema 内）：用普通外键即可，被引用行与引用行必然同 schema（= 同 env），无需任何 env 一致性校验或复合外键。
+  - 业务表→平台表（跨 schema）：用指向 `platform.<表>` 的普通外键（PostgreSQL 支持跨 schema 外键），如 `game_channels.channel_id_ref REFERENCES platform.channels(id)`。
 
 > 备注：`cashier_merchant_accounts.secret_ciphertext` 等支付密钥属平台级基础数据，全环境共享；如果未来需要分环境密钥，再单独扩展，本期不做。
 
@@ -206,8 +219,20 @@ published --(发布新版本时自动)--> archived
 
 ### 4.4 模板版本维护（基础数据）
 
-- 模板本身由"基础数据/模板管理后台"维护，受 §3.3 版本生命周期约束。
+- 模板本身由"基础数据/模板管理后台"维护。
 - 同一逻辑渠道在不同 market 下**可复用同一套模板定义**，但**实际配置实例必须各自独立**（不共享 secret/file/状态）。
+
+#### 4.4.1 版本状态机适用边界（重要）
+
+模板版本的管理分为两类，**`§3.3 VersionStatus`（draft/published/archived）三态机只适用于 cashier 价格模板版本**：
+
+- **简单模板表**（`account_auth_templates`、`channel_login_templates`、`channel_iap_templates`、`cashier_provider_templates`、`feature_plugin_templates`）：
+  - **不走** §3.3 三态机，**没有 `status` 列**；只有 `enabled` + `template_version` 两个版本控制字段。
+  - 运行时一律取 `enabled=true` 的**最新 `template_version`**（不存在"取 published 版本"的概念）。
+  - 停用某版本通过 `enabled=false` 实现；升级通过写入更高的 `template_version` 实现。
+- **cashier 价格模板版本**（`cashier_price_template_versions`，有独立的版本表 + `status` 列）：
+  - **唯一**适用 §3.3 `VersionStatus`（draft/published/archived）三态机的对象。
+  - 运行时取该模板当前 `published` 版本（同一模板任一时刻最多一个 `published`）。
 
 ---
 
@@ -273,7 +298,7 @@ EUR  Euro               decimal=2 min=1 rounding=half_up
 - 内容类型：`application/json; charset=utf-8`。
 - 时间：ISO-8601 UTC（如 `2026-06-15T10:00:00Z`）。
 - 命名：请求/响应 JSON 字段统一 **camelCase**；数据库列统一 **snake_case**；URL path 段 **kebab/camel** 按现有风格（`game-channels`、`gameId`）。
-- 写操作默认作用于**当前运行环境**的 `env`（见 §2.1）。
+- 写操作默认作用于**当前运行环境对应的 schema**（见 §2.1），前端不能指定/跨 schema 写。
 
 ### 7.2 统一响应包络
 
@@ -328,7 +353,7 @@ EUR  Euro               decimal=2 min=1 rounding=half_up
 
 - 所有**有意义的写操作**（创建/更新/删除/发布/隐藏/同步执行/审核）必须写 `audit_logs`。
 - 字段：`actor_id`、`action`、`resource_type`、`resource_id`、`env`、`detail_json`、`created_at`。
-- `env` 口径（见 §2.2 特例）：记录该操作**发生时的运行环境**，仅作过滤维度；`audit_logs` 不是游戏维度业务表，`env` 不前置唯一键、不参与同步 diff。`production` 的审计在 production 本地产生，不由 sandbox 同步而来。
+- `env` 口径（见 §2.2 特例）：`audit_logs` 位于共享 `platform` schema，`env` 仅作过滤列，记录该操作**发生时的运行环境**；它不是游戏维度业务表，`env` 不前置唯一键、不参与同步 diff。`production` 的审计在 production 本地产生，不由 sandbox 同步而来。
 - `action` 命名与权限码同源（`game.create` / `sync.execute` / `cashier.publish` …）。
 - `detail_json` 记录关键 before/after（密文脱敏）。
 - 审计查询页见 `modules/22-audit/README.md`。
@@ -342,6 +367,7 @@ EUR  Euro               decimal=2 min=1 rounding=half_up
 - 任何金额写入不绕过 `currency_specs`。
 - `sandbox -> production` 不允许无 preview 直接写；execute 必须复核基线（D6）。
 - 不存明文密钥；响应不回明文密钥。
+- 不用默认 `public` / 超级用户 / 库 owner 跑业务请求；每环境用最小权限角色 + 建连时固定 `search_path`，跨环境只允许 `sync` 专用角色 + 全限定名（`01` §4.4）。
 - 被隐藏 / 不兼容 / 无效的渠道实例：不进快照、不参与同步、不进客户端最终配置、不进默认列表。
 - `production` 视图里不允许出现可执行的 `Sync to Production`。
 
@@ -349,7 +375,7 @@ EUR  Euro               decimal=2 min=1 rounding=half_up
 
 ## 10. 命名与默认值兜底约定
 
-- 新增带 `env` 的行，`env` 一律取当前运行环境。
+- 业务表的写入一律落当前运行环境对应的 schema（由 `search_path` 决定，业务行不再带 `env` 列）；`audit_logs.env` 取当前运行环境。
 - 布尔默认：`enabled=TRUE`、`hidden=FALSE`、各 `*_locked=FALSE`、`is_default=FALSE`（除非模块另有说明）。
 - 字符串默认：URL/备注类默认 `''`；JSONB 配置类默认 `{}`，列表类默认 `[]`。
 - `default_locale` 默认 `en-US`。

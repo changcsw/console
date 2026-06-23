@@ -33,14 +33,14 @@ children: []
 | **支付提供商 `provider`** | `cashier_providers` | 平台级，**不带 env** | **真实 PSP（Payment Service Provider）**，如 Airwallex、PayerMax、Stripe。是技术对接对象，决定走哪套 SDK/网关协议。玩家**不感知** provider 名称。 | 仅后台可见 |
 | **公司主体 `billing_subject`** | `billing_subjects` | 平台级，**不带 env** | **签约/清算法律实体**，如"XX 香港有限公司""XX 新加坡 Pte Ltd"。决定资金最终归集到哪个法人、哪个发票主体。 | 仅后台可见 |
 | **商户账户 `merchant_account`** | `cashier_merchant_accounts` | 平台级，**不带 env** | **某个主体在某个 provider 下开立的具体商户号 + 接入密钥**。是真正可用于发起交易/清算的最小可执行单元，`secret_ciphertext` 密文存储。 | 仅后台可见，密钥脱敏 |
-| **支付路由 `payment_route`** | `payment_routes` | **游戏级，带 env（D1）** | **按"游戏 + 支付方式"维度，把一组匹配条件（选择器）映射到一个 `(provider, merchant_account)` 的优先级规则。** 是连接"玩家可见支付方式"与"真实清算通道"的桥梁。 | 后台维护，结果进入客户端运行时配置 |
+| **支付路由 `payment_route`** | `payment_routes` | **游戏级业务表，每环境独立 schema（D1，不带 env 列）** | **按"游戏 + 支付方式"维度，把一组匹配条件（选择器）映射到一个 `(provider, merchant_account)` 的优先级规则。** 是连接"玩家可见支付方式"与"真实清算通道"的桥梁。 | 后台维护，结果进入客户端运行时配置 |
 
 ### 1.2 概念之间的连接关系
 
 ```text
 玩家视角:            credit_card (pay_way)
                           │
-                          │  payment_routes（游戏级 + env）
+                          │  payment_routes（游戏级，按 env schema 隔离）
                           │  选择器: package/channel/market/country/currency + priority
                           ▼
 后台视角:     ┌──────────────────────────────────────────┐
@@ -57,7 +57,7 @@ children: []
 - **不把"渠道 IAP 配置（`product`）"与"收银台支付路由（本模块）"混在一起**（`00` §9 红线、`backend_agent_execution.md` 阶段 9）。渠道 IAP 走渠道自身计费（Google/Apple/华为内购），支付路由走自有收银台/PSP 清算，二者数据、表、领域包均独立。
 - **不把"渠道 `channel`"与"提供商 `provider`"混为一谈。** `channel` 是发行/分发渠道（Google Play、华为），`provider` 是支付清算服务商。路由选择器里的 `channel` 仅用于"在某渠道包场景下走哪个 PSP"的细分，不等于 PSP。
 - **路由匹配是纯函数。** 匹配/排序/唯一性判定必须是不依赖 IO 的纯领域逻辑（`internal/domain/payment`），便于单测与复用（`01` §4 分层）。
-- **平台级基础数据全 env 共享。** `pay_ways/cashier_providers/cashier_provider_templates/billing_subjects/cashier_merchant_accounts` 不带 env（`00` §2.2、D1 备注）；只有 `payment_routes` 带 env。
+- **平台级基础数据全 env 共享。** `pay_ways/cashier_providers/cashier_provider_templates/billing_subjects/cashier_merchant_accounts` 放共享 schema `platform`、不带 env（`00` §2.2、D1 备注）；只有 `payment_routes` 是游戏级业务表（每环境独立 schema、不带 env 列）。
 
 ---
 
@@ -67,19 +67,19 @@ children: []
 
 ### 2.1 聚合根：PaymentRouting
 
-`PaymentRouting` 聚合按 **`(env, gameID, payWayID)`** 为一致性边界，持有该游戏该支付方式下的全部路由条目集合。所有"唯一性校验、优先级冲突检测、最佳路由选择"都在聚合边界内完成。
+`PaymentRouting` 聚合在**当前运行环境 schema 内**按 **`(gameID, payWayID)`** 为一致性边界（env 由所在 schema 决定），持有该游戏该支付方式下的全部路由条目集合。所有"唯一性校验、优先级冲突检测、最佳路由选择"都在聚合边界内完成。
 
 ```go
 // 概念形态（非最终实现）
 type PaymentRouting struct {
-    Env      common.Environment // develop/sandbox/production
+    Env      common.Environment // 当前运行环境（由 search_path/schema 决定，仅作上下文标记）
     GameID   string             // 业务游戏号
     PayWayID string             // 玩家可见支付方式，如 credit_card
     Routes   []Route            // 同 pay_way 下的所有路由条目
 }
 ```
 
-> 说明：跨 `pay_way` 的唯一性互不影响——`credit_card` 与 `paypal` 的 priority 可以重复，因为它们是不同支付方式的独立优先级链路。唯一性边界严格是"同游戏 + 同 pay_way + 同 env"。
+> 说明：跨 `pay_way` 的唯一性互不影响——`credit_card` 与 `paypal` 的 priority 可以重复，因为它们是不同支付方式的独立优先级链路。唯一性边界严格是"同游戏 + 同 pay_way"（在当前环境 schema 内，env 由 schema 隔离）。
 
 ### 2.2 值对象：Route（路由条目）
 
@@ -88,7 +88,6 @@ type PaymentRouting struct {
 ```go
 type Route struct {
     ID               int64  // 物理行 id（持久层用）
-    Env              string // 冗余以便校验一致性
     GameID           string
 
     // —— 选择器（5 维匹配条件，空 = "*" 通配）——
@@ -153,7 +152,7 @@ func normalize(v string) string {
 
 ## 3. 数据模型（Data Model）
 
-逐表逐字段说明。**带 env 的仅 `payment_routes`（D1）；其余 5 张均为平台级基础数据表，不带 env，全环境共享一套。**
+逐表逐字段说明。**游戏级业务表仅 `payment_routes`（D1，每环境独立 schema、不带 env 列）；其余 5 张均为平台级基础数据表，放共享 schema `platform`、不带 env，全环境共享一套。**
 
 ### 3.1 `pay_ways`（支付方式，平台级，不带 env）
 
@@ -189,7 +188,7 @@ func normalize(v string) string {
 
 ### 3.3 `cashier_provider_templates`（提供商模板四件套，平台级，不带 env）
 
-模板驱动表单定义，语义遵循 `00` §4 模板四件套。用于商户账户配置表单渲染与前后端校验。受 `00` §3.3 版本生命周期约束。
+模板驱动表单定义，语义遵循 `00` §4 模板四件套。用于商户账户配置表单渲染与前后端校验。该表为**简单模板表**（`00` §4.4.1），无 `status` 列，不走 §3.3 三态机；运行时取 `enabled=TRUE` 的最新 `template_version`。
 
 | 列 | 类型 | 默认值 | 约束 | 说明 |
 | --- | --- | --- | --- | --- |
@@ -239,27 +238,26 @@ func normalize(v string) string {
 
 > 强约束：任何响应中 `secret_ciphertext` 及 `config_json` 内被 `secret_fields_json` 标记的字段一律返回 `"masked"`，绝不回明文（`00` §6.1）；同步预览中这些字段 `masked=true`。
 
-### 3.6 `payment_routes`（支付路由，**游戏级，带 env，D1**）
+### 3.6 `payment_routes`（支付路由，**游戏级业务表，每环境独立 schema，D1**）
 
-这是本模块唯一带 env 的表。**按 D1 锁定决策：新增 `env` 列，且所有唯一约束前置 `env`。**
+这是本模块唯一的游戏级业务表。**按 D1 锁定决策：每环境独立 schema，本表在各环境 schema 各一份同名同结构表，不带 `env` 列，所有唯一约束不前置 `env`（env 由所在 schema 隔离）。**
 
-> 现状（`000001_init.up.sql`）：`payment_routes` **没有 env 列、没有任何唯一约束**。v2 需新增迁移补齐 env 列与唯一约束（不改历史迁移，追加新文件，见 §3.7）。
+> 现状（`000001_init.up.sql`）：`payment_routes` **没有任何唯一约束**。v2 需在各环境 schema 内补齐唯一约束（不改历史迁移，追加新文件，见 §3.7）。
 
 逐字段（v2 目标形态）：
 
 | 列 | 类型 | 默认值 | 约束 | 说明 |
 | --- | --- | --- | --- | --- |
 | `id` | BIGSERIAL | — | PK | |
-| `env` | VARCHAR(16) | — | `NOT NULL CHECK (env IN ('develop','sandbox','production'))` | **D1 新增**：环境维度 |
-| `game_id_ref` | BIGINT | — | `REFERENCES games(id)` | 所属游戏（被引用行 env 必须一致，应用层保证，`00` §2.2） |
+| `game_id_ref` | BIGINT | — | `REFERENCES games(id)` | 所属游戏（同环境 schema 内普通外键，父子行天然同 env，`00` §2.2） |
 | `market_code` | VARCHAR(32) | `'*'` | NOT NULL | 选择器：发行大区，`'*'` 通配 |
 | `country_code` | VARCHAR(8) | `'*'` | NOT NULL | 选择器：国家码，`'*'` 通配 |
 | `currency` | VARCHAR(8) | `'*'` | NOT NULL | 选择器：币种，`'*'` 通配 |
-| `channel_id_ref` | BIGINT | `NULL` | `REFERENCES channels(id)`，**可空** | 选择器：渠道，**NULL 表示 `*` 通配** |
-| `package_id_ref` | BIGINT | `NULL` | `REFERENCES channel_packages(id)`，**可空** | 选择器：渠道包，**NULL 表示 `*` 通配** |
-| `pay_way_id_ref` | BIGINT | — | `REFERENCES pay_ways(id)` | 玩家可见支付方式（唯一性聚合维度） |
-| `provider_id_ref` | BIGINT | — | `REFERENCES cashier_providers(id)` | 路由目标：真实 PSP |
-| `merchant_account_id_ref` | BIGINT | — | `REFERENCES cashier_merchant_accounts(id)` | 路由目标：商户账户 |
+| `channel_id_ref` | BIGINT | `NULL` | `REFERENCES platform.channels(id)`，**可空** | 选择器：渠道（跨 schema 指向平台表），**NULL 表示 `*` 通配** |
+| `package_id_ref` | BIGINT | `NULL` | `REFERENCES channel_packages(id)`，**可空** | 选择器：渠道包（同环境 schema 普通外键），**NULL 表示 `*` 通配** |
+| `pay_way_id_ref` | BIGINT | — | `REFERENCES platform.pay_ways(id)` | 玩家可见支付方式（唯一性聚合维度，跨 schema 指向平台表） |
+| `provider_id_ref` | BIGINT | — | `REFERENCES platform.cashier_providers(id)` | 路由目标：真实 PSP（跨 schema 指向平台表） |
+| `merchant_account_id_ref` | BIGINT | — | `REFERENCES platform.cashier_merchant_accounts(id)` | 路由目标：商户账户（跨 schema 指向平台表） |
 | `priority` | INT | `100` | NOT NULL | 优先级，**越小越优先**（`00` §10） |
 | `enabled` | BOOLEAN | `TRUE` | NOT NULL | 仅 `TRUE` 参与生效集合与唯一性校验 |
 | `created_at` / `updated_at` | TIMESTAMPTZ | `NOW()` | NOT NULL | |
@@ -269,28 +267,23 @@ func normalize(v string) string {
 - `priority` 默认 `100`，数值越小优先级越高（与 `00` §10 一致）。
 - `provider_id_ref` 与 `merchant_account_id_ref` 必须自洽：所选 `merchant_account` 的 `provider_id_ref` 必须等于路由的 `provider_id_ref`（应用层校验，§5.5）。
 
-### 3.7 v2 迁移：env 列与唯一性约束（D1 前置 env）
+### 3.7 v2 迁移：唯一性约束（D1，每环境 schema 内）
 
-新增迁移文件（示意，遵循 `01` §6 不改历史迁移、追加新文件、幂等）：
+新增迁移文件（示意，遵循 `01` §6 不改历史迁移、追加新文件、幂等；在每个环境 schema 内执行，唯一约束不前置 env，env 由所在 schema 隔离）：
 
 ```sql
--- 000003_payment_routes_env.up.sql（示意）
+-- 000003_payment_routes_unique.up.sql（示意；在每个环境 schema 内执行）
 
--- 1) 增加 env 列；存量行回填为当前运行环境（约定回填 'develop'，由运维确认）
-ALTER TABLE payment_routes
-  ADD COLUMN IF NOT EXISTS env VARCHAR(16) NOT NULL DEFAULT 'develop'
-  CHECK (env IN ('develop','sandbox','production'));
-
--- 2) DB 层硬约束：同 env+game+pay_way 下 priority 不重复（仅约束生效行靠应用层补充，见说明）
+-- 1) DB 层硬约束：同 game+pay_way 下 priority 不重复（仅约束生效行靠应用层补充，见说明）
 --    注意：DB 唯一索引无法直接表达"仅 enabled=true"，故用部分唯一索引 WHERE enabled。
 CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_routes_priority
-  ON payment_routes (env, game_id_ref, pay_way_id_ref, priority)
+  ON payment_routes (game_id_ref, pay_way_id_ref, priority)
   WHERE enabled;
 
--- 3) 归一化选择器唯一：channel/package 用 COALESCE(-1) 折叠 NULL，market/country/currency 已是字面量 '*'
+-- 2) 归一化选择器唯一：channel/package 用 COALESCE(-1) 折叠 NULL，market/country/currency 已是字面量 '*'
 CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_routes_selector
   ON payment_routes (
-    env, game_id_ref, pay_way_id_ref,
+    game_id_ref, pay_way_id_ref,
     COALESCE(package_id_ref, -1),
     COALESCE(channel_id_ref, -1),
     market_code, country_code, currency
@@ -313,7 +306,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_routes_selector
 | `PayWayType` | `card` / `wallet` / `platform` / `local` | **无默认**（建表必填） | `pay_ways.pay_way_type`，`00` §3.1 |
 | `ProviderKind` | `aggregator` / `gateway` / `wallet_direct` | **无默认** | `cashier_providers.provider_kind`，`00` §3.1 |
 | `Market`（选择器取值域） | `GLOBAL` / `JP` / `KR` / `SEA` / `HMT` / `CN` / `*` | 路由 `market_code` 默认 `'*'` | `00` §3.1 + 通配 `*` |
-| `Environment` | `develop` / `sandbox` / `production` | `develop`（当前运行环境） | `payment_routes.env`，`00` §2.1 |
+| `Environment` | `develop` / `sandbox` / `production` | `develop`（当前运行环境） | 运行时环境（由 `search_path`/schema 决定，非表列），`00` §2.1 |
 
 `PayWayType` 语义：
 - `card`：卡类支付（信用卡/借记卡），如 `credit_card`。**本模块"信用卡无感切 PSP"的主战场。**
@@ -337,7 +330,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_routes_selector
 | `payment_routes.package_id_ref` | `NULL`（= `*`） | DDL 可空 |
 | `payment_routes.priority` | `100`（越小越优先） | DDL + `00` §10 |
 | `payment_routes.enabled` | `TRUE` | DDL + `00` §10 |
-| `payment_routes.env` | 当前运行环境（迁移回填 `develop`） | D1 + `00` §10 |
 | `*.enabled`（5 张平台表） | `TRUE` | DDL + `00` §10 |
 | `pay_ways.sort` / `cashier_providers.sort` | `0` | DDL |
 | `cashier_merchant_accounts.config_json` | `{}` | DDL + `00` §10 |
@@ -380,7 +372,7 @@ merchant_aw_main   provider=airwallex  subject=hk_entity   merchant_id=AW-001   
 merchant_pm_main   provider=payermax   subject=sg_entity   merchant_id=PM-001   secret=<encrypted>
 ```
 
-`cashier_provider_templates`：每个 provider 至少一套 `published` 模板版本（四件套），用于商户账户表单渲染。
+`cashier_provider_templates`：每个 provider 至少一套 `enabled=TRUE` 的 `template_version`（四件套），用于商户账户表单渲染。
 
 ---
 
@@ -513,7 +505,7 @@ func specificityCount(r Route) int {
 
 ### 5.4 唯一性归一化键与冲突校验（ValidateRouteSet）
 
-**唯一性边界：同一 `env` + 同一 `gameID` + 同一 `payWayID` 下，仅对 `enabled=true` 的生效路由。** 两类约束并行：
+**唯一性边界：当前环境 schema 内、同一 `gameID` + 同一 `payWayID` 下，仅对 `enabled=true` 的生效路由（env 由所在 schema 隔离，不进入唯一键）。** 两类约束并行：
 
 1. **priority 唯一**：生效路由的 `priority` 不允许重复。归一化键 = `priorityKey = payWay + ":" + priority`。
 2. **归一化选择器组合唯一**：`{package, channel, market, country, currency}` 经 `normalize` 折叠 `*` 后的组合不允许重复。归一化键 = `selectorKey = payWay|norm(package)|norm(channel)|norm(market)|norm(country)|norm(currency)`。
@@ -570,20 +562,25 @@ func ValidateRouteSet(routes []Route) error {
 - `merchant_account.provider_id_ref == route.provider_id_ref`（商户账户必须属于所选 provider），否则 `VALIDATION_FAILED`。
 - `pay_way` / `provider` / `merchant_account` / `channel` / `package` 引用必须存在且 `enabled`（被禁用的基础数据不可新挂路由）。
 - `market_code` 取值必须 ∈ `{GLOBAL,JP,KR,SEA,HMT,CN,*}`；`currency` 若非 `*` 建议校验存在于 `currency_specs`（与 `00` §5 一致，非强制，因币种此处仅作选择器而非金额）。
-- 被引用的 `game`、`channel_packages` 与本路由 `env` 一致（`00` §2.2 跨表 env 一致性）。
+- 被引用的 `game`、`channel_packages` 与本路由同在当前环境 schema（普通外键天然保证父子行同 env，`00` §2.2），无需额外 env 一致性校验。
+
+> **运行时剔除规则（与上面"保存校验须 enabled"对称，落实 `00` §9 红线）**：即便某条 `payment_routes.enabled=true`，若其引用的 `provider`（`cashier_providers.enabled=false`）或 `merchant_account`（`cashier_merchant_accounts.enabled=false`）已被禁用，该路由**不参与运行时匹配**（`ResolveRoute` 候选过滤阶段剔除），也不进客户端最终配置。这样基础数据被禁用后无需逐条改路由即可即时失效，与保存期"被禁用的基础数据不可新挂路由"对称。
 
 ### 5.6 完整匹配算法（端到端伪代码）
 
 ```text
-function ResolveRoute(env, gameID, input MatchInput) -> (provider, merchant_account) or NOT_FOUND:
-    # 1. 取该 env+game+pay_way 下所有 enabled 路由
-    routes = repo.ListEnabledRoutes(env, gameID, input.PayWay)
+function ResolveRoute(gameID, input MatchInput) -> (provider, merchant_account) or NOT_FOUND:
+    # 1. 取当前环境 schema 下该 game+pay_way 的所有 enabled 路由
+    #    （env 由连接 search_path 决定，仓储 SQL 不写 schema 前缀、不带 env 谓词）
+    routes = repo.ListEnabledRoutes(gameID, input.PayWay)
 
     # 2. 归一化已在持久层->领域层映射时完成（NULL/'' -> '*'）
 
-    # 3. 候选过滤（§5.1）
+    # 3. 候选过滤（§5.1 + §5.5 运行时剔除：provider/merchant_account 被禁用的路由剔除）
     candidates = []
     for r in routes:
+        if providerDisabled(r) or merchantAccountDisabled(r):
+            continue   # §5.5 运行时剔除规则
         if matchPackage(r, input) and matchChannel(r, input)
            and marketMatches(r.Market, input.Market)
            and matchCountry(r, input) and matchCurrency(r, input):
@@ -826,7 +823,7 @@ function ResolveRoute(env, gameID, input MatchInput) -> (provider, merchant_acco
 ### 6.8 `PUT /api/admin/games/{gameId}/payment-routes` — 全量保存游戏路由
 
 - 权限：`payment.write`，审计 `action=payment_route.update`
-- 语义：**整组替换**（按 game + env 全量覆盖；也可按 payWay 分组提交，见 §7）。保存前服务端执行 §5.4 唯一性校验 + §5.5 自洽校验；任一失败整体拒绝（事务回滚），返回 `ROUTE_CONFLICT` 或 `VALIDATION_FAILED`。
+- 语义：**整组替换**（在当前环境 schema 内按 game 全量覆盖，env 由 `search_path` 决定、落当前运行环境对应 schema，不允许跨 schema 写；也可按 payWay 分组提交，见 §7）。保存前服务端执行 §5.4 唯一性校验 + §5.5 自洽校验；任一失败整体拒绝（事务回滚），返回 `ROUTE_CONFLICT` 或 `VALIDATION_FAILED`。
 - 请求 DTO（`items[]`）：
 
 | 字段 | 类型 | 必填 | 校验 |
@@ -835,7 +832,7 @@ function ResolveRoute(env, gameID, input MatchInput) -> (provider, merchant_acco
 | `countryCode` | string | 否 | 缺省 `*` |
 | `currency` | string | 否 | 缺省 `*`；非 `*` 建议存在于 `currency_specs` |
 | `channelId` | string\|null | 否 | null/缺省 = `*`；非空必须存在且 enabled |
-| `packageCode` | string\|null | 否 | null/缺省 = `*`；非空必须属于本 game 且 env 一致 |
+| `packageCode` | string\|null | 否 | null/缺省 = `*`；非空必须属于本 game（同环境 schema） |
 | `payWayId` | string | 是 | 必须存在且 enabled |
 | `providerId` | string | 是 | 必须存在且 enabled |
 | `merchantAccountId` | string | 是 | 必须存在且 enabled，且其 provider == `providerId`（§5.5） |
@@ -908,11 +905,11 @@ function ResolveRoute(env, gameID, input MatchInput) -> (provider, merchant_acco
 应用层 `PaymentRouteService`（`internal/app`，编排，不放纯规则；`01` §4）。依赖窄仓储 + `payment` 领域纯函数 + `crypto`（商户密钥）。
 
 职责：
-1. **读编排**：`ListPayWays` / `ListProviders` / `ListBillingSubjects` / `ListMerchantAccounts`（脱敏）/ `GetGameRoutes`（按 env，分组 + 组内排序）。
+1. **读编排**：`ListPayWays` / `ListProviders` / `ListBillingSubjects` / `ListMerchantAccounts`（脱敏）/ `GetGameRoutes`（当前环境 schema，分组 + 组内排序）。
 2. **写编排（事务内）**：
    - `CreateBillingSubject` / `CreateMerchantAccount`（加密 secret → `secret_ciphertext`；按 provider 模板 `validation_rules_json` 校验 config）。
-   - `SaveGameRoutes`：装载提交 items → 映射 NULL/`""`/`*` 三态 → `ValidateRouteSet`（§5.4）→ 逐条自洽校验（§5.5）→ 全量替换 `payment_routes`（限定 game + env）→ 写 `audit_logs`。
-3. **运行时解析**：`ResolveRoute(env, gameID, MatchInput)`（§5.6），供配置快照模块（`snapshot`）生成 per-game per-market 运行时配置时调用。
+   - `SaveGameRoutes`：装载提交 items → 映射 NULL/`""`/`*` 三态 → `ValidateRouteSet`（§5.4）→ 逐条自洽校验（§5.5）→ 在当前环境 schema 内全量替换 `payment_routes`（限定 game，env 由 `search_path` 决定）→ 写 `audit_logs`。
+3. **运行时解析**：`ResolveRoute(gameID, MatchInput)`（§5.6），供配置快照模块（`snapshot`）生成 per-game per-market 运行时配置时调用。
 4. **唯一性与冲突**：全部委托 `route_validator.ValidateRouteSet`，冲突统一抛 `ROUTE_CONFLICT`。
 
 服务接口（示意）：
@@ -924,19 +921,19 @@ type PaymentRouteService interface {
     ListProviders(ctx, filter) ([]dto.ProviderDTO, error)
     ListBillingSubjects(ctx, filter) ([]dto.BillingSubjectDTO, error)
     ListMerchantAccounts(ctx, filter) ([]dto.MerchantAccountDTO, error) // secret 脱敏
-    GetGameRoutes(ctx, env, gameID) (dto.GameRoutesDTO, error)          // 分组+排序
+    GetGameRoutes(ctx, gameID) (dto.GameRoutesDTO, error)              // 当前环境 schema，分组+排序
 
     // 写（事务）
     CreateBillingSubject(ctx, cmd) (dto.BillingSubjectDTO, error)
     CreateMerchantAccount(ctx, cmd) (dto.MerchantAccountDTO, error)     // 加密 secret
-    SaveGameRoutes(ctx, env, gameID, cmd) (dto.GameRoutesDTO, error)    // 校验+全量替换+审计
+    SaveGameRoutes(ctx, gameID, cmd) (dto.GameRoutesDTO, error)        // 校验+全量替换+审计
 
     // 运行时
-    ResolveRoute(ctx, env, gameID, input payment.MatchInput) (payment.RouteTarget, error)
+    ResolveRoute(ctx, gameID, input payment.MatchInput) (payment.RouteTarget, error)
 }
 ```
 
-与仓储边界（`01` §4.2）：仓储窄，仅单聚合 CRUD + `ListEnabledRoutes(env, gameID, payWayID)` 等必要查询；跨表自洽校验、加密、唯一性都在 service。所有带 env 方法接收 `ctx` 与 `env`。
+与仓储边界（`01` §4.2）：仓储窄，仅单聚合 CRUD + `ListEnabledRoutes(gameID, payWayID)` 等必要查询；跨表自洽校验、加密、唯一性都在 service。env 由 `ctx`（中间件设定的 `search_path`）决定，业务表仓储 SQL 不写 schema 前缀、不带 env 谓词，写操作落当前运行环境对应 schema。
 
 ---
 
@@ -955,11 +952,11 @@ type PaymentRouteService interface {
   └─（游戏支付路由位于 /games/:gameId 详情页的"支付路由"Tab，游戏级 + env）
 ```
 
-> 路由是游戏级 + env 数据，归属游戏详情页"支付路由"Tab（`spec` 前端信息架构：支付路由属游戏级区域）；前 4 个是平台级基础数据，归属 `/payment`。
+> 路由是游戏级业务数据（按环境 schema 隔离），归属游戏详情页"支付路由"Tab（`spec` 前端信息架构：支付路由属游戏级区域）；前 4 个是平台级基础数据，归属 `/payment`。
 
 ### 8.2 商户账户抽屉（模板驱动 + 密文）
 
-- 选择 `provider` → 拉取该 provider 的 `published` 模板四件套 → 用统一模板渲染器渲染 `form_schema_json`（`01` §5.3）。
+- 选择 `provider` → 拉取该 provider `enabled=TRUE` 的最新 `template_version` 模板四件套 → 用统一模板渲染器渲染 `form_schema_json`（`01` §5.3）。
 - `secret_fields_json` 字段用 `password` 组件，回显恒为 `masked`，留空表示不修改（`00` §6.1）。
 - `file_fields_json` 字段走统一上传（`00` §6.2）。
 - 选择 `billing_subject` 下拉。
@@ -1005,10 +1002,10 @@ type PaymentRouteService interface {
 
 | 公共能力（`00`/`01`） | 本模块如何遵循 |
 | --- | --- |
-| env 模型（D1，`00` §2） | 仅 `payment_routes` 带 env，唯一约束前置 env；5 张平台表不带 env。写操作 env 取当前运行环境。 |
+| env 模型（D1，`00` §2） | 仅 `payment_routes` 是游戏级业务表（每环境独立 schema、不带 env 列、唯一约束不前置 env）；5 张平台表放共享 schema `platform`。写操作落当前运行环境对应 schema（由 `search_path` 决定），不允许跨 schema 写。 |
 | 全局枚举（`00` §3） | `PayWayType`、`ProviderKind`、`Market`、`Environment` 全部以 `00` 为唯一事实来源。 |
 | Market 语义（`00` §3.2） | §5.2 marketMatches 与 `00`/spec 完全一致（CN 不被 GLOBAL 兜底等）。 |
-| 模板四件套（`00` §4） | `cashier_provider_templates` 驱动商户账户表单；遵循版本生命周期 §3.3。 |
+| 模板四件套（`00` §4） | `cashier_provider_templates` 驱动商户账户表单；简单模板表（§4.4.1），取 `enabled` 最新 `template_version`，不走 §3.3 三态机。 |
 | 币种归一化（`00` §5） | 路由 `currency` 仅作选择器，不涉及金额写入；如校验存在性则查 `currency_specs`。真实金额在收银台模块。 |
 | 密文与文件（`00` §6） | `cashier_merchant_accounts.secret_ciphertext` 加密落库、响应脱敏、同步预览 `masked=true`、复制时清空。 |
 | 统一 API 约定（`00` §7） | 前缀、包络、分页、错误码（含 `ROUTE_CONFLICT`）、camelCase 全部遵循。 |
@@ -1063,8 +1060,8 @@ type PaymentRouteService interface {
 | POST /api/admin/billing-subjects | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — | — | subjectId 唯一(CONFLICT)；平台级无 env（S6 —）；审计 billing_subject.create |
 | GET /api/admin/cashier/merchant-accounts | ✓ | ✓ | ✓ | — | — | — | — | ✓ | ✓ | — | 商户密钥脱敏(merchant_accounts.secret_ciphertext, S8)；平台级无 env（S6 —） |
 | POST /api/admin/cashier/merchant-accounts | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — | — | 密钥加密落库+脱敏(secret_ciphertext, S8)；平台级无 env（S6 —）；审计 merchant_account.create |
-| GET /api/admin/games/{gameId}/payment-routes | ✓ | ✓ | ✓ | — | — | ✓ | — | — | — | — | payment_routes 带 env（S6 ✓）；ResolveRoute 命中、分组+排序展示 |
-| PUT /api/admin/games/{gameId}/payment-routes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | ✓ | 路由匹配/排序/唯一性(ROUTE_CONFLICT)、选择器归一化(*)、PSP 无感切换、与渠道 IAP 隔离(红线)；payment_routes 带 env（S6 ✓）；全量替换事务回滚(S10) |
+| GET /api/admin/games/{gameId}/payment-routes | ✓ | ✓ | ✓ | — | — | ✓ | — | — | — | — | payment_routes 每环境 schema 隔离；跨 env（schema 隔离）：读当前环境 schema（S6 ✓）；ResolveRoute 命中、分组+排序展示 |
+| PUT /api/admin/games/{gameId}/payment-routes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | ✓ | 路由匹配/排序/唯一性(ROUTE_CONFLICT)、选择器归一化(*)、PSP 无感切换、与渠道 IAP 隔离(红线)；跨 env（schema 隔离）：写落当前环境 schema，不允许跨 schema 写（S6 ✓）；全量替换事务回滚(S10) |
 
 前端：`payment.spec.ts` 覆盖 `/payment`（支付方式/提供商只读列表、主体与商户账户抽屉创建、密文输入恒显 `masked`）与游戏详情「支付路由」Tab（按 pay_way 优先级链路渲染、`⋯` 切换通道实现 PSP 无感切、`ROUTE_CONFLICT` 双行高亮、production 隐藏 Sync 入口） / vitest 覆盖模板驱动商户表单渲染、路由编辑器 5 维作用域 `*` 归一化与兜底徽标。
 
@@ -1074,7 +1071,7 @@ type PaymentRouteService interface {
 
 ### 11.1 假设（本文已按此书写，若不成立需回改）
 
-- **A1**：`payment_routes` 的 env 列与唯一约束由 v2 新迁移补齐（§3.7）；存量行回填 `develop`，具体回填策略待运维确认。
+- **A1**：`payment_routes` 的唯一约束由 v2 新迁移在各环境 schema 内补齐（§3.7）；本表不带 env 列，env 由所在 schema 隔离。
 - **A2**：商户密钥本期平台级、全 env 共享（D1 备注）；未来若需分环境密钥再扩展，不影响本模块路由结构。
 - **A3**：路由的 `country/currency` 仅作选择器字符串匹配，不强制存在于 `currency_specs`（仅建议校验）；金额相关校验属收银台模块。
 - **A4**：`PUT payment-routes` 采用"按 game+env 全量替换"语义；若改为"按 pay_way 分组增量替换"，唯一性边界不变，仅接口粒度变化。

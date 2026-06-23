@@ -4,6 +4,10 @@
 # logs
 *.log
 
+# tmp
+.tmp
+.pnpm-store
+
 # env
 .env
 .env.local

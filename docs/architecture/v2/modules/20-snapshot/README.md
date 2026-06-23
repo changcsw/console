@@ -23,21 +23,21 @@ children: []
 
 ### 1.1 一句话定义
 
-- **配置快照（Config Snapshot）**：某个游戏在某个 `env` 下、某个时间点的"客户端最终配置 JSON"的物化版本。一条快照 = 一份完整的、per-game 的 `config_json`，其内部**按 `market` 分区**，每个 market 下存放"已按合并规则解析后的最终配置"。
+- **配置快照（Config Snapshot）**：某个游戏在某个环境（即所在 schema）下、某个时间点的"客户端最终配置 JSON"的物化版本。一条快照 = 一份完整的、per-game 的 `config_json`，其内部**按 `market` 分区**，每个 market 下存放"已按合并规则解析后的最终配置"。
 - **运行时配置合并（Runtime Config Merge）**：把游戏级配置 + 各 market 的有效渠道实例，按 `00` §3.2 / market-channel-sync 规范的合并规则，解析为每个 market 的最终配置的**纯逻辑过程**。该过程**只在生成快照时执行一次**，结果固化进 `config_json`；客户端、同步、Dashboard 均消费固化结果，不再重复合并。
 
 ### 1.2 在系统中的位置（数据流）
 
 ```text
-[11 游戏主数据] [12 渠道实例] [13 账号认证] [14 渠道登录]
-[15 商品/IAP]  [16 收银台模板] [17 游戏收银台] [18 支付路由]
+[game 游戏主数据] [channel 渠道实例] [account-auth 账号认证] [channel-login 渠道登录]
+[product 商品/IAP] [cashier-template 收银台模板] [game-cashier 游戏收银台] [payment 支付路由]
         │  （各模块只暴露"有效数据"：enabled 且 config_status=valid 且未隐藏未不兼容）
         ▼
-[19 BuildRuntimeConfig 纯逻辑] ── 按 market 合并 ──► per-game config_json（按 market 分区）
+[snapshot BuildRuntimeConfig 纯逻辑] ── 按 market 合并 ──► per-game config_json（按 market 分区）
         ▼
-[19 ConfigSnapshotService] ── 计算 file_hash / 落库 game_config_snapshots(env=当前) ──► draft 快照
+[snapshot ConfigSnapshotService] ── 计算 file_hash / 落库 <当前env>.game_config_snapshots ──► draft 快照
         ▼  publish
-[19] published 快照  ──►  [20 同步 config section]  /  客户端拉取  /  [22 Dashboard 只读]
+[snapshot] published 快照  ──►  [sync config section]  /  客户端拉取  /  [dashboard 只读]
 ```
 
 ### 1.3 明确不做（红线，见 `00` §9）
@@ -46,7 +46,7 @@ children: []
 - **不重新定义合并规则**：合并规则的唯一事实来源是 `00` §3.2 与 `docs/superpowers/specs/2026-06-16-market-channel-sync-design.md` 的"GLOBAL 与具体 Market 的配置合并规则"，本文只做工程化落地，不得改写语义。
 - **不收纳无效数据**：被隐藏 / 不兼容 / `config_status != valid` / `enabled=false` 的任何实例，**一律不进 `config_json`**。
 - **不存明文密钥**：`config_json` 内不得出现明文 secret；密文字段按 §9.2 处理。
-- **不跨 env**：快照永远归属当前运行 `env`（D1）；同一 `config_version` 在不同 env 下是不同物理行。
+- **不跨 env**：快照永远落在当前运行环境对应的 schema（D1）；同一 `config_version` 在不同环境 schema 下是不同物理行（同名表、不同 schema）。
 - **不在 production 盲写**：production 下不提供"重新生成 + 直接覆盖同步"的捷径；production 快照通常由 `sync` 同步而来，本模块的 generate 在 production 下仅用于核对/补偿，受权限码约束。
 
 ---
@@ -58,8 +58,8 @@ children: []
 ```text
 ConfigSnapshot (聚合根)
   ├─ id                 BIGINT
-  ├─ env                Environment          // D1：快照归属环境
-  ├─ gameRef            GameRef              // game_id_ref -> games.id
+  │                                          // D1：快照归属环境由其所在 schema 决定，行内不带 env 列
+  ├─ gameRef            GameRef              // game_id_ref -> games.id（同一环境 schema 内）
   ├─ configSchemaVersion string             // 配置 JSON 结构版本（代码常量，见 §4）
   ├─ configVersion      string              // 内容版本号（生成时按规则产出，见 §5.5）
   ├─ config             RuntimeConfig (值对象，最终落为 config_json)
@@ -95,7 +95,7 @@ ResolvedChannel
 
 ### 2.2 领域不变量（invariants）
 
-- **I1（环境一致性）**：`ConfigSnapshot.env` 必须等于当前运行 env；聚合内引用的所有源数据必须同 env（应用层保证）。
+- **I1（环境一致性）**：快照与其引用的所有源数据必然落在**同一环境 schema**（由连接 `search_path` 决定，天然同 env，无需额外校验）。
 - **I2（有效性闭包）**：`MarketConfig.channels` 中的每个实例都满足"未隐藏 ∧ 兼容当前 market ∧ `config_status=valid` ∧ `enabled=true`"。任何不满足者在合并阶段即被剔除，绝不进入聚合。
 - **I3（实例级覆盖）**：具体海外 market 覆盖 GLOBAL 时，以"完整实例"为单位替换，**禁止字段级深度合并**（见 §5.2）。
 - **I4（确定性）**：给定同一份源数据集合，`BuildRuntimeConfig` 必须产出字节级一致的 canonical JSON，从而 `fileHash` 一致（见 §5.5）。
@@ -110,15 +110,14 @@ ResolvedChannel
 
 ## 3. 数据模型（逐表逐字段）
 
-本模块仅拥有一张表：`game_config_snapshots`。下表给出 **v2 目标形态**（在 `000001_init.up.sql` 现状基础上由新增迁移补 `env` 列并改唯一键，遵循 D1）。
+本模块仅拥有一张表：`game_config_snapshots`。它是**游戏维度业务表**，在每个环境 schema（`develop`/`sandbox`/`production`）各有一份同名同结构表，**不带 `env` 列**（D1）。
 
-### 3.1 `game_config_snapshots`（带 env，游戏维度业务表）
+### 3.1 `game_config_snapshots`（游戏维度业务表，每环境 schema 一份）
 
 | 列 | 类型 | 默认值 | 约束 / 说明 |
 | --- | --- | --- | --- |
 | `id` | BIGSERIAL | — | 主键 |
-| `env` | VARCHAR(16) | （无默认，写入取当前运行 env） | **新增（D1）**；`CHECK (env IN ('develop','sandbox','production'))` |
-| `game_id_ref` | BIGINT | — | `REFERENCES games(id)`；被引用 `games` 行需同 env |
+| `game_id_ref` | BIGINT | — | `REFERENCES games(id)`（同一环境 schema 内的 `games`，天然同 env） |
 | `config_schema_version` | VARCHAR(32) | （由代码常量写入，如 `'1.0'`） | 配置 JSON 结构版本，见 §4 |
 | `config_version` | VARCHAR(32) | （生成时产出，见 §5.5） | 内容版本号 |
 | `config_json` | JSONB | — | **per-game、按 market 分区**的最终配置（结构见 §5.6 样例）；可能较大 |
@@ -131,31 +130,28 @@ ResolvedChannel
 | `created_at` | TIMESTAMPTZ | `NOW()` | |
 | `updated_at` | TIMESTAMPTZ | `NOW()` | |
 
-### 3.2 唯一键与索引（D1 前置 env）
+### 3.2 唯一键与索引（不含 env，按 schema 隔离）
 
 ```sql
--- v2 目标（迁移中将现状 UNIQUE(game_id_ref, config_version) 调整为前置 env）
-ALTER TABLE game_config_snapshots ADD COLUMN env VARCHAR(16) NOT NULL DEFAULT 'develop';
-ALTER TABLE game_config_snapshots ADD CONSTRAINT chk_gcs_env
-  CHECK (env IN ('develop','sandbox','production'));
+-- 该 DDL 在每个环境 schema（develop/sandbox/production）各应用一份（见 01 §6）
 ALTER TABLE game_config_snapshots ADD CONSTRAINT chk_gcs_status
   CHECK (status IN ('draft','published'));
 
--- 唯一键：前置 env（D1）
+-- 唯一键：schema 内自成体系，不含 env（D1）
 ALTER TABLE game_config_snapshots DROP CONSTRAINT IF EXISTS game_config_snapshots_game_id_ref_config_version_key;
 ALTER TABLE game_config_snapshots
-  ADD CONSTRAINT uq_gcs_env_game_version UNIQUE (env, game_id_ref, config_version);
+  ADD CONSTRAINT uq_gcs_game_version UNIQUE (game_id_ref, config_version);
 
--- 常用查询索引：按游戏列出快照、按 env+game 查最新 published
-CREATE INDEX IF NOT EXISTS idx_gcs_env_game_generated
-  ON game_config_snapshots (env, game_id_ref, generated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_gcs_env_game_status
-  ON game_config_snapshots (env, game_id_ref, status);
+-- 常用查询索引：按游戏列出快照、查最新 published
+CREATE INDEX IF NOT EXISTS idx_gcs_game_generated
+  ON game_config_snapshots (game_id_ref, generated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_gcs_game_status
+  ON game_config_snapshots (game_id_ref, status);
 ```
 
-> 说明：迁移中 `env` 加 `DEFAULT 'develop'` 仅为回填历史行；应用层写入**必须显式取当前运行 env**，不依赖默认值（见 `00` §2.1）。
+> 说明：业务表 SQL 不写 schema 前缀、不带 env 谓词，目标环境 schema 由连接 `search_path` 决定（`00` §2.1）。
 
-### 3.3 字段默认值落地清单（呼应 §4）
+> **同 schema 引用（`00` §2.2 / `01` §4.3）**：`game_config_snapshots` 与其 `game_id_ref` 指向的 `games` 行**必然在同一环境 schema**（同 env），用普通外键 `REFERENCES games(id)` 即可，无需复合外键或应用层 env 校验。
 
 | 字段 | 落地默认 | 触发时机 |
 | --- | --- | --- |
@@ -177,7 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_gcs_env_game_status
 | `Market` 分区键 | `GLOBAL/JP/KR/SEA/HMT/CN` | 复用 `00 §3` |
 | `storage_key` | 默认 `''` | 空=内联存 `config_json` |
 | `file_name` | 默认 `game_<gameId>_<configVersion>.json` | |
-| `env` | 当前运行环境 | D1 |
+| 所在 schema | 当前运行环境 schema | D1（行内不带 env 列） |
 | `generated_at` | 默认 `NOW()`（可注入以复现） | |
 
 ---
@@ -263,16 +259,16 @@ BuildRuntimeConfig(game, targetMarket, validData):
 ### 5.7 发布流程
 - 生成 ⇒ `draft` 快照。
 - 发布 ⇒ 校验当前 `draft`，置 `status=published` + `published_at=NOW()`；写审计 `snapshot.publish`。
-- 同一 `(env, game)` 可有多份历史快照；"当前生效"由最近 published 决定（实现可加 `is_current` 或按 `published_at` 取最新，本期按最新 published）。
+- 同一环境 schema 内、同一 `game` 可有多份历史快照；"当前生效"由最近 published 决定（实现可加 `is_current` 或按 `published_at` 取最新，本期按最新 published）。
 
 ---
 
 ## 6. 后端 API
 
-> 前缀 `/api/admin`，遵循 `00 §7` 包络。读 `game.read`，生成/发布 `snapshot.write` / `snapshot.publish`。
+> 前缀 `/api/admin`，遵循 `00 §7` 包络。读 `game.read`，生成/发布 `snapshot.generate` / `snapshot.publish`。
 
-- **POST `/api/admin/games/{gameId}/config-snapshots/generate`** 权限 `snapshot.write`
-  - 行为：按当前 env 拉取有效数据 → `BuildRuntimeConfig`（各 market）→ 计算 hash/version → 落 `draft` 快照。
+- **POST `/api/admin/games/{gameId}/config-snapshots/generate`** 权限 `snapshot.generate`
+  - 行为：从当前环境 schema 拉取有效数据 → `BuildRuntimeConfig`（各 market）→ 计算 hash/version → 落 `draft` 快照。
   - 成功 `201`：
     ```json
     { "data": { "id": 12, "configVersion": "20260615100000-a1b2c3d4",
@@ -295,7 +291,7 @@ BuildRuntimeConfig(game, targetMarket, validData):
 ## 7. 应用服务与 command/query
 - `ConfigSnapshotService`：`Generate`（编排：加载有效数据 → 调 `BuildRuntimeConfig` → hash/version → 落库）、`List`、`Publish`、`Download`。
 - 领域纯逻辑：`domain/snapshot/build_runtime_config.go`（`BuildRuntimeConfig`，无 IO，可单测）。
-- 仓储：`ConfigSnapshotRepository`（按 env）；只读聚合各模块仓储的"有效数据视图"。
+- 仓储：`ConfigSnapshotRepository`（SQL 不带 env 谓词，目标环境 schema 由连接 `search_path` 决定）；只读聚合各模块仓储的"有效数据视图"。
 
 ---
 
@@ -306,7 +302,7 @@ BuildRuntimeConfig(game, targetMarket, validData):
   - JSON 预览（按 market 分区折叠展示，密文脱敏）。
   - 下载入口。
   - "发布"操作（draft → published，二次确认）。
-- 空/错/权限态遵循全局；无 `snapshot.write/publish` 置灰。
+- 空/错/权限态遵循全局；无 `snapshot.generate/publish` 置灰。
 
 ---
 
@@ -318,8 +314,8 @@ BuildRuntimeConfig(game, targetMarket, validData):
 `config_json` 内 secret 字段**不落明文**：存占位（如 `"***"`）或密文引用键；下载/预览均脱敏（`00 §6`、I6）。
 
 ### 9.3 审计与 env
-- 审计：`snapshot.generate`、`snapshot.publish` 写 `audit_logs`。
-- env：快照归属当前运行 env；production 快照通常由 `sync` 同步而来（§1.3）。
+- 审计：`snapshot.generate`、`snapshot.publish` 写 `platform.audit_logs`（`env` 记当前运行环境）。
+- env：快照落在当前运行环境对应 schema；production 快照通常由 `sync` 同步而来（§1.3）。
 
 ---
 
@@ -340,11 +336,11 @@ BuildRuntimeConfig(game, targetMarket, validData):
 | 接口 | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | 模块私有维度 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | POST `/api/admin/games/{gameId}/config-snapshots/generate` | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓ | — | ✓ | per-game 按 market 分区(D4)、scope 过滤(client/both 进、server 不进)、确定性 hash/可复现、隐藏/不兼容/无效排除、production 不盲写 |
-| GET `/api/admin/games/{gameId}/config-snapshots` | ✓ | ✓ | ✓ | — | — | ✓ | — | — | ✓ | — | draft/published 状态列出（按 env+game） |
+| GET `/api/admin/games/{gameId}/config-snapshots` | ✓ | ✓ | ✓ | — | — | ✓ | — | — | ✓ | — | draft/published 状态列出（当前环境 schema 内按 game） |
 | POST `/api/admin/game-config-snapshots/{snapshotId}/publish` | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓ | — | — | ✓ | draft→published 单调（VERSION_STATE_INVALID/CONFLICT） |
 | GET `/api/admin/game-config-snapshots/{snapshotId}/download` | ✓ | ✓ | ✓ | — | — | ✓ | — | ✓ | — | — | 密文脱敏(S8)、按 market 分区呈现 |
 
-前端：`games.spec.ts` 覆盖"配置快照"区域（生成 draft / 发布二次确认 / JSON 预览按 market 折叠+脱敏 / 下载入口）、空/错/无 `snapshot.write|publish` 置灰态 / vitest 组件：快照列表（version/status/hash/时间）、JSON 预览（密文脱敏）。
+前端：`games.spec.ts` 覆盖"配置快照"区域（生成 draft / 发布二次确认 / JSON 预览按 market 折叠+脱敏 / 下载入口）、空/错/无 `snapshot.generate|publish` 置灰态 / vitest 组件：快照列表（version/status/hash/时间）、JSON 预览（密文脱敏）。
 
 ---
 

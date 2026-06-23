@@ -13,7 +13,9 @@ import (
 	"github.com/csw/console/services/admin-api/internal/domain/common"
 	"github.com/csw/console/services/admin-api/internal/domain/game"
 	"github.com/csw/console/services/admin-api/internal/domain/sync"
+	domaincashier "github.com/csw/console/services/admin-api/internal/domain/cashier"
 	"github.com/csw/console/services/admin-api/internal/infra/config"
+	cashierhttp "github.com/csw/console/services/admin-api/internal/transport/http/cashier"
 	channelshttp "github.com/csw/console/services/admin-api/internal/transport/http/channels"
 	syncapi "github.com/csw/console/services/admin-api/internal/transport/http/sync"
 )
@@ -24,6 +26,7 @@ type Server struct {
 
 type marketChannelScaffoldService struct{}
 type sectionSyncScaffoldService struct{}
+type templateVersionScaffoldService struct{}
 
 func New(cfg config.Config) *http.Server {
 	server := &Server{mux: http.NewServeMux()}
@@ -41,6 +44,7 @@ func (s *Server) registerRoutes(cfg config.Config) {
 		marketChannelScaffoldService{},
 	)
 	sectionSyncHandler := syncapi.NewSectionSyncHandler(sectionSyncScaffoldService{})
+	templateVersionHandler := cashierhttp.NewTemplateVersionHandler(templateVersionScaffoldService{})
 
 	s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -113,6 +117,19 @@ func (s *Server) registerRoutes(cfg config.Config) {
 			})
 		}
 	})
+
+	s.mux.HandleFunc("/api/admin/cashier/templates/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/api/admin/cashier/templates/")
+		switch {
+		case strings.HasSuffix(path, "/copy-to-draft"):
+			templateVersionHandler.CopyToDraft(w, r)
+		default:
+			writeJSON(w, http.StatusNotImplemented, map[string]string{
+				"message": "route scaffolded but not implemented",
+				"path":    r.URL.Path,
+			})
+		}
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -149,6 +166,16 @@ func (sectionSyncScaffoldService) Preview(_ context.Context, cmd command.Preview
 func (sectionSyncScaffoldService) Execute(_ context.Context, cmd command.ExecuteSectionSyncCommand) error {
 	_, err := sync.ParseSections(cmd.SelectedSections, true)
 	return err
+}
+
+func (templateVersionScaffoldService) CopyToDraft(_ context.Context, cmd command.CopyTemplateVersionCommand) (domaincashier.TemplateVersion, error) {
+	source := domaincashier.TemplateVersion{
+		TemplateID: cmd.TemplateID,
+		Version:    cmd.SourceVersion,
+		Status:     domaincashier.StatusPublished,
+	}
+
+	return command.BuildDraftFromTemplateVersion(source, cmd.SourceVersion+1), nil
 }
 
 func (marketChannelScaffoldService) Create(_ context.Context, cmd command.CreateMarketChannelCommand) (domainchannel.GameMarketChannel, error) {

@@ -126,21 +126,23 @@ ChannelInstanceIssuesMetric
 
 ### 3.2 读取来源表与过滤条件汇总
 
-> 下表以 `00` §2.2 的 v2 env 落库规则为准：带 env 的业务表按 `env = 当前运行环境` 过滤；平台级表全 env 共享（不按 env 过滤，需在卡片上明确标注）。
-> 列名以 `docs/architecture/postgresql_ddl_draft.sql` 为基础，叠加 v2 约定的 `env` / `market_code` / `hidden` 等新增列（详见各来源模块文档）。
+> 下表以 `00` §2.2 的 schema-per-env 规则为准：游戏维度业务表分布在每个环境 schema（不带 `env` 列），由连接的 `search_path = <当前env>, platform` 决定查询当前环境 schema，**SQL 无需 `env` 谓词**；平台级表在 `platform` schema，全环境共享一套（需在卡片上明确标注）。
+> 列名以 `docs/architecture/postgresql_ddl_draft.sql` 为基础，叠加 v2 约定的 `market_code` / `hidden` 等新增列（详见各来源模块文档）。
 
-| 指标 | 来源表 | 关键列 | 过滤条件（current env = E） | env 维度 |
+| 指标 | 来源表 | 关键列 | 过滤条件（当前环境 schema 由 search_path 决定） | schema 维度 |
 | --- | --- | --- | --- | --- |
-| 汇率待审 | `cashier_fx_sync_runs` | `status`, `template_id_ref`, `triggered_at` | `status = 'pending_review'` | **平台级**（不按 env，全环境共享一套，见 `00` §2.2） |
-| 配置异常·自有账号认证 | `game_account_auth_configs` | `config_status`, `env`, `game_id_ref`, `last_check_message` | `env = E AND config_status = 'invalid'` | 按 env |
-| 配置异常·渠道登录 | `game_channel_login_configs` | `config_status`, `env`, `game_channel_id_ref` | `env = E AND config_status = 'invalid'` | 按 env |
-| 配置异常·渠道 IAP | `game_channel_iap_configs` | `config_status`, `env`, `game_channel_id_ref` | `env = E AND config_status = 'invalid'` | 按 env |
-| 配置异常·分包 IAP 覆盖 | `channel_package_iap_overrides` | `config_status`, `env`, `package_id_ref` | `env = E AND config_status = 'invalid'` | 按 env |
-| 最近同步任务状态 | `sync_jobs` | `status`, `target_env`, `game_id_ref`, `executed_at`, `created_at` | `target_env = E AND created_at >= now()-window` | 按 env（用 `target_env`） |
-| 待发布快照 | `game_config_snapshots` | `status`, `env`, `game_id_ref`, `config_version`, `generated_at` | `env = E AND status = 'draft'` | 按 env |
-| 不兼容/隐藏渠道实例 | `game_channels` | `hidden`, `market_code`, `env`, `game_id_ref`, `channel_id_ref` | `env = E AND (hidden = TRUE OR 与 market 不兼容)` | 按 env |
-| 渠道兼容性判定辅助 | `channels` | `region`（`domestic`/`overseas`） | 关联 `game_channels.channel_id_ref` | 平台级（关联用） |
-| 游戏名展示辅助 | `games` | `env`, `game_id`, `game_name` | `env = E`，按 `game_id_ref` 关联取名 | 按 env |
+| 汇率待审 | `cashier_fx_sync_runs` | `status`, `template_id_ref`, `triggered_at` | `status = 'pending_review'` | **平台级**（`platform`，全环境共享一套，见 `00` §2.2） |
+| 配置异常·自有账号认证 | `game_account_auth_configs` | `config_status`, `game_id_ref`, `last_check_message` | `config_status = 'invalid'` | 当前环境 schema |
+| 配置异常·渠道登录 | `game_channel_login_configs` | `config_status`, `game_channel_id_ref` | `config_status = 'invalid'` | 当前环境 schema |
+| 配置异常·渠道 IAP | `game_channel_iap_configs` | `config_status`, `game_channel_id_ref` | `config_status = 'invalid'` | 当前环境 schema |
+| 配置异常·分包 IAP 覆盖 | `channel_package_iap_overrides` | `config_status`, `package_id_ref` | `config_status = 'invalid'` | 当前环境 schema |
+| 配置异常·功能插件 | `game_channel_plugin_configs` | `config_status`, `game_channel_id_ref`, `plugin_id_ref` | `config_status = 'invalid'` | 当前环境 schema |
+| 配置异常·分包插件覆盖 | `channel_package_plugin_overrides` | `config_status`, `package_id_ref`, `plugin_id_ref` | `config_status = 'invalid'` | 当前环境 schema |
+| 最近同步任务状态 | `sync_jobs`（platform） | `status`, `target_env`, `game_id_ref`, `executed_at`, `created_at` | `target_env = E AND created_at >= now()-window` | 平台表，按 `target_env` 过滤 |
+| 待发布快照 | `game_config_snapshots` | `status`, `game_id_ref`, `config_version`, `generated_at` | `status = 'draft'` | 当前环境 schema |
+| 不兼容/隐藏渠道实例 | `game_channels` | `hidden`, `market_code`, `game_id_ref`, `channel_id_ref` | `hidden = TRUE OR 与 market 不兼容` | 当前环境 schema |
+| 渠道兼容性判定辅助 | `channels`（platform） | `region`（`domestic`/`overseas`） | 关联 `game_channels.channel_id_ref` → `platform.channels` | 平台级（关联用） |
+| 游戏名展示辅助 | `games` | `id`, `name` | 按 `game_id_ref` 关联取名 | 当前环境 schema |
 
 ### 3.3 关键过滤口径补充
 
@@ -151,7 +153,7 @@ ChannelInstanceIssuesMetric
 
 ### 3.4 索引与性能（不新增，仅利用既有）
 
-Dashboard 仅依赖来源表既有索引（如 `idx_game_config_snapshots_game_id_ref`、`idx_sync_jobs_game_id_ref` 等）与各 `config_status` / `status` / `env` 列。聚合查询均为 `COUNT(*)` + 少量 `ORDER BY ... LIMIT N`，复杂度低。若后续单表数据量大、`config_status='invalid'` 计数变慢，可由来源模块按需补 `(env, config_status)` 部分索引——**该决策归来源模块所有，不在本模块落实**（见 §11）。
+Dashboard 仅依赖来源表既有索引（如 `idx_game_config_snapshots_game_id_ref`、`idx_sync_jobs_game_id_ref` 等）与各 `config_status` / `status` 列。聚合查询均为 `COUNT(*)` + 少量 `ORDER BY ... LIMIT N`，复杂度低。业务表索引在每个环境 schema 各建一份（随业务迁移）。若后续单表数据量大、`config_status='invalid'` 计数变慢，可由来源模块按需补 `(config_status)` 部分索引——**该决策归来源模块所有，不在本模块落实**（见 §11）。
 
 ---
 
@@ -176,7 +178,7 @@ Dashboard 仅依赖来源表既有索引（如 `idx_game_config_snapshots_game_i
 | 常量 | 取值 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `ChannelIssueType` | `hidden` / `incompatible` | — | 仅用于 `channelInstanceIssues.topItems[].issue` 的展示标注，不落库 |
-| `ConfigIssueSource` | `account_auth` / `channel_login` / `channel_iap` / `package_iap_override` | — | 配置异常分桶来源标识，对应 4 张来源表 |
+| `ConfigIssueSource` | `account_auth` / `channel_login` / `channel_iap` / `package_iap_override` / `plugin_config` / `package_plugin_override` | — | 配置异常分桶来源标识，对应 6 张来源表 |
 
 ### 4.3 时间范围（"最近"类指标）默认值
 
@@ -198,7 +200,7 @@ Dashboard 仅依赖来源表既有索引（如 `idx_game_config_snapshots_game_i
 
 ## 5. 业务规则（各卡片/指标的定义与计算口径）
 
-> 统一约定：current env = E（来自服务端运行环境）。除特别标注"平台级"外，所有计数都隐含 `WHERE env = E`。所有 SQL 为口径示意（实际由 `app/query` 用 pgx 实现），不代表最终物化语句。
+> 统一约定：查询在**当前运行环境对应的 schema** 下执行（连接 `search_path = <当前env>, platform`，`00` §2.1）。除特别标注"平台级"（`platform` schema）外，所有计数都隐含落在当前环境 schema 的同名业务表上，**SQL 不再带 `env` 谓词**。所有 SQL 为口径示意（实际由 `app/query` 用 pgx 实现），不代表最终物化语句。
 
 ### 5.1 卡片 A：汇率待审（FX Pending Review）
 
@@ -219,25 +221,32 @@ WHERE status = 'pending_review';
 ### 5.2 卡片 B：配置异常（Config Issues · invalid）
 
 - **定义**：当前 env 下，模板驱动配置实例中处于 `invalid` 的总数（按来源分桶）。这些实例缺必填/敏感/文件字段或校验未过，需人工修复。
-- **来源**：`account-auth` / `channel-login` / `product` 的四张配置表（自有账号认证、渠道登录、渠道 IAP、分包 IAP 覆盖）。
-- **口径**（四张表分别计数后求和）：
+- **来源**：`account-auth` / `channel-login` / `product` / `feature-plugin` 的六张配置表（自有账号认证、渠道登录、渠道 IAP、分包 IAP 覆盖、功能插件、分包插件覆盖）。
+- **口径**（六张表分别计数后求和）：
 
 ```sql
+-- 查询在当前环境 schema 下执行（search_path 已设），故无 env 谓词
 -- 自有账号认证（account-auth）
 SELECT COUNT(*) FROM game_account_auth_configs
-WHERE env = :E AND config_status = 'invalid';
+WHERE config_status = 'invalid';
 -- 渠道登录（channel-login）
 SELECT COUNT(*) FROM game_channel_login_configs
-WHERE env = :E AND config_status = 'invalid';
+WHERE config_status = 'invalid';
 -- 渠道 IAP（product）
 SELECT COUNT(*) FROM game_channel_iap_configs
-WHERE env = :E AND config_status = 'invalid';
+WHERE config_status = 'invalid';
 -- 分包 IAP 覆盖（product）
 SELECT COUNT(*) FROM channel_package_iap_overrides
-WHERE env = :E AND config_status = 'invalid';
+WHERE config_status = 'invalid';
+-- 功能插件（feature-plugin）
+SELECT COUNT(*) FROM game_channel_plugin_configs
+WHERE config_status = 'invalid';
+-- 分包插件覆盖（feature-plugin）
+SELECT COUNT(*) FROM channel_package_plugin_overrides
+WHERE config_status = 'invalid';
 ```
 
-- **`invalidTotal`** = 上述四者之和；**`bySource`** 给出每来源的分桶计数（`account_auth` / `channel_login` / `channel_iap` / `package_iap_override`）。
+- **`invalidTotal`** = 上述六者之和；**`bySource`** 给出每来源的分桶计数（`account_auth` / `channel_login` / `channel_iap` / `package_iap_override` / `plugin_config` / `package_plugin_override`）。
 - **不含 `empty`**：`empty` 不计入异常（理由见 §3.3）。
 - **env 维度**：按 env。
 - **跳转**：分桶点击跳到对应模块列表并预置 `configStatus=invalid` 过滤；卡片整体点击默认跳 `channel` / `account-auth` 系列的"配置异常"汇总入口（约定 route 见 §8）。
@@ -275,9 +284,10 @@ WHERE target_env = :E AND status = 'failed'
 - **口径**：
 
 ```sql
+-- 当前环境 schema（search_path 已设）
 SELECT COUNT(*) AS draft_count
 FROM game_config_snapshots
-WHERE env = :E AND status = 'draft';
+WHERE status = 'draft';
 ```
 
 - **env 维度**：按 env。
@@ -294,20 +304,18 @@ WHERE env = :E AND status = 'draft';
 - **口径**：
 
 ```sql
+-- 当前环境 schema（search_path 已设）；channels 在 platform schema，跨 schema 关联
 -- 被隐藏实例
 SELECT COUNT(*) AS hidden_count
 FROM game_channels
-WHERE env = :E AND hidden = TRUE;
+WHERE hidden = TRUE;
 
 -- 不兼容实例（CN 仅允许 domestic；非 CN 仅允许 overseas）
 SELECT COUNT(*) AS incompatible_count
 FROM game_channels gc
-JOIN channels c ON c.id = gc.channel_id_ref
-WHERE gc.env = :E
-  AND (
-        (gc.market_code = 'CN'  AND c.region <> 'domestic')
-     OR (gc.market_code <> 'CN' AND c.region <> 'overseas')
-      );
+JOIN platform.channels c ON c.id = gc.channel_id_ref
+WHERE (gc.market_code = 'CN'  AND c.region <> 'domestic')
+   OR (gc.market_code <> 'CN' AND c.region <> 'overseas');
 ```
 
 - **是否相交**：`hidden` 与 `incompatible` 在统计上**各自独立计数**（一个实例可能同时既隐藏又不兼容）。卡片分别展示两个数字；若需"去重总数"，由前端用并集说明文案处理，后端不强行去重（明细 `topItems[].issue` 会标注命中哪类，单实例命中两类时列两条标注或合并标注，见前端）。
@@ -326,7 +334,7 @@ WHERE gc.env = :E
 ## 6. 后端 API
 
 > 统一遵循 `00` §7：前缀 `/api/admin`，`Authorization: Bearer`，camelCase，成功包络 `{ "data": ... }`，错误包络 `{ "error": { code, message, details } }`。所有接口均为只读 `GET`，无写权限码。
-> 读权限：建议引入聚合读权限码 `dashboard.read`（仅控制能否进入 Dashboard 本身）；**各指标是否返回还需叠加来源模块的读权限**（如 `cashier.read` / `channel.read` / `game.read` / `sync.read` / `snapshot.read`），由 `DashboardQueryService` 逐项裁剪。
+> 读权限：建议引入聚合读权限码 `dashboard.read`（仅控制能否进入 Dashboard 本身）；**各指标是否返回还需叠加来源模块的读权限**（如 `cashier.read` / `channel.read` / `game.read` / `sync.preview` / `snapshot.read`），由 `DashboardQueryService` 逐项裁剪。
 
 ### 6.1 `GET /api/admin/dashboard/summary`
 
@@ -391,12 +399,14 @@ Authorization: Bearer <accessToken>
     "configIssues": {
       "permitted": true,
       "envScoped": true,
-      "invalidTotal": 5,
+      "invalidTotal": 6,
       "bySource": [
         { "source": "account_auth", "invalidCount": 1 },
         { "source": "channel_login", "invalidCount": 2 },
         { "source": "channel_iap", "invalidCount": 1 },
-        { "source": "package_iap_override", "invalidCount": 1 }
+        { "source": "package_iap_override", "invalidCount": 1 },
+        { "source": "plugin_config", "invalidCount": 1 },
+        { "source": "package_plugin_override", "invalidCount": 0 }
       ],
       "link": { "route": "/games", "query": { "configStatus": "invalid" } },
       "topItems": [
@@ -425,9 +435,9 @@ Authorization: Bearer <accessToken>
       "draftCount": 3,
       "link": { "route": "/games", "query": { "tab": "snapshots", "status": "draft" } },
       "topItems": [
-        { "snapshotId": 510, "gameId": "g_swordman", "gameName": "剑客世界", "configVersion": "2026.06.17-1", "generatedAt": "2026-06-17T08:00:00Z" },
-        { "snapshotId": 509, "gameId": "g_racing", "gameName": "极速狂飙", "configVersion": "2026.06.16-2", "generatedAt": "2026-06-16T10:00:00Z" },
-        { "snapshotId": 508, "gameId": "g_puzzle", "gameName": "方块谜题", "configVersion": "2026.06.15-1", "generatedAt": "2026-06-15T07:00:00Z" }
+        { "snapshotId": 510, "gameId": "g_swordman", "gameName": "剑客世界", "configVersion": "20260617080000-a1b2c3d4", "generatedAt": "2026-06-17T08:00:00Z" },
+        { "snapshotId": 509, "gameId": "g_racing", "gameName": "极速狂飙", "configVersion": "20260616100000-b2c3d4e5", "generatedAt": "2026-06-16T10:00:00Z" },
+        { "snapshotId": 508, "gameId": "g_puzzle", "gameName": "方块谜题", "configVersion": "20260615070000-c3d4e5f6", "generatedAt": "2026-06-15T07:00:00Z" }
       ]
     },
     "channelInstanceIssues": {
@@ -525,7 +535,7 @@ Authorization: Bearer <accessToken>
 
 #### 6.2.3 `GET /api/admin/dashboard/recent-sync-jobs`
 
-最近同步任务明细（当前 env 为 target）。读权限：`dashboard.read` + `sync.read`。
+最近同步任务明细（当前 env 为 target）。读权限：`dashboard.read` + `sync.preview`。
 
 **Query**：`range`(默认 `7d`)、`status`(可选 `previewed`/`succeeded`/`failed`)、`page`/`pageSize`/`sort`（默认 `-createdAt`）。
 
@@ -570,7 +580,7 @@ Authorization: Bearer <accessToken>
         "snapshotId": 510,
         "gameId": "g_swordman",
         "gameName": "剑客世界",
-        "configVersion": "2026.06.17-1",
+        "configVersion": "20260617080000-a1b2c3d4",
         "configSchemaVersion": "1.4",
         "status": "draft",
         "generatedAt": "2026-06-17T08:00:00Z"
@@ -630,7 +640,7 @@ Authorization: Bearer <accessToken>
 | GET | `/dashboard/summary` | `dashboard.read` | 逐项裁剪 | 各指标各自 | 无 |
 | GET | `/dashboard/pending-fx-runs` | `dashboard.read` | `cashier.read` | 平台级 | 无 |
 | GET | `/dashboard/config-issues` | `dashboard.read` | `channel.read`/`game.read` | 当前 env | 无 |
-| GET | `/dashboard/recent-sync-jobs` | `dashboard.read` | `sync.read` | 当前 env（target） | 无 |
+| GET | `/dashboard/recent-sync-jobs` | `dashboard.read` | `sync.preview` | 当前 env（target） | 无 |
 | GET | `/dashboard/pending-snapshots` | `dashboard.read` | `snapshot.read` | 当前 env | 无 |
 | GET | `/dashboard/channel-instance-issues` | `dashboard.read` | `channel.read` | 当前 env | 无 |
 
@@ -658,7 +668,7 @@ DashboardQueryService
 ├── syncJobReadRepo      (sync_jobs 只读计数/列表)
 ├── snapshotReadRepo     (game_config_snapshots 只读计数/列表)
 ├── channelInstanceReadRepo (game_channels + channels.region 只读计数/列表)
-└── gameNameLookup       (games 只读，按 game_id_ref 取 game_name)
+└── gameNameLookup       (games 只读，按 game_id_ref 取 games.name)
 ```
 
 ### 7.3 关键方法（签名示意）
@@ -769,7 +779,7 @@ ChannelInstanceIssues(ctx, issue?, page) -> Page[ChannelIssueItem]
 ### 10.1 单元测试（`DashboardQueryService`）
 
 - **env 过滤正确性**：注入 env=production，构造 develop/sandbox/production 三套数据，断言按 env 指标只统计 production；汇率待审跨 env 全计入。
-- **配置异常口径**：构造 `empty/invalid/valid` 三态，断言只计 `invalid`；四来源分桶数正确、`invalidTotal`=分桶之和。
+- **配置异常口径**：构造 `empty/invalid/valid` 三态，断言只计 `invalid`；六来源分桶数正确、`invalidTotal`=分桶之和。
 - **同步任务窗口**：构造不同 `created_at`，断言 `range` 边界（含/不含 `now()-window`）；`byStatus` 缺桶补 0；`lastFailedAt` 取最近失败。
 - **快照口径**：只计 `draft`，`published` 不计。
 - **渠道兼容性判定**：覆盖 `CN+domestic`(兼容)、`CN+overseas`(不兼容)、`GLOBAL+overseas`(兼容)、`JP+domestic`(不兼容)；`hidden` 与 `incompatible` 各自独立计数。
@@ -832,6 +842,6 @@ ChannelInstanceIssues(ctx, issue?, page) -> Page[ChannelIssueItem]
 - **Q2 指标级降级 vs 整体失败**：`/summary` 中单指标查询出错时，是返回该指标错误态（其余正常）还是整体 500？MVP 默认整体 500，体验优化可改指标级降级。
 - **Q3 跳转 query 契约**：各来源模块列表页对 `configStatus`/`issue`/`status`/`targetEnv` 等过滤参数的具体命名需与来源模块前端文档最终对齐；本模块先给约定值。
 - **Q4 是否纳入更多指标**：如"汇率 `failed` 运行数""同步 `failed` 待重试""快照与最新配置漂移"等是否进 Dashboard，本期未纳入，作为后续增量。
-- **Q5 配置异常是否含 `game_cashier_profiles` 等其它配置态**：本期口径限定四张带 `config_status` 的模板驱动表；收银台 profile 无 `config_status` 列，暂不纳入"配置异常"卡。
+- **Q5 配置异常是否含 `game_cashier_profiles` 等其它配置态**：本期口径限定六张带 `config_status` 的模板驱动表（含 `game_channel_plugin_configs`、`channel_package_plugin_overrides` 两张插件表）；收银台 profile 无 `config_status` 列，暂不纳入"配置异常"卡。
 - **Q6 缓存**：是否对 `/summary` 加短 TTL（如 30s）缓存以降负载？本期默认实时查询，不缓存。
 - **Q7 来源仓储只读方法归属**：Dashboard 所需"计数/限量明细"只读方法应由各来源模块仓储提供；若来源模块尚未提供，需在对应模块补充（不在本模块新增跨表仓储）。

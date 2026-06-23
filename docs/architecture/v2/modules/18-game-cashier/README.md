@@ -42,41 +42,38 @@ children: []
 
 ## 3. 数据模型
 
-> 两表**带 env**（`00 §2.2`，D1）。
+> 两表均为**游戏维度业务表**，按 D1 放在**每个环境 schema**（`develop`/`sandbox`/`production`）下各一份同名同结构表，**不带 `env` 列**——行属于哪个 env 由其所在 schema 决定（`00 §2.2`）。
 
-### 3.1 `game_cashier_profiles`（带 env）
+### 3.1 `game_cashier_profiles`（业务表，每环境独立 schema）
 
 | 列 | 类型 | 可空 | 默认 | 约束 |
 | --- | --- | --- | --- | --- |
 | `id` | BIGSERIAL | 否 | — | PK |
-| **`env`** | VARCHAR(16) | 否 | — | **新增**，CHECK in `develop/sandbox/production` |
-| `game_id_ref` | BIGINT | 否 | — | FK→games(id) |
-| `template_id_ref` | BIGINT | 否 | — | FK→cashier_price_templates(id) |
-| `applied_template_version_id` | BIGINT | 否 | — | FK→cashier_price_template_versions(id)（快照版本） |
+| `game_id_ref` | BIGINT | 否 | — | FK→games(id)（同 schema 普通外键） |
+| `template_id_ref` | BIGINT | 否 | — | FK→platform.cashier_price_templates(id)（跨 schema 指向平台表） |
+| `applied_template_version_id` | BIGINT | 否 | — | FK→platform.cashier_price_template_versions(id)（快照版本） |
 | `snapshot_checksum` | VARCHAR(128) | 否 | `''` | 绑定时刻版本校验和 |
 | `applied_at` | TIMESTAMPTZ | 否 | `NOW()` | |
 | `created_at`/`updated_at` | TIMESTAMPTZ | 否 | `NOW()` | |
 
-唯一键（D1）：`UNIQUE(env, game_id_ref)`（一个游戏一份绑定）。
+唯一键：`UNIQUE(game_id_ref)`（一个游戏一份绑定；env 由所在 schema 隔离，不前置 env）。
 
-**迁移（追加）**：
+**迁移（追加，在每个环境 schema 内执行）**：
 ```sql
-ALTER TABLE game_cashier_profiles
-  ADD COLUMN env VARCHAR(16) NOT NULL DEFAULT 'develop' CHECK (env IN ('develop','sandbox','production'));
+-- 业务表不带 env 列；唯一键不前置 env（env 由 schema 隔离）
 ALTER TABLE game_cashier_profiles DROP CONSTRAINT IF EXISTS game_cashier_profiles_game_id_ref_key;
-ALTER TABLE game_cashier_profiles ADD CONSTRAINT gcp_env_game_key UNIQUE (env, game_id_ref);
+ALTER TABLE game_cashier_profiles ADD CONSTRAINT gcp_game_key UNIQUE (game_id_ref);
 ```
 
-### 3.2 `game_cashier_price_overrides`（带 env）
+### 3.2 `game_cashier_price_overrides`（业务表，每环境独立 schema）
 
 | 列 | 类型 | 可空 | 默认 | 约束 |
 | --- | --- | --- | --- | --- |
 | `id` | BIGSERIAL | 否 | — | PK |
-| **`env`** | VARCHAR(16) | 否 | — | **新增** |
-| `game_id_ref` | BIGINT | 否 | — | FK→games(id) |
+| `game_id_ref` | BIGINT | 否 | — | FK→games(id)（同 schema 普通外键） |
 | `country_code` | VARCHAR(8) | 否 | — | |
 | `region_code` | VARCHAR(16) | 否 | `'*'` | |
-| `currency` | VARCHAR(8) | 否 | — | 必须在 currency_specs |
+| `currency` | VARCHAR(8) | 否 | — | 必须在 platform.currency_specs |
 | `price_id` | VARCHAR(64) | 否 | — | |
 | `pre_tax_amount_minor` | BIGINT | 否 | — | 归一化 |
 | `tax_rate` | DECIMAL(8,6) | 否 | — | |
@@ -86,15 +83,14 @@ ALTER TABLE game_cashier_profiles ADD CONSTRAINT gcp_env_game_key UNIQUE (env, g
 | `effective_at` | TIMESTAMPTZ | 否 | — | |
 | `created_at`/`updated_at` | TIMESTAMPTZ | 否 | `NOW()` | |
 
-唯一键（D1）：`UNIQUE(env, game_id_ref, country_code, region_code, currency, price_id)`。
+唯一键：`UNIQUE(game_id_ref, country_code, region_code, currency, price_id)`（不前置 env，env 由所在 schema 隔离）。
 
-**迁移（追加）**：
+**迁移（追加，在每个环境 schema 内执行）**：
 ```sql
-ALTER TABLE game_cashier_price_overrides
-  ADD COLUMN env VARCHAR(16) NOT NULL DEFAULT 'develop' CHECK (env IN ('develop','sandbox','production'));
+-- 业务表不带 env 列；唯一键不前置 env（env 由 schema 隔离）
 ALTER TABLE game_cashier_price_overrides DROP CONSTRAINT IF EXISTS game_cashier_price_overrides_game_id_ref_country_code_region_co_key;
-ALTER TABLE game_cashier_price_overrides ADD CONSTRAINT gcpo_env_key
-  UNIQUE (env, game_id_ref, country_code, region_code, currency, price_id);
+ALTER TABLE game_cashier_price_overrides ADD CONSTRAINT gcpo_key
+  UNIQUE (game_id_ref, country_code, region_code, currency, price_id);
 ```
 
 ---
@@ -106,7 +102,6 @@ ALTER TABLE game_cashier_price_overrides ADD CONSTRAINT gcpo_env_key
 | `region_code` | 默认 `'*'` |
 | `snapshot_checksum`/`reason` | 默认 `''` |
 | 金额字段 | `*_amount_minor`，归一化整数最小单位 |
-| `env` | 当前运行环境 |
 | `applied_at` | 默认 `NOW()` |
 
 ---
@@ -156,7 +151,7 @@ ALTER TABLE game_cashier_price_overrides ADD CONSTRAINT gcpo_env_key
 
 ## 7. 应用服务与 command/query
 - `GameCashierService`：绑定/升级模板版本（取版本快照 checksum）、读写价格覆盖（归一化、审计）。
-- 仓储：`GameCashierProfileRepository`、`GameCashierPriceOverrideRepository`（均按 env）。
+- 仓储：`GameCashierProfileRepository`、`GameCashierPriceOverrideRepository`（SQL 不写 schema 前缀、不带 env 谓词；写操作落当前运行环境对应 schema，由 `search_path` 决定）。
 
 ---
 
@@ -172,7 +167,7 @@ ALTER TABLE game_cashier_price_overrides ADD CONSTRAINT gcpo_env_key
 ## 9. 与公共能力的关系
 - 金额归一化：`00 §5`。
 - 审计：`cashier.profile.bind`、`cashier.override.update`。
-- env：两表按当前运行环境；同步走 `cashier` section（`sync`）。
+- env：两表为业务表、每环境独立 schema，写操作落当前运行环境对应 schema（由 `search_path` 决定）；同步走 `cashier` section（`sync`，跨 schema diff/upsert）。
 - 与 `cashier-template`：绑定的是 `cashier-template` 的某个 `published` 版本快照。
 
 ---
@@ -185,10 +180,10 @@ ALTER TABLE game_cashier_price_overrides ADD CONSTRAINT gcpo_env_key
 
 | 接口 | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | 模块私有维度 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| GET `/api/admin/games/{gameId}/cashier/profile` | ✓ | ✓ | ✓ | — | — | ✓ | — | — | — | — | 绑定 published 版本快照(snapshot_checksum)、跨 env(带 env 表) |
-| PUT `/api/admin/games/{gameId}/cashier/profile` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | ✓ | 绑定 published 版本快照(snapshot_checksum)、跨 env(带 env 表) |
-| GET `/api/admin/games/{gameId}/cashier/price-overrides` | ✓ | ✓ | ✓ | — | — | ✓ | — | — | ✓ | — | 游戏级价格覆盖、currency 归一化、跨 env(带 env 表) |
-| PUT `/api/admin/games/{gameId}/cashier/price-overrides` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | ✓ | 游戏级价格覆盖、currency 归一化、金额最小单位、跨 env(带 env 表) |
+| GET `/api/admin/games/{gameId}/cashier/profile` | ✓ | ✓ | ✓ | — | — | ✓ | — | — | — | — | 绑定 published 版本快照(snapshot_checksum)、跨 env（schema 隔离）：读当前环境 schema |
+| PUT `/api/admin/games/{gameId}/cashier/profile` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | ✓ | 绑定 published 版本快照(snapshot_checksum)、跨 env（schema 隔离）：写落当前环境 schema，不允许跨 schema 写 |
+| GET `/api/admin/games/{gameId}/cashier/price-overrides` | ✓ | ✓ | ✓ | — | — | ✓ | — | — | ✓ | — | 游戏级价格覆盖、currency 归一化、跨 env（schema 隔离）：读当前环境 schema |
+| PUT `/api/admin/games/{gameId}/cashier/price-overrides` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | ✓ | 游戏级价格覆盖、currency 归一化、金额最小单位、跨 env（schema 隔离）：写落当前环境 schema，不允许跨 schema 写 |
 
 前端：Playwright e2e 收银台 Tab（绑定/升级版本、覆盖编辑、空/错/无权限态置灰）/ vitest 覆盖行高亮与金额舍入预览组件。
 
@@ -201,6 +196,6 @@ ALTER TABLE game_cashier_price_overrides ADD CONSTRAINT gcpo_env_key
 ---
 
 ## 11. 未决问题与显式假设
-- 假设一个游戏同一 env 只绑定一个收银台模板（`UNIQUE(env, game_id)`）。
+- 假设一个游戏在同一环境 schema 内只绑定一个收银台模板（`UNIQUE(game_id)`；env 由所在 schema 隔离）。
 - 假设"升级绑定版本"为显式动作，不自动跟随。
 - 覆盖为整行覆盖语义（与渠道实例的实例级覆盖一致，不做字段级深合并）。

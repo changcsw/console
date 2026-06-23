@@ -103,7 +103,7 @@ children: []
 
 ## 3. 数据模型（逐表逐字段）
 
-> 数据来源：`services/admin-api/migrations/000001_init.up.sql`。**以下所有表均不带 `env` 列**（平台级，`00 §2.2` 已列入"不带 env 的平台级表"）。
+> 数据来源：`services/admin-api/migrations/000001_init.up.sql`。**以下所有表均为平台级、不带 `env` 列**，统一置于共享 schema `platform`（`00 §2.2` 已列入平台级共享表），全环境只有一份管理员/角色/权限数据。
 > 命名：列 `snake_case`；时间戳 `created_at` / `updated_at` 默认 `NOW()`。
 
 ### 3.1 `admin_users`（管理员）
@@ -264,34 +264,39 @@ admin_roles *───* admin_permissions （经 admin_role_permissions）
 
 **权限码样例清单（建议 seed 固化于 `admin_permissions`）**：
 
+> 「归属模块」列用稳定 id（见 `CONVENTIONS §3.2 / §6`），不用数字编号。
+
 | permission_code | permission_name | 归属模块 |
 | --- | --- | --- |
-| `game.read` | 游戏-查看 | 11 |
-| `game.write` | 游戏-编辑 | 11 |
-| `channel.read` | 渠道实例-查看 | 12 |
-| `channel.write` | 渠道实例-编辑 | 12 |
-| `account_auth.read` | 自有账号认证-查看 | 13 |
-| `account_auth.write` | 自有账号认证-编辑 | 13 |
-| `channel_login.read` | 渠道登录-查看 | 14 |
-| `channel_login.write` | 渠道登录-编辑 | 14 |
-| `product.read` | 商品/IAP-查看 | 15 |
-| `product.write` | 商品/IAP-编辑 | 15 |
-| `cashier.read` | 收银台模板-查看 | 16 |
-| `cashier.write` | 收银台模板-编辑 | 16 |
-| `cashier.publish` | 收银台版本-发布 | 16 |
-| `fx.approve` | 汇率同步-审核 | 16 |
-| `payment.read` | 支付路由-查看 | 18 |
-| `payment.write` | 支付路由-编辑 | 18 |
-| `snapshot.read` | 配置快照-查看 | 19 |
-| `snapshot.generate` | 配置快照-生成 | 19 |
-| `snapshot.publish` | 配置快照-发布 | 19 |
-| `sync.preview` | 同步-预览 | 20 |
-| `sync.execute` | 同步-执行 | 20 |
-| `audit.read` | 审计日志-查看 | 21 |
-| `system.read` | 系统管理-查看（管理员/角色/权限只读） | 10 |
-| `admin_user.write` | 管理员-管理（增改禁用/分配角色/重置密码） | 10 |
-| `role.write` | 角色-管理（增改删/配权限） | 10 |
-| `permission.write` | 权限码目录-维护 | 10 |
+| `game.read` | 游戏-查看 | game |
+| `game.write` | 游戏-编辑 | game |
+| `channel.read` | 渠道实例-查看 | channel |
+| `channel.write` | 渠道实例-编辑 | channel |
+| `account_auth.read` | 自有账号认证-查看 | account-auth |
+| `account_auth.write` | 自有账号认证-编辑 | account-auth |
+| `channel_login.read` | 渠道登录-查看 | channel-login |
+| `channel_login.write` | 渠道登录-编辑 | channel-login |
+| `plugin.read` | 功能插件-查看 | feature-plugin |
+| `plugin.write` | 功能插件-编辑 | feature-plugin |
+| `product.read` | 商品/IAP-查看 | product |
+| `product.write` | 商品/IAP-编辑 | product |
+| `cashier.read` | 收银台模板-查看 | cashier-template |
+| `cashier.write` | 收银台模板-编辑 | cashier-template |
+| `cashier.publish` | 收银台版本-发布 | cashier-template |
+| `fx.approve` | 汇率同步-审核 | cashier-template |
+| `payment.read` | 支付路由-查看 | payment |
+| `payment.write` | 支付路由-编辑 | payment |
+| `snapshot.read` | 配置快照-查看 | snapshot |
+| `snapshot.generate` | 配置快照-生成 | snapshot |
+| `snapshot.publish` | 配置快照-发布 | snapshot |
+| `sync.preview` | 同步-预览 | sync |
+| `sync.execute` | 同步-执行 | sync |
+| `audit.read` | 审计日志-查看 | audit |
+| `dashboard.read` | 总览仪表盘-查看 | dashboard |
+| `system.read` | 系统管理-查看（管理员/角色/权限只读） | auth |
+| `admin_user.write` | 管理员-管理（增改禁用/分配角色/重置密码） | auth |
+| `role.write` | 角色-管理（增改删/配权限） | auth |
+| `permission.write` | 权限码目录-维护 | auth |
 
 > 说明：`*.read` 类是否进权限码目录、是否做接口级强校验，取决于策略。本模块默认**读接口要求登录但不强制特定权限码**（除敏感读如 `audit.read`、`system.read`）；**写/危险操作必须挂权限码**（`00 §7.5`）。
 
@@ -425,7 +430,7 @@ Recoverer ─▶ RequestID/Logger ─▶ EnvContext ─▶ Authn(Bearer) ─▶ 
 
 | 中间件 | 职责 | 失败响应 |
 | --- | --- | --- |
-| `EnvContext` | 把 `APP_ENV` 注入 ctx，并在响应头 `X-Environment` 回显当前环境 | — |
+| `EnvContext` | 把 `APP_ENV` 注入 ctx（供审计/响应头使用），并在响应头 `X-Environment` 回显当前环境。**不在请求层 `SET search_path`**：`search_path` 由每环境独立连接池在建连时钉死（`01 §4.4`），中间件只负责选用对应环境的池/ctx，不逐请求改连接 | — |
 | `Authn` | 校验 `Authorization: Bearer <accessToken>`：签名/exp/typ=access；还原 `AuthContext` 入 ctx | 缺/失效 -> `401 UNAUTHENTICATED` |
 | `Authz(code)` | 路由级声明所需权限码，校验 `code ∈ ctx.perms` | 无权限 -> `403 FORBIDDEN` |
 | `Audit` | 写操作成功后写 `audit_logs`（§9） | 不阻断主流程（失败仅告警） |
@@ -435,9 +440,9 @@ Recoverer ─▶ RequestID/Logger ─▶ EnvContext ─▶ Authn(Bearer) ─▶ 
 
 ### 5.7 环境上下文注入
 
-- 当前运行环境由 `APP_ENV` 决定（`00 §2.1`），缺省 `develop`。
+- 当前运行环境由 `APP_ENV` 决定（`00 §2.1`），缺省 `develop`。连接的 `search_path = <当前env>, platform` 由每环境独立连接池在建连时一次性钉死（`01 §4.4`，业务表落当前环境 schema、平台表落 `platform`）；`EnvContext` 中间件**不逐请求 `SET search_path`**，只把 `env` 注入 ctx 供审计/响应头使用。
 - 每个响应附 `X-Environment: <env>`；`GET /api/admin/me` 的 `environment` 字段亦回显；前端常驻展示 `EnvironmentBadge`（`01 §5.2`）。
-- 本模块不写带 env 的数据；审计写入时 `audit_logs.env` 取当前运行环境（登录/管理操作的 env 记录为发生环境）。
+- 本模块所有表均为平台级、置于 `platform` schema（无 `env` 列）；审计表 `audit_logs` 是 `platform` 中保留 `env` 过滤列的特例（`00 §2.2`），写入时 `audit_logs.env` 取当前运行环境（登录/管理操作的 env 记录为发生环境）。
 
 ---
 
@@ -1206,8 +1211,8 @@ type PermissionRepository interface {
 
 ### 9.3 环境上下文（`00 §2` / `01 §2`）
 
-- `admin_*` 平台级、无 env；但每次审计写入的 `audit_logs.env` 记录"操作发生时的运行环境"。
-- `/api/admin/me.environment` 与响应头 `X-Environment` 向前端透出当前运行环境，前端常驻展示。
+- `admin_*` 平台级、无 env，置于共享 schema `platform`；但每次审计写入的 `audit_logs.env`（`platform` 中保留的过滤列）记录"操作发生时的运行环境"。
+- `/api/admin/me.environment` 与响应头 `X-Environment` 向前端透出当前运行环境（由 `EnvContext` 据 `search_path` 当前 env 给出），前端常驻展示。
 
 ### 9.4 统一 API 约定（`00 §7`）
 

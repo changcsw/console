@@ -28,8 +28,8 @@ children: []
 - 实现 market × 渠道的**可见性/兼容性校验**、**复制创建**、**隐藏/恢复**、**运行态标识推导**。
 
 ### 1.2 上下游
-- 依赖：`11-游戏主数据`（游戏已启用的 market 集合）、`00 §3.2`（Market 语义与可见性）。
-- 被依赖：`13-自有账号认证` 与 `14-渠道登录`（登录配置挂在渠道实例上）、`15-商品与IAP`（包级映射）、`18-支付路由`（按 channel/package 选择器）、`19-配置快照`（运行时合并的最小生效单元）、`20-同步`（channels/packages section）。
+- 依赖：`game`（游戏主数据，游戏已启用的 market 集合）、`00 §3.2`（Market 语义与可见性）。
+- 被依赖：`account-auth`（自有账号认证）与 `channel-login`（渠道登录，登录配置挂在渠道实例上）、`product`（商品与 IAP，包级映射）、`payment`（支付路由，按 channel/package 选择器）、`snapshot`（配置快照，运行时合并的最小生效单元）、`sync`（同步，channels/packages section）。
 
 ### 1.3 边界红线（来自 `00 §9`）
 - 渠道**强制登录**（`channel-login`）与**自有账号认证**（`account-auth`）底层分开，本模块只提供"渠道实例"这一挂载点。
@@ -43,14 +43,14 @@ children: []
 代表"某游戏 + 某 market + 某渠道"的唯一实例。落地表即 `game_channels`（D2）。
 
 聚合拥有：
-- 实例身份：`(env, gameId, market, channelId)`。
+- 实例身份：`(gameId, market, channelId)`（所属 env 由其所在环境 schema 决定，不落列）。
 - 隐藏状态：`hidden` + `hiddenBy` + `hiddenAt`。
 - 兼容性（派生，不落库）：由 `market` 与 `channel.region` 经可见性规则判定。
-- 渠道实例配置入口：渠道包（本模块）、渠道登录配置（`channel-login`）、IAP 配置（`product`）。
+- 渠道实例配置入口：渠道包（本模块）、渠道登录配置（`channel-login`）、IAP 配置（`product`）、功能插件配置（`feature-plugin`）。
 - 配置状态：`config_status`（`empty/invalid/valid`，见 `00 §3.4`）。
 
 不变量：
-- 同一 `(env, gameId, market, channelId)` 唯一。
+- 同一 `(gameId, market, channelId)` 在所属环境 schema 内唯一（每环境 schema 各一份，唯一性天然按 schema 隔离）。
 - 创建/迁移到某 market 时必须满足可见性：`market=CN ⇒ channel.region=domestic`；`market!=CN ⇒ channel.region=overseas`。
 - `hidden=true` ⇒ `IncludedInSnapshot/Sync/RuntimeConfig` 全为 `false`。
 
@@ -67,7 +67,7 @@ children: []
 
 ## 3. 数据模型
 
-> 约定见 `00 §2.2`：`game_channels`、`channel_packages` **带 env**；`channels`、`channel_policies` 为平台级**不带 env**。
+> 约定见 `00 §2.2`：`game_channels`、`channel_packages` 为**游戏维度业务表**，在每个环境 schema（`develop`/`sandbox`/`production`）各一份同名同结构表、**不带 `env` 列**（行属于哪个 env 由所在 schema 决定）；`channels`、`channel_policies` 为平台级共享表，置于共享 schema `platform`。运行时由 `search_path = <当前env>, platform` 路由。
 
 ### 3.1 `channels`（平台级，新增 `region` —— D3）
 
@@ -123,15 +123,14 @@ seed region 固定值：
 
 seed 策略（来自现有迁移）：`huawei_cn/xiaomi_cn/oppo_cn/vivo_cn` ⇒ `login_mode=channel_only, payment_mode=channel_only, login_locked=TRUE, payment_locked=TRUE`；其余 ⇒ `login_mode=account_system, payment_mode=hybrid, locked=FALSE`。
 
-### 3.3 `game_channels`（带 env，新增 `market_code`，即 GameMarketChannel —— D2）
+### 3.3 `game_channels`（游戏维度业务表，每环境 schema 一份、不带 env 列，新增 `market_code`，即 GameMarketChannel —— D2）
 
 | 列 | 类型 | 可空 | 默认 | 约束/说明 |
 | --- | --- | --- | --- | --- |
 | `id` | BIGSERIAL | 否 | — | PK |
-| **`env`** | VARCHAR(16) | 否 | — | **新增**，CHECK in `develop/sandbox/production`（D1） |
-| `game_id_ref` | BIGINT | 否 | — | FK→games(id) |
+| `game_id_ref` | BIGINT | 否 | — | FK→games(id)（同一环境 schema 内普通外键） |
 | **`market_code`** | VARCHAR(32) | 否 | — | **新增**，CHECK in `GLOBAL/JP/KR/SEA/HMT/CN`（D2） |
-| `channel_id_ref` | BIGINT | 否 | — | FK→channels(id) |
+| `channel_id_ref` | BIGINT | 否 | — | FK→`platform.channels(id)`（跨 schema 指向平台表） |
 | `enabled` | BOOLEAN | 否 | `TRUE` | |
 | `hidden` | BOOLEAN | 否 | `FALSE` | **新增**，手动隐藏 |
 | `hidden_by` | VARCHAR(128) | 否 | `''` | **新增**，隐藏操作人 |
@@ -143,15 +142,15 @@ seed 策略（来自现有迁移）：`huawei_cn/xiaomi_cn/oppo_cn/vivo_cn` ⇒ 
 | `remark` | VARCHAR(255) | 否 | `''` | |
 | `created_at`/`updated_at` | TIMESTAMPTZ | 否 | `NOW()` | |
 
-唯一键（D1+D2）：`UNIQUE(env, game_id_ref, market_code, channel_id_ref)`。
-索引建议：`(env, game_id_ref)`（全 market 列表默认查询）、`(env, game_id_ref, market_code)`、`(channel_id_ref)`。
+唯一键（D2，每环境 schema 内一份，唯一性按 schema 天然隔离）：`UNIQUE(game_id_ref, market_code, channel_id_ref)`，不再前置 `env`。
+索引建议：`(game_id_ref)`（全 market 列表默认查询）、`(game_id_ref, market_code)`、`(channel_id_ref)`。
 
 > 说明：`兼容性` 不落库，按 `market_code` 与 `channels.region` 实时派生（避免规则变化导致脏数据）。`copied_from_market` 仅作来源记录，**不建立运行时联动**。
 
-**迁移（追加）**：
+**迁移（追加，在每个环境 schema `develop`/`sandbox`/`production` 内各执行一次；`channels` 在 `platform`）**：
 ```sql
+-- 以下在每个环境 schema 内执行（不带 env 列；channel_id_ref 跨 schema 指向 platform.channels）
 ALTER TABLE game_channels
-  ADD COLUMN env VARCHAR(16) NOT NULL DEFAULT 'develop' CHECK (env IN ('develop','sandbox','production')),
   ADD COLUMN market_code VARCHAR(32) NOT NULL DEFAULT 'GLOBAL' CHECK (market_code IN ('GLOBAL','JP','KR','SEA','HMT','CN')),
   ADD COLUMN hidden BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN hidden_by VARCHAR(128) NOT NULL DEFAULT '',
@@ -160,19 +159,18 @@ ALTER TABLE game_channels
   ADD COLUMN last_check_at TIMESTAMPTZ,
   ADD COLUMN last_check_message VARCHAR(255) NOT NULL DEFAULT '',
   ADD COLUMN copied_from_market VARCHAR(32) NOT NULL DEFAULT '';
--- 调整唯一约束：先删旧 UNIQUE(game_id_ref, channel_id_ref)，再建新键
+-- 调整唯一约束：先删旧 UNIQUE(game_id_ref, channel_id_ref)，再建新键（不前置 env）
 ALTER TABLE game_channels DROP CONSTRAINT IF EXISTS game_channels_game_id_ref_channel_id_ref_key;
-ALTER TABLE game_channels ADD CONSTRAINT game_channels_env_game_market_channel_key
-  UNIQUE (env, game_id_ref, market_code, channel_id_ref);
+ALTER TABLE game_channels ADD CONSTRAINT game_channels_game_market_channel_key
+  UNIQUE (game_id_ref, market_code, channel_id_ref);
 ```
 
-### 3.4 `channel_packages`（带 env）
+### 3.4 `channel_packages`（游戏维度业务表，每环境 schema 一份、不带 env 列）
 
 | 列 | 类型 | 可空 | 默认 | 约束/说明 |
 | --- | --- | --- | --- | --- |
 | `id` | BIGSERIAL | 否 | — | PK |
-| **`env`** | VARCHAR(16) | 否 | — | **新增**（D1） |
-| `game_channel_id_ref` | BIGINT | 否 | — | FK→game_channels(id) |
+| `game_channel_id_ref` | BIGINT | 否 | — | FK→game_channels(id)（同一环境 schema 内普通外键） |
 | `package_code` | VARCHAR(64) | 否 | — | |
 | `package_name` | VARCHAR(128) | 否 | — | |
 | `market_code` | VARCHAR(32) | 否 | — | 与所属渠道实例 market 一致（应用层校验） |
@@ -182,16 +180,23 @@ ALTER TABLE game_channels ADD CONSTRAINT game_channels_env_game_market_channel_k
 | `override_json` | JSONB | 否 | `{}` | 包级覆盖载荷 |
 | `created_at`/`updated_at` | TIMESTAMPTZ | 否 | `NOW()` | |
 
-唯一键：`UNIQUE(env, game_channel_id_ref, package_code)`。索引：`(env, game_channel_id_ref)`。
+唯一键（每环境 schema 内一份，唯一性按 schema 天然隔离）：`UNIQUE(game_channel_id_ref, package_code)`，不再前置 `env`。索引：`(game_channel_id_ref)`。
 
-**迁移（追加）**：
+**迁移（追加，在每个环境 schema 内各执行一次）**：
 ```sql
-ALTER TABLE channel_packages
-  ADD COLUMN env VARCHAR(16) NOT NULL DEFAULT 'develop' CHECK (env IN ('develop','sandbox','production'));
+-- 在每个环境 schema 内执行；channel_packages 本身不带 env 列
 ALTER TABLE channel_packages DROP CONSTRAINT IF EXISTS channel_packages_game_channel_id_ref_package_code_key;
-ALTER TABLE channel_packages ADD CONSTRAINT channel_packages_env_gc_code_key
-  UNIQUE (env, game_channel_id_ref, package_code);
+ALTER TABLE channel_packages ADD CONSTRAINT channel_packages_gc_code_key
+  UNIQUE (game_channel_id_ref, package_code);
 ```
+
+### 3.5 跨表关系与 env 隔离（`00` §2.2 / `01` §4.3，与 `11-game` §3.4 同口径）
+
+- `game_channels`、`channel_packages` 均为游戏维度业务表，在每个环境 schema 各一份、**不带 `env` 列**；行属于哪个 env 由所在 schema 决定。
+- `game_channels.game_id_ref → games(id)`：父子行**必然在同一环境 schema**（同 env），用**同 schema 内的普通外键**即可，**无需复合 env 外键，也无需应用层 env 一致性校验**。
+- `channel_packages.game_channel_id_ref → game_channels(id)`：包与所属渠道实例同样**必然同 schema（同 env）**，用同 schema 内普通外键即可；仅需应用层校验包的 `market_code` 与所属渠道实例 `market_code` 一致（业务约束，见 §3.4 `market_code` 行），不涉及任何 env 校验。
+- `game_channels.channel_id_ref → platform.channels(id)`：业务表→平台表用**跨 schema 普通外键**指向 `platform.channels`（PostgreSQL 支持跨 schema 外键）。
+- 运行时由 `search_path = <当前env>, platform` 路由：业务表自动落当前环境 schema，平台表落 `platform`；仓储 SQL 不写 schema 前缀、不带 `env` 谓词。
 
 ---
 
@@ -211,12 +216,11 @@ ALTER TABLE channel_packages ADD CONSTRAINT channel_packages_env_gc_code_key
 | `inherit_channel_config` | 默认 `TRUE` |
 | `override_json` | 默认 `{}` |
 | `bundle_id`/`remark`/`hidden_by`/`last_check_message`/`copied_from_market` | 默认 `''` |
-| `env` | 取当前运行环境 |
 
 ### 运行态标识（派生，只读，三态布尔）
 - `IncludedInRuntimeConfig = !hidden && compatible && config_status=='valid'`
 - `IncludedInSnapshot = IncludedInRuntimeConfig`
-- `IncludedInSync = !hidden && compatible`（同步以 section 数据为准，但隐藏一律排除；不兼容数据不参与同步）
+- `IncludedInSync = !hidden && compatible && config_status=='valid'`（与运行态/快照口径一致：隐藏 / 不兼容 / 无效实例一律不参与同步，落实 `00 §9` 红线）
 - 任一为 `false` 时，前端须给原因：`hidden` / `incompatible` / `invalid_config`。
 
 ---
@@ -235,7 +239,7 @@ ValidateMarketChannelCompatibility(market, region):
 - 派生兼容性：对已存在实例，用同一函数判定；不兼容 ⇒ 列表标红、提示"不兼容当前 market"，**不自动删除、保留配置**。
 
 ### 5.2 创建（空白 / 复制）
-- 同一 `(env, game, market, channel)` 已存在 ⇒ 拒绝重复新增（`CONFLICT`）。
+- 同一 `(game, market, channel)` 在当前环境 schema 内已存在 ⇒ 拒绝重复新增（`CONFLICT`）。
 - 已隐藏渠道默认不出现在"新增可选列表"。
 - 复制创建（从其它 market 同渠道）规则（来自 spec）：
   - 仅复制普通字段；`secret` 字段清空；`file` 字段清空；
@@ -251,7 +255,8 @@ ValidateMarketChannelCompatibility(market, region):
 - "不兼容" vs "已隐藏" 必须在 UI 上明确区分：不兼容=规则下不可正常使用但保留；已隐藏=管理员主动移出生效集。
 
 ### 5.4 ConfigStatus 推导
-- 遵循 `00 §3.4`。渠道实例自身的 `config_status` 由其模板驱动配置（登录/IAP，`channel-login`/`product`）综合判定；缺必填/敏感/文件字段 ⇒ `invalid`；全通过 ⇒ `valid`；未建任何配置 ⇒ `empty`。
+- 遵循 `00 §3.4`。渠道实例自身的 `config_status` 由其模板驱动配置综合判定，覆盖三类来源：**渠道登录（`channel-login`）、IAP（`product`）、功能插件（`feature-plugin`，含所有 `required=true` 必接插件）**；缺必填/敏感/文件字段 ⇒ `invalid`；全通过 ⇒ `valid`；未建任何配置 ⇒ `empty`。
+- **必接插件口径**：任一 `required=true` 的功能插件 `enabled=false` 或 `config_status!=valid`，渠道实例 `config_status` 即不得为 `valid`（与 `feature-plugin §1.3`、`snapshot §5.1` 一致）。
 - 复制创建强制 `invalid`（见 5.2）。
 
 ### 5.5 渠道包 inherit/override
@@ -265,6 +270,14 @@ ValidateMarketChannelCompatibility(market, region):
 
 > 统一前缀 `/api/admin`，遵循 `00 §7` 包络与错误码。写操作挂权限码 `channel.write`，读 `channel.read`。
 
+### 6.0 资源 ID 口径（统一约定）
+
+渠道实例对外有两种 ID 形态，**口径统一如下，避免列表/详情/包接口混用**：
+
+- **路径参数一律用 `int64` 的 `gameChannelId`**（= `game_channels.id`）：`GET/PATCH /game-channels/{gameChannelId}`、`.../game-channels/{gameChannelId}/packages`、隐藏/恢复的 `{id}` 同样取该 int64。**前端从列表行的 `gameChannelId` 字段取值回传**，不解析复合串。
+- **复合串 `gameId:market:channelId`（如 `100001:GLOBAL:google`）仅作展示 key / 前端列表行 `key`**，便于人读与去重，**不作为任何接口的路径参数**。
+- 因此列表响应每行**同时**返回 `gameChannelId`（int64，调用接口用）与 `displayKey`（复合串，仅展示）；下文 §6.2 示例中的 `id` 即等价于 `displayKey`，调用详情/包接口时改用同行的 `gameChannelId`。
+
 ### 6.1 渠道主数据
 **GET `/api/admin/games/{gameId}/channels`** —— 列出该游戏可用的渠道主数据（含 region/policy），用于新增时筛选。权限 `channel.read`。
 响应：
@@ -276,7 +289,7 @@ ValidateMarketChannelCompatibility(market, region):
 ```
 
 ### 6.2 渠道实例总览（默认全 market）
-**GET `/api/admin/games/{gameId}/market-channels`** —— 默认返回该游戏当前 env 下**所有 market 的所有渠道实例**。权限 `channel.read`。
+**GET `/api/admin/games/{gameId}/market-channels`** —— 默认返回该游戏当前运行环境（当前 schema）下**所有 market 的所有渠道实例**。权限 `channel.read`。
 Query 参数（全部可选）：
 | 参数 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
@@ -291,13 +304,15 @@ Query 参数（全部可选）：
 ```json
 { "data": { "items": [
   {
-    "id": "100001:GLOBAL:google", "gameId": "100001", "market": "GLOBAL", "channelId": "google",
+    "gameChannelId": 5001, "displayKey": "100001:GLOBAL:google",
+    "gameId": "100001", "market": "GLOBAL", "channelId": "google",
     "region": "overseas", "compatible": true, "hidden": false, "configStatus": "valid",
     "includedInSnapshot": true, "includedInSync": true, "includedInRuntimeConfig": true,
     "copiedFromMarket": "", "updatedAt": "2026-06-15T10:00:00Z"
   },
   {
-    "id": "100001:JP:google", "gameId": "100001", "market": "JP", "channelId": "google",
+    "gameChannelId": 5002, "displayKey": "100001:JP:google",
+    "gameId": "100001", "market": "JP", "channelId": "google",
     "region": "overseas", "compatible": true, "hidden": false, "configStatus": "invalid",
     "includedInSnapshot": false, "includedInSync": true, "includedInRuntimeConfig": false,
     "copiedFromMarket": "GLOBAL", "updatedAt": "2026-06-15T11:00:00Z"
@@ -321,7 +336,7 @@ Query 参数（全部可选）：
 ```
 成功 `201`：
 ```json
-{ "data": { "id": "100001:JP:google", "market": "JP", "channelId": "google",
+{ "data": { "gameChannelId": 5002, "displayKey": "100001:JP:google", "market": "JP", "channelId": "google",
   "configStatus": "invalid", "lastCheckMessage": "缺少必填敏感字段或文件字段",
   "copiedFromMarket": "GLOBAL" } }
 ```
@@ -332,8 +347,8 @@ Query 参数（全部可选）：
 失败（重复）`409`：`{ "error": { "code": "CONFLICT", "message": "channel already exists for this market" } }`
 
 ### 6.4 隐藏 / 恢复
-- **POST `/api/admin/game-market-channels/{id}/hide`** 权限 `channel.write`。请求体可选 `{ "reason": "" }`。成功返回更新后的实例（`hidden=true`，运行态全 false）。
-- **POST `/api/admin/game-market-channels/{id}/unhide`** 权限 `channel.write`。成功返回 `hidden=false`，运行态按 §4 重新推导。
+- **POST `/api/admin/game-channels/{gameChannelId}/hide`** 权限 `channel.write`（`{gameChannelId}` 为 int64，见 §6.0）。请求体可选 `{ "reason": "" }`。成功返回更新后的实例（`hidden=true`，运行态全 false）。
+- **POST `/api/admin/game-channels/{gameChannelId}/unhide`** 权限 `channel.write`。成功返回 `hidden=false`，运行态按 §4 重新推导。
 
 ### 6.5 渠道实例详情/编辑
 - **GET `/api/admin/game-channels/{gameChannelId}`** 权限 `channel.read`。
@@ -361,7 +376,7 @@ Query 参数（全部可选）：
 - `command/hide_market_channel.go` / `unhide_market_channel.go`：隐藏/恢复 + 审计。
 - `query/list_market_channels.go`：`ListMarketChannelsQuery{ Env, GameID, Market(ALL), ChannelID, Compatible, Hidden, ConfigStatus, Page, PageSize }` + `FilterMarketChannels` + 运行态推导。
 - 领域：`domain/channel/visibility.go`（`ValidateMarketChannelCompatibility`）、`domain/channel/game_market_channel.go`（聚合、`NewCopiedMarketChannel`、`Hide/Unhide`、`ResolveRuntimeFlags`）。
-- 仓储：`ChannelRepository`（channels/policies 读）、`GameChannelRepository`（实例 CRUD，按 env）、`ChannelPackageRepository`。
+- 仓储：`ChannelRepository`（读 `platform.channels`/`platform.channel_policies`）、`GameChannelRepository`（实例 CRUD，连接按当前 env 设置 `search_path`，SQL 不写 schema 前缀/不带 env 谓词）、`ChannelPackageRepository`。
 
 ---
 
@@ -399,7 +414,7 @@ Query 参数（全部可选）：
 - currency：本模块自身不涉及金额（金额在 `product`/`cashier-template`/`game-cashier`）。
 - 密文/文件：渠道实例的 secret/file 字段经 `00 §6` 加密与脱敏；复制清空。
 - 审计：`channel.create/hide/unhide`、包的 `package.create/update` 等写操作写 `audit_logs`。
-- env：所有实例/包按当前运行环境写入；同步在 `channels`/`packages` section 内按 env diff（`sync`）。
+- env：所有实例/包按当前运行环境对应 schema 写入（由 `search_path` 决定，不允许跨 schema 写）；`sandbox`→`production` 的跨 schema 复制在 `channels`/`packages` section 内由 `sync` 做同库跨 schema diff/upsert。
 
 ---
 
@@ -407,15 +422,15 @@ Query 参数（全部可选）：
 
 ### 接口场景矩阵（→ 见 `../../03-testing.md` §4）
 
-> 维度定义见 `03-testing.md §4`（S1 成功 / S2 鉴权401 / S3 权限403 / S4 校验失败 / S5 冲突 / S6 跨env / S7 审计 / S8 脱敏 / S9 分页 / S10 事务回滚）。`✓`=覆盖，`—`=不适用。后端 manifest：`tests/backend/scenarios/channel.yaml`；前端 e2e：`tests/frontend/e2e/channels.spec.ts`。
+> 维度定义见 `03-testing.md §4`（S1 成功 / S2 鉴权401 / S3 权限403 / S4 校验失败 / S5 冲突 / S6 跨 env（schema 隔离）：写落当前环境 schema、不允许跨 schema 写 / S7 审计 / S8 脱敏 / S9 分页 / S10 事务回滚）。`✓`=覆盖，`—`=不适用。后端 manifest：`tests/backend/scenarios/channel.yaml`；前端 e2e：`tests/frontend/e2e/channels.spec.ts`。
 
 | 接口 | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | 模块私有维度 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/admin/games/{gameId}/channels | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | 可见性过滤(CN/overseas) 候选筛选 |
 | GET /api/admin/games/{gameId}/market-channels | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — | ✓ | — | 可见性过滤(CN/overseas)、隐藏过滤、config_status 综合判定、运行态标识推导 |
 | POST /api/admin/games/{gameId}/markets/{market}/channels | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ | market-channel 兼容性(MARKET_CHANNEL_INCOMPATIBLE)、复制(secret/file 清空)、config_status=invalid |
-| POST /api/admin/game-market-channels/{id}/hide | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — | — | ✓ | 隐藏/取消隐藏（禁隐藏 invalid/empty）、运行态全 false |
-| POST /api/admin/game-market-channels/{id}/unhide | ✓ | ✓ | ✓ | — | — | ✓ | ✓ | — | — | ✓ | 隐藏/取消隐藏、运行态按 §4 重新推导 |
+| POST /api/admin/game-channels/{gameChannelId}/hide | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — | — | ✓ | 隐藏/取消隐藏（禁隐藏 invalid/empty）、运行态全 false |
+| POST /api/admin/game-channels/{gameChannelId}/unhide | ✓ | ✓ | ✓ | — | — | ✓ | ✓ | — | — | ✓ | 隐藏/取消隐藏、运行态按 §4 重新推导 |
 | GET /api/admin/game-channels/{gameChannelId} | ✓ | ✓ | ✓ | — | — | ✓ | — | ✓ | — | — | config_status 综合判定 |
 | PATCH /api/admin/game-channels/{gameChannelId} | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — | — | ✓ | market/channel 身份不可变 |
 | GET /api/admin/game-channels/{gameChannelId}/packages | ✓ | ✓ | ✓ | — | — | ✓ | — | — | — | — | 按所属实例归属过滤 |
@@ -430,7 +445,7 @@ Query 参数（全部可选）：
 - 隐藏：`hidden=true` ⇒ 运行态三标识全 false；默认列表不含隐藏。
 - 全 market 默认：`market=ALL` 返回多 market 多渠道。
 - 运行态推导：`invalid` 或 `incompatible` 时 `IncludedInRuntimeConfig=false` 且给出原因。
-- 唯一性：同 `(env,game,market,channel)` 重复创建被拒。
+- 唯一性：当前环境 schema 内同 `(game,market,channel)` 重复创建被拒。
 
 ---
 

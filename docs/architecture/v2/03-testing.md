@@ -17,14 +17,14 @@ children: []
 
 > 本文件是 v2 架构文档集的**全局测试契约**：定义测试分层、目录结构（与代码结构对齐）、后端「接口场景矩阵」标准维度、前端 Playwright 截图、统一 fixtures、统一回归入口与报告产物。
 > 各模块文档不再各自重定义测试方法，只在自己的 README「接口场景矩阵」小节列出**本模块接口 × 本文标准维度**的覆盖清单，并回链本文。
-> 与 `00`（契约）、`01`（结构）配合：本文的「跨 env / 审计 / 脱敏」等维度直接复用 `00` 的红线与约定。
+> 与 `00`（契约）、`01`（结构）配合：本文的「跨 env（schema 隔离）/ 审计 / 脱敏」等维度直接复用 `00` 的红线与约定。
 
 ---
 
 ## 1. 目标与原则
 
 - **可按模块测，也可整体回归**：测试结构与代码功能结构（`domain/<module>`、`views/<module>`）对齐，既能只跑单模块，又能一条命令跑全量回归。
-- **真实依赖优先**：后端集成/接口测试跑**真实 PostgreSQL**（容器或本地实例）+ 真实迁移 + seed，不用 mock 库糊弄跨 env / 事务 / 唯一约束这类必须真实 DB 才能验证的场景。
+- **真实依赖优先**：后端集成/接口测试跑**真实 PostgreSQL**（容器或本地实例）+ 真实迁移（含 `platform` + 三环境 schema 建立）+ seed，不用 mock 库糊弄跨 schema / 事务 / 唯一约束这类必须真实 DB 才能验证的场景。
 - **前端截图用真实页面**：组件级逻辑用 `vitest`，**真实页面截图 / trace / 可视回归**用 **Playwright**。
 - **场景可脚本化**：后端接口测试由 **scenario manifest** 驱动，覆盖成功与各类失败分支；维度清单见 §4。
 - **产物统一**：所有测试输出统一汇集到 `tests/reports/`，回归脚本产出一份 `summary`。
@@ -36,7 +36,7 @@ children: []
 | 层 | 跑什么 | 工具 | 位置（hybrid） | 依赖 |
 | --- | --- | --- | --- | --- |
 | L1 单元 | `domain` 纯逻辑（枚举、状态机、currency 归一化、hash 规范化、route 匹配…） | Go `testing` | 就近 `internal/domain/<module>/*_test.go` | 无 IO |
-| L2 集成 | `app` 服务 + `infra` 仓储（真实 PG、事务、唯一约束、复合外键） | Go `testing` + 真实 PG | 就近 `internal/app/.../*_test.go`、`internal/infra/.../*_test.go` | PG + migrate + seed |
+| L2 集成 | `app` 服务 + `infra` 仓储（真实 PG、事务、唯一约束、跨 schema 外键、search_path 环境隔离） | Go `testing` + 真实 PG | 就近 `internal/app/.../*_test.go`、`internal/infra/.../*_test.go` | PG + migrate + seed |
 | L3 接口 | `transport/http` 全链路（鉴权/权限/包络/错误码/分页/审计） | Go `httptest` + 真实 PG | 就近 `internal/transport/http/<module>/*_test.go` + 顶层 `tests/backend/scenarios` manifest | PG + 全装配 |
 | L4 前端组件 | 组件/store/表单渲染器/权限指令 | `vitest` + `@testing-library/vue` | 就近 `apps/admin-web/src/**/*.spec.ts` | 无后端（mock API） |
 | L5 跨栈 e2e + 截图 | 真实页面操作、截图、可视回归、关键操作主线 | **Playwright** | 顶层 `tests/frontend/e2e` | 真实前后端 + PG |
@@ -73,10 +73,10 @@ console/
         channel-login.yaml  feature-plugin.yaml  product.yaml
         cashier-template.yaml  game-cashier.yaml  payment.yaml
         snapshot.yaml  sync.yaml  audit.yaml  dashboard.yaml
-    fixtures/                 # 统一 seed/fixtures（按 env 维度组织）
-      common/                 # 字典/枚举/currency_specs/channels(region)/模板
-      sandbox/                # sandbox 环境业务数据样本
-      production/             # production 环境基线样本（用于同步 diff 测试）
+    fixtures/                 # 统一 seed/fixtures（按 schema 维度组织）
+      common/                 # platform schema：字典/枚举/currency_specs/channels(region)/模板/admin_*
+      sandbox/                # sandbox schema 业务数据样本
+      production/             # production schema 基线样本（用于同步 diff 测试）
     reports/                  # 测试产物（junit.xml / html / trace / coverage / summary）
 
   scripts/
@@ -101,7 +101,7 @@ console/
 | S3 | 权限 | 登录但缺该接口权限码 | 403 `FORBIDDEN` | §7.5 |
 | S4 | 校验失败 | 缺必填/类型错/越界/格式错 | 400 `VALIDATION_FAILED`（含 `details`） | §7.4 |
 | S5 | 冲突 | 唯一键/状态机非法流转/路由冲突 | 409 `CONFLICT` 系（`VERSION_STATE_INVALID`/`ROUTE_CONFLICT`/…） | §3.3/§7.4 |
-| S6 | 跨 env | 写操作落 `env=当前运行环境`；不允许前端指定 env；仅 sync 域显式双 env | env 隔离正确，无越权写 production | §2 |
+| S6 | 跨 env（schema 隔离） | 写操作落**当前运行环境对应 schema**（由 `search_path` 决定，业务行无 `env` 列）；不允许前端指定/跨 schema 写；仅 sync 域显式跨 `sandbox`/`production` schema | schema 隔离正确，无越权写 production | §2 |
 | S7 | 审计 | 有意义的写操作 | 写一条 `audit_logs`（`action` 同源权限码，detail 脱敏） | §8 |
 | S8 | 脱敏 | 含 secret/file 字段的读/同步预览 | 响应密文恒 `masked`，绝不回明文 | §6 |
 | S9 | 分页 | 列表接口 | `page/pageSize/total` 正确，`pageSize` 上限 100，`sort` 生效 | §7.3 |
@@ -197,7 +197,7 @@ scripts/regression/run.sh
 
 ## 7. fixtures 约定
 
-- **按 env 维度组织**：`common/`（平台级，全 env 共享，含 `currency_specs`、`channels`+`region`、各模板四件套）、`sandbox/`（同步源样本）、`production/`（同步目标基线，用于 diff/baseline/nonce 测试）。
+- **按 schema 维度组织**：`common/`（灌入 `platform` schema，全环境共享，含 `currency_specs`、`channels`+`region`、各模板四件套）、`sandbox/`（灌入 `sandbox` schema，同步源样本）、`production/`（灌入 `production` schema，同步目标基线，用于 diff/baseline/nonce 测试）。
 - **幂等可重复**：seed 用 `ON CONFLICT DO NOTHING`，可重复灌入；每个 scenario 可声明所需 fixture 子集。
 - **覆盖关键边界**：至少包含一份「含 secret/file 的模板配置实例」（验 S8 脱敏）、「跨 market（GLOBAL + 具体 market）的渠道实例」（验合并/覆盖）、「production 与 sandbox 存在 add/update/delete 三类差异的样本」（验 sync）。
 - fixtures 与 §F 模块矩阵引用的 `fixture:` 名称对应。
@@ -225,5 +225,5 @@ scripts/regression/run.sh
 ## 9. 实现状态（harness 已落地，模块场景增量补充）
 
 - **已落地**：`tests/` 目录树、`docker-compose.yml`（Postgres）、`scripts/regression/*`（`lib.sh`/`db.sh`/`backend.sh`/`frontend.sh`/`run.sh`/`summarize.sh`）、后端 scenario harness（`services/admin-api/internal/testkit/scenario`，进程内 httptest + manifest 加载/点路径断言/入口测试）、前端 Playwright（截图 / trace / HTML report / 视觉基线）、贯穿现有 scaffold 的 smoke 切片。
-- **增量补充**：各模块 S1–S10 完整场景 YAML 与 `expect.db` 断言，随对应模块连库实现后按 `tests/backend/scenarios/README.md` 的 schema 追加；`tests/fixtures/{common,sandbox,production}` 按 env 灌入实体样本。
+- **增量补充**：各模块 S1–S10 完整场景 YAML 与 `expect.db` 断言，随对应模块连库实现后按 `tests/backend/scenarios/README.md` 的 schema 追加；`tests/fixtures/{common,sandbox,production}` 分别按 `platform`/`sandbox`/`production` schema 灌入实体样本。
 - **运行**：全量 `sh scripts/regression/run.sh`（需 docker + golang-migrate）；快路径 `WITH_DB=0 sh scripts/regression/run.sh`（仅进程内场景 + 前端，不依赖 docker/migrate）。前端浏览器二进制需在本机可运行的环境下安装（`pnpm exec playwright install chromium`）。

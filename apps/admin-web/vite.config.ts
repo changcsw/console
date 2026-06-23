@@ -15,6 +15,12 @@ export default defineConfig({
     setupFiles: "./src/test/setup.ts"
   },
   server: {
-    port: 5173
+    port: 5173,
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:18080",
+        changeOrigin: true
+      }
+    }
   }
 });

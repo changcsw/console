@@ -15,7 +15,7 @@ children: []
 # 17 · 收银台模板与汇率同步（Cashier Template & FX Sync）
 
 > 本模块定义平台级"收银台价格模板"的版本化管理与汇率同步（FX）流程。版本生命周期严格遵循 `00 §3.3`（`draft/published/archived`）。金额一律按 `00 §5` 归一化。
-> 这些表是**平台级、不带 env**；游戏如何绑定模板见 `17-游戏级收银台`。
+> 这些表是**平台级、不带 env**；游戏如何绑定模板见 `game-cashier`（游戏级收银台）。
 
 ---
 
@@ -106,7 +106,7 @@ children: []
 | `id` | BIGSERIAL | 否 | — | PK |
 | `template_id_ref` | BIGINT | 否 | — | FK→templates(id) |
 | `candidate_version_id_ref` | BIGINT | 否 | — | FK→versions(id)（候选 draft） |
-| `status` | VARCHAR(16) | 否 | — | CHECK in `pending_review/approved/applied/ignored/failed` |
+| `status` | VARCHAR(16) | 否 | `'pending_review'` | `DEFAULT 'pending_review'`；CHECK in `pending_review/approved/applied/ignored/failed` |
 | `diff_summary_json` | JSONB | 否 | `{}` | 差异摘要 |
 | `triggered_at` | TIMESTAMPTZ | 否 | `NOW()` | |
 | `reviewed_by` | BIGINT | 是 | `NULL` | |
@@ -114,7 +114,7 @@ children: []
 | `review_note` | VARCHAR(255) | 否 | `''` | |
 | `created_at`/`updated_at` | TIMESTAMPTZ | 否 | `NOW()` | |
 
-> 这些表不带 env（`00 §2.2`）。无需新增 env 迁移。
+> 这些表为平台级，放共享 schema `platform`，不带 env（`00 §2.2`）。无需 env 迁移。
 
 ---
 
@@ -156,7 +156,7 @@ draft --publish--> published --(发布新版本时自动)--> archived
 ### 5.3 汇率同步（FX）
 - 默认 `manual_confirm`：同步仅生成**候选 draft 版本** + `cashier_fx_sync_runs(status=pending_review)` + 差异摘要，**不自动应用**。
 - 仅当 `fx_sync_mode=auto_apply`（显式开启）才允许自动 approve→apply。
-- 审核流程：`pending_review` →（approve）`approved` →（apply 即发布候选版本）`applied`；或 `ignored`；异常 `failed`。
+- 审核流程：`pending_review` →（approve）→ `applied`；**`manual_confirm` 下 approve 即完成 apply（同一事务内发布候选版本并置 `applied`），不单设 apply 端点**（中间 `approved` 态仅在 `auto_apply` 或未来异步发布场景下短暂出现）；或 `ignored`；异常 `failed`。
 - `fx_sync_schedule` 控制触发周期（`monthly/quarterly`）。
 
 ### 5.4 金额归一化
@@ -166,7 +166,7 @@ draft --publish--> published --(发布新版本时自动)--> archived
 
 ## 6. 后端 API
 
-> 前缀 `/api/admin/cashier`，遵循 `00 §7` 包络。读 `cashier.read`，写 `cashier.write`，发布 `cashier.publish`，审核 `cashier.approve`。
+> 前缀 `/api/admin/cashier`，遵循 `00 §7` 包络。读 `cashier.read`，写 `cashier.write`，发布 `cashier.publish`，汇率审核 `fx.approve`。
 
 - **GET `/templates`** / **POST `/templates`**（创建模板）
   ```json
@@ -187,7 +187,7 @@ draft --publish--> published --(发布新版本时自动)--> archived
 - **POST `/templates/{templateId}/versions/{version}/publish`** 权限 `cashier.publish`
   - 校验当前为 `draft`；发布后旧 `published` 自动 `archived`；非法 → `VERSION_STATE_INVALID`。
 - **POST `/templates/{templateId}/fx-sync/runs`** 权限 `cashier.write`：触发一次汇率同步，生成候选 draft + run(pending_review)。
-- **POST `/fx-sync-runs/{runId}/approve`** 权限 `cashier.approve`：审核通过；`manual_confirm` 下 approve 后再 apply（发布候选版本）。
+- **POST `/fx-sync-runs/{runId}/approve`** 权限 `fx.approve`：审核通过；`manual_confirm` 下 **approve 即完成 apply（发布候选版本），不单设 apply 端点**（见 §业务规则）。
 
 错误码：`VERSION_STATE_INVALID`、`CURRENCY_NOT_SUPPORTED`、`VALIDATION_FAILED`、`CONFLICT`。
 
@@ -213,8 +213,8 @@ draft --publish--> published --(发布新版本时自动)--> archived
 ## 9. 与公共能力的关系
 - 版本生命周期：`00 §3.3`。
 - 金额归一化：`00 §5`。
-- 审计：`cashier.template.create`、`cashier.version.publish`、`cashier.fx.approve` 等写 `audit_logs`。
-- env：本模块平台级不带 env；游戏绑定快照在 `game-cashier`（带 env）。
+- 审计：`cashier.template.create`、`cashier.version.publish`、`fx.approve` 等写 `audit_logs`。
+- env：本模块平台级、放共享 schema `platform`、不带 env；游戏绑定快照在 `game-cashier`（业务表，每环境独立 schema）。
 
 ---
 
