@@ -1,0 +1,518 @@
+{
+  "version": 1,
+  "generated_from": "front-matter of each doc; regenerate when front-matter changes",
+  "doc_root": "docs/architecture/v2",
+  "index_page": "README.md",
+  "usage": {
+    "for_codegen": "实现某模块时：先读 always_read，再读该模块自身（优先 compact，无则 README.md），再按 depends_on 仅读被引用到的相关章节。不要读其它无关模块。代码落地到该模块的 code_paths。",
+    "compact_field": "compact 为该文档的精简版规格路径；为 null 表示尚未生成，应回退读 path（全文）。",
+    "testing_note": "testing 是所有模块的通用下游，常规代码生成无需全文读取，仅在补测试/场景矩阵时读取。"
+  },
+  "always_read": [
+    "common",
+    "structure",
+    "conventions"
+  ],
+  "docs": [
+    {
+      "id": "common",
+      "code": "00",
+      "title": "公共部分（跨模块契约）",
+      "kind": "foundation",
+      "path": "00-common.md",
+      "lines": 383,
+      "depends_on": [],
+      "impacts": [
+        "auth",
+        "game",
+        "channel",
+        "account-auth",
+        "channel-login",
+        "feature-plugin",
+        "product",
+        "cashier-template",
+        "game-cashier",
+        "payment",
+        "snapshot",
+        "sync",
+        "audit",
+        "dashboard",
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/domain/common",
+        "apps/admin-web/src/stores/dictionary.ts"
+      ],
+      "compact": null
+    },
+    {
+      "id": "structure",
+      "code": "01",
+      "title": "整体项目结构",
+      "kind": "foundation",
+      "path": "01-structure.md",
+      "lines": 292,
+      "depends_on": [
+        "common"
+      ],
+      "impacts": [
+        "testing"
+      ],
+      "code_paths": [
+        "."
+      ],
+      "compact": null
+    },
+    {
+      "id": "operation-flow",
+      "code": "02",
+      "title": "操作主线（功能/流程视角）",
+      "kind": "reference",
+      "path": "02-operation-flow.md",
+      "lines": 122,
+      "depends_on": [
+        "game",
+        "channel",
+        "feature-plugin",
+        "account-auth",
+        "channel-login",
+        "product",
+        "cashier-template",
+        "game-cashier",
+        "payment",
+        "snapshot",
+        "sync",
+        "auth",
+        "common"
+      ],
+      "impacts": [],
+      "code_paths": [
+        "apps/admin-web/src/views"
+      ],
+      "compact": null
+    },
+    {
+      "id": "testing",
+      "code": "03",
+      "title": "测试体系与回归（全局契约）",
+      "kind": "foundation",
+      "path": "03-testing.md",
+      "lines": 229,
+      "depends_on": [
+        "common",
+        "structure",
+        "auth",
+        "game",
+        "channel",
+        "account-auth",
+        "channel-login",
+        "feature-plugin",
+        "product",
+        "cashier-template",
+        "game-cashier",
+        "payment",
+        "snapshot",
+        "sync",
+        "audit",
+        "dashboard"
+      ],
+      "impacts": [],
+      "code_paths": [
+        "tests",
+        "scripts/regression",
+        "services/admin-api/internal",
+        "apps/admin-web/src"
+      ],
+      "compact": null
+    },
+    {
+      "id": "conventions",
+      "code": "conv",
+      "title": "文档规范（命名 / front-matter / 拆分 / 关联）",
+      "kind": "foundation",
+      "path": "CONVENTIONS.md",
+      "lines": 119,
+      "depends_on": [],
+      "impacts": [],
+      "code_paths": [],
+      "compact": null
+    },
+    {
+      "id": "schema-reference",
+      "code": "schema",
+      "title": "Schema 参考（按模块分组的全表-全字段）",
+      "kind": "reference",
+      "path": "schema-reference.md",
+      "lines": 180,
+      "depends_on": [
+        "common",
+        "game",
+        "channel",
+        "account-auth",
+        "channel-login",
+        "feature-plugin",
+        "product",
+        "cashier-template",
+        "game-cashier",
+        "payment",
+        "snapshot",
+        "sync",
+        "audit",
+        "auth"
+      ],
+      "impacts": [],
+      "code_paths": [
+        "services/admin-api/migrations"
+      ],
+      "compact": null
+    },
+    {
+      "id": "auth",
+      "code": "10",
+      "title": "后台鉴权与 RBAC",
+      "kind": "module",
+      "path": "modules/10-auth/README.md",
+      "lines": 1305,
+      "depends_on": [
+        "common"
+      ],
+      "impacts": [],
+      "code_paths": [
+        "services/admin-api/internal/domain/admin",
+        "services/admin-api/internal/domain/auth",
+        "services/admin-api/internal/transport/http/admin",
+        "apps/admin-web/src/stores/auth.ts",
+        "apps/admin-web/src/stores/permission.ts",
+        "apps/admin-web/src/views/login",
+        "apps/admin-web/src/views/system"
+      ],
+      "compact": "modules/10-auth/spec.compact.md"
+    },
+    {
+      "id": "game",
+      "code": "11",
+      "title": "游戏主数据（Game Core）",
+      "kind": "module",
+      "path": "modules/11-game/README.md",
+      "lines": 959,
+      "depends_on": [
+        "common"
+      ],
+      "impacts": [
+        "channel",
+        "account-auth",
+        "channel-login",
+        "feature-plugin",
+        "product",
+        "cashier-template",
+        "game-cashier",
+        "payment",
+        "snapshot",
+        "sync",
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/domain/game",
+        "services/admin-api/internal/transport/http/games",
+        "apps/admin-web/src/views/games"
+      ],
+      "compact": "modules/11-game/spec.compact.md"
+    },
+    {
+      "id": "channel",
+      "code": "12",
+      "title": "渠道与渠道实例（GameMarketChannel）",
+      "kind": "module",
+      "path": "modules/12-channel/README.md",
+      "lines": 456,
+      "depends_on": [
+        "game",
+        "common"
+      ],
+      "impacts": [
+        "account-auth",
+        "channel-login",
+        "feature-plugin",
+        "product",
+        "payment",
+        "snapshot",
+        "sync",
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/domain/channel",
+        "services/admin-api/internal/transport/http/channels",
+        "apps/admin-web/src/views/channels"
+      ],
+      "compact": "modules/12-channel/spec.compact.md"
+    },
+    {
+      "id": "account-auth",
+      "code": "13",
+      "title": "自有账号认证（Account Auth）",
+      "kind": "module",
+      "path": "modules/13-account-auth/README.md",
+      "lines": 287,
+      "depends_on": [
+        "channel",
+        "game",
+        "common"
+      ],
+      "impacts": [
+        "snapshot",
+        "sync",
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/domain/accountauth",
+        "services/admin-api/internal/transport/http/games",
+        "apps/admin-web/src/views/games"
+      ],
+      "compact": "modules/13-account-auth/spec.compact.md"
+    },
+    {
+      "id": "channel-login",
+      "code": "14",
+      "title": "渠道登录（渠道强制登录配置）",
+      "kind": "module",
+      "path": "modules/14-channel-login/README.md",
+      "lines": 645,
+      "depends_on": [
+        "channel",
+        "game",
+        "common"
+      ],
+      "impacts": [
+        "snapshot",
+        "sync",
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/domain/channel",
+        "services/admin-api/internal/transport/http/channels",
+        "apps/admin-web/src/views/channels"
+      ],
+      "compact": "modules/14-channel-login/spec.compact.md"
+    },
+    {
+      "id": "feature-plugin",
+      "code": "15",
+      "title": "功能插件（Feature Plugin）",
+      "kind": "module",
+      "path": "modules/15-feature-plugin/README.md",
+      "lines": 264,
+      "depends_on": [
+        "channel",
+        "game",
+        "common"
+      ],
+      "impacts": [
+        "snapshot",
+        "sync",
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/domain/plugin",
+        "apps/admin-web/src/views/channels"
+      ],
+      "compact": "modules/15-feature-plugin/spec.compact.md"
+    },
+    {
+      "id": "product",
+      "code": "16",
+      "title": "商品与 IAP 映射（Product / Channel IAP）",
+      "kind": "module",
+      "path": "modules/16-product/README.md",
+      "lines": 868,
+      "depends_on": [
+        "channel",
+        "game",
+        "common"
+      ],
+      "impacts": [
+        "game-cashier",
+        "payment",
+        "snapshot",
+        "sync",
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/domain/product",
+        "apps/admin-web/src/views/games"
+      ],
+      "compact": "modules/16-product/spec.compact.md"
+    },
+    {
+      "id": "cashier-template",
+      "code": "17",
+      "title": "收银台模板与汇率同步（Cashier Template & FX Sync）",
+      "kind": "module",
+      "path": "modules/17-cashier-template/README.md",
+      "lines": 254,
+      "depends_on": [
+        "common"
+      ],
+      "impacts": [
+        "game-cashier",
+        "payment",
+        "snapshot",
+        "sync",
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/domain/cashier",
+        "services/admin-api/internal/transport/http/cashier",
+        "apps/admin-web/src/views/cashier"
+      ],
+      "compact": "modules/17-cashier-template/spec.compact.md"
+    },
+    {
+      "id": "game-cashier",
+      "code": "18",
+      "title": "游戏级收银台（Game Cashier）",
+      "kind": "module",
+      "path": "modules/18-game-cashier/README.md",
+      "lines": 201,
+      "depends_on": [
+        "cashier-template",
+        "game",
+        "common"
+      ],
+      "impacts": [
+        "payment",
+        "snapshot",
+        "sync",
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/domain/cashier",
+        "services/admin-api/internal/transport/http/cashier",
+        "apps/admin-web/src/views/cashier"
+      ],
+      "compact": "modules/18-game-cashier/spec.compact.md"
+    },
+    {
+      "id": "payment",
+      "code": "19",
+      "title": "支付路由（Payment Routing）",
+      "kind": "module",
+      "path": "modules/19-payment/README.md",
+      "lines": 1087,
+      "depends_on": [
+        "channel",
+        "product",
+        "cashier-template",
+        "game-cashier",
+        "game",
+        "common"
+      ],
+      "impacts": [
+        "snapshot",
+        "sync",
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/domain/payment",
+        "apps/admin-web/src/views/payment"
+      ],
+      "compact": "modules/19-payment/spec.compact.md"
+    },
+    {
+      "id": "snapshot",
+      "code": "20",
+      "title": "配置快照与运行时配置合并",
+      "kind": "module",
+      "path": "modules/20-snapshot/README.md",
+      "lines": 351,
+      "depends_on": [
+        "channel",
+        "account-auth",
+        "channel-login",
+        "feature-plugin",
+        "product",
+        "cashier-template",
+        "game-cashier",
+        "payment",
+        "game",
+        "common"
+      ],
+      "impacts": [
+        "sync",
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/domain/snapshot"
+      ],
+      "compact": "modules/20-snapshot/spec.compact.md"
+    },
+    {
+      "id": "sync",
+      "code": "21",
+      "title": "Sandbox → Production 同步",
+      "kind": "module",
+      "path": "modules/21-sync/README.md",
+      "lines": 882,
+      "depends_on": [
+        "snapshot",
+        "channel",
+        "account-auth",
+        "channel-login",
+        "feature-plugin",
+        "product",
+        "cashier-template",
+        "game-cashier",
+        "payment",
+        "game",
+        "common"
+      ],
+      "impacts": [
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/domain/sync",
+        "services/admin-api/internal/transport/http/sync"
+      ],
+      "compact": "modules/21-sync/spec.compact.md"
+    },
+    {
+      "id": "audit",
+      "code": "22",
+      "title": "审计日志（Audit Logs）",
+      "kind": "module",
+      "path": "modules/22-audit/README.md",
+      "lines": 931,
+      "depends_on": [
+        "common"
+      ],
+      "impacts": [
+        "testing"
+      ],
+      "code_paths": [
+        "services/admin-api/internal/transport/http/middleware",
+        "apps/admin-web/src/views/audit"
+      ],
+      "compact": "modules/22-audit/spec.compact.md"
+    },
+    {
+      "id": "dashboard",
+      "code": "23",
+      "title": "Dashboard 总览（只读聚合视图）",
+      "kind": "module",
+      "path": "modules/23-dashboard/README.md",
+      "lines": 847,
+      "depends_on": [
+        "cashier-template",
+        "snapshot",
+        "sync",
+        "common"
+      ],
+      "impacts": [
+        "testing"
+      ],
+      "code_paths": [
+        "apps/admin-web/src/views/dashboard"
+      ],
+      "compact": "modules/23-dashboard/spec.compact.md"
+    }
+  ]
+}
