@@ -32,8 +32,8 @@
 | 14 | `channel-login` | `channels-surface` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 与 `feature-plugin` 同 lane，二选一先开 |
 | 15 | `feature-plugin` | `channels-surface` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 与 `channel-login` 同 lane，二选一先开 |
 | 16 | `product` | `games-surface` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | `account-auth` 已完成，可开工 |
-| 17 | `cashier-template` | `cashier-surface` | common | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 可开工 |
-| 18 | `game-cashier` | `cashier-surface` | cashier-template, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `cashier-template` |
+| 17 | `cashier-template` | `cashier-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 全流程完成（验收 29/29 PASS）；遗留非阻断·跨模块 |
+| 18 | `game-cashier` | `cashier-surface` | cashier-template, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ✅ 可开工：cashier-template 与 game 均已完成，阻塞已解除 |
 | 19 | `payment` | `payment-surface` | channel, product, cashier-template, game-cashier, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `product + game-cashier` |
 | 20 | `snapshot` | `runtime-surface` | channel, account-auth, channel-login, feature-plugin, product, cashier-template, game-cashier, payment, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 14/15/16/17/18/19 |
 | 21 | `sync` | `runtime-surface` | snapshot, +上游全部 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `snapshot` |
@@ -50,7 +50,7 @@
 | --- | --- | --- | --- |
 | `games-surface` | `product` | ✅ 可开工 | `account-auth` 已完成，同 lane 空闲 |
 | `channels-surface` | `channel-login` | ✅ 可开工 | `feature-plugin` 与其同 lane，暂不并开 |
-| `cashier-surface` | `cashier-template` | ✅ 可开工 | `game-cashier` 依赖它 |
+| `cashier-surface` | `game-cashier` | ✅ 可开工 | `cashier-template` 已完成，阻塞已解除；同 lane 现空闲 |
 | `audit-surface` | `audit` | ✅ 可开工 | 与其他 lane 可并行 |
 | `payment-surface` | `payment` | ⛔ 阻塞 | 等待 `product + game-cashier` |
 | `runtime-surface` | `snapshot` | ⛔ 阻塞 | 等待 14/15/16/17/18/19 |
@@ -64,7 +64,7 @@
 
 | 模块 | lane | 当前阶段 | worktree / branch | handoff.summary.md | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| — | — | — | — | — | 当前无在制模块 |
+| — | — | — | — | — | 当前无在制模块（cashier-template 已 ✅ 完成，见进度总表 #17） |
 
 > 总 Agent 每次只维护当前模块这一行；模块完成或阻塞后即清空或转历史，不把长日志写回本文件。
 

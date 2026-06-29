@@ -1,89 +1,105 @@
 <template>
-  <PageCard title="模板版本" description="支持查看版本状态，并将 published 版本直接复制成新的 draft。">
-    <div class="version-list">
-      <article v-for="version in versions" :key="version.version" class="version-row">
-        <div>
-          <strong>v{{ version.version }}</strong>
-          <span>{{ version.status }}</span>
-        </div>
-        <button
-          v-if="version.status === 'published'"
-          class="copy-button"
-          type="button"
-          @click="selectedVersion = version"
-        >
-          复制为 draft
-        </button>
-      </article>
+  <PageCard title="版本列表" description="published 版本只读，需复制为 draft 后再修改。">
+    <div class="toolbar">
+      <el-button v-perm="'cashier.write'" type="primary" @click="emit('create-version')">新建 draft 版本</el-button>
     </div>
 
-    <CopyPublishedToDraftDialog
-      v-if="selectedVersion"
-      :open="true"
-      :source-version="selectedVersion"
-      :template-id="templateId"
-      @close="selectedVersion = null"
-      @created="appendDraft"
-    />
+    <el-table :data="versions" border size="small" @row-click="onRowClick">
+      <el-table-column label="版本" width="110">
+        <template #default="{ row }">
+          <strong>v{{ row.version }}</strong>
+        </template>
+      </el-table-column>
+      <el-table-column label="状态" width="120">
+        <template #default="{ row }">
+          <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="sourceType" label="来源" min-width="140" />
+      <el-table-column label="发布时间" min-width="170">
+        <template #default="{ row }">{{ formatTime(row.publishedAt) }}</template>
+      </el-table-column>
+      <el-table-column label="操作" width="240" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="primary" @click.stop="emit('select-version', row.version)">编辑矩阵</el-button>
+          <el-button
+            v-if="row.status === 'published'"
+            v-perm="'cashier.write'"
+            link
+            type="primary"
+            @click.stop="emit('copy-version', row)"
+          >
+            复制为 draft
+          </el-button>
+          <el-popconfirm
+            v-if="row.status === 'draft'"
+            title="确认发布该版本？当前 published 将自动归档。"
+            width="260"
+            @confirm="emit('publish-version', row)"
+          >
+            <template #reference>
+              <el-button v-perm="'cashier.publish'" link type="success" @click.stop>发布</el-button>
+            </template>
+          </el-popconfirm>
+        </template>
+      </el-table-column>
+      <template #empty>
+        <span class="text-muted">暂无版本，请先创建 draft 版本</span>
+      </template>
+    </el-table>
   </PageCard>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
 import PageCard from "@/components/page/PageCard.vue";
-import CopyPublishedToDraftDialog from "./components/CopyPublishedToDraftDialog.vue";
-import type { TemplateVersion } from "@/api/templateVersions";
+import type { CashierTemplateVersion, VersionStatus } from "@/api/modules/cashier";
 
-const props = defineProps<{
-  templateId?: string;
+defineProps<{
+  versions: CashierTemplateVersion[];
 }>();
 
-const versions = ref<TemplateVersion[]>([
-  { version: 7, status: "published" },
-  { version: 6, status: "archived" }
-]);
-const selectedVersion = ref<TemplateVersion | null>(null);
+const emit = defineEmits<{
+  (e: "create-version"): void;
+  (e: "copy-version", version: CashierTemplateVersion): void;
+  (e: "publish-version", version: CashierTemplateVersion): void;
+  (e: "select-version", version: string): void;
+}>();
 
-function appendDraft(created: TemplateVersion) {
-  selectedVersion.value = null;
-  versions.value = [created, ...versions.value.filter((item) => item.version !== created.version)];
+function onRowClick(row: CashierTemplateVersion) {
+  emit("select-version", row.version);
+}
+
+function statusType(status: VersionStatus): "primary" | "success" | "info" {
+  if (status === "published") {
+    return "success";
+  }
+  if (status === "draft") {
+    return "primary";
+  }
+  return "info";
+}
+
+function formatTime(value?: string | null): string {
+  if (!value) {
+    return "—";
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 </script>
 
 <style scoped>
-.version-list {
-  display: grid;
-  gap: 12px;
-}
-
-.version-row {
-  align-items: center;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-md);
+.toolbar {
   display: flex;
-  justify-content: space-between;
-  padding: 16px;
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
 
-.version-row div {
-  display: grid;
-  gap: 4px;
-}
-
-.version-row span {
+.text-muted {
   color: var(--text-subtle);
-  text-transform: uppercase;
 }
 
-.copy-button {
-  background: var(--brand);
-  border: 1px solid transparent;
-  border-radius: 999px;
-  color: #ffffff;
+:deep(.el-table__row) {
   cursor: pointer;
-  font: inherit;
-  font-weight: 600;
-  padding: 10px 14px;
 }
 </style>

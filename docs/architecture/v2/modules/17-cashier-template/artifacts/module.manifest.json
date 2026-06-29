@@ -1,0 +1,204 @@
+{
+  "module_id": "cashier-template",
+  "lane": "cashier-surface",
+  "spec_path": "docs/architecture/v2/modules/17-cashier-template/spec.compact.md",
+  "worktree": "../console-cashier-template",
+  "branch": "codex/cashier-template",
+  "shared_surfaces_touched": [
+    "services/admin-api/internal/domain/cashier",
+    "services/admin-api/internal/transport/http/cashier",
+    "services/admin-api/internal/app/cashier",
+    "services/admin-api/internal/infra/persistence/postgres",
+    "services/admin-api/internal/transport/httpserver/admin_wiring.go",
+    "apps/admin-web/src/views/cashier",
+    "apps/admin-web/src/router/routes.ts",
+    "apps/admin-web/src/api/modules/cashier.ts",
+    "apps/admin-web/package.json (frontend-test: 补 @vue/test-utils devDependency)",
+    "tests/frontend/e2e/cashier.spec.ts",
+    "tests/frontend/visual-baseline/cashier.spec.ts-snapshots"
+  ],
+  "backend_routes": [
+    "GET /api/admin/cashier/templates",
+    "POST /api/admin/cashier/templates",
+    "GET /api/admin/cashier/templates/{templateId}",
+    "POST /api/admin/cashier/templates/{templateId}/versions",
+    "POST /api/admin/cashier/templates/{templateId}/versions/{version}/copy-to-draft",
+    "GET /api/admin/cashier/templates/{templateId}/versions/{version}/rows",
+    "PUT /api/admin/cashier/templates/{templateId}/versions/{version}/rows",
+    "POST /api/admin/cashier/templates/{templateId}/versions/{version}/publish",
+    "POST /api/admin/cashier/templates/{templateId}/fx-sync/runs",
+    "POST /api/admin/cashier/fx-sync-runs/{runId}/approve"
+  ],
+  "frontend_routes": [
+    {
+      "path": "/cashier",
+      "name": "cashier",
+      "perm": "cashier.read",
+      "file": "apps/admin-web/src/router/routes.ts"
+    }
+  ],
+  "frontend_views": [
+    "apps/admin-web/src/views/cashier/CashierView.vue",
+    "apps/admin-web/src/views/cashier/templates/TemplateVersionsTab.vue",
+    "apps/admin-web/src/views/cashier/templates/PriceMatrixEditor.vue",
+    "apps/admin-web/src/views/cashier/templates/FxSyncRunsReviewList.vue",
+    "apps/admin-web/src/views/cashier/templates/components/CreateTemplateDialog.vue",
+    "apps/admin-web/src/views/cashier/templates/components/CreateVersionDialog.vue",
+    "apps/admin-web/src/views/cashier/templates/components/CopyPublishedToDraftDialog.vue"
+  ],
+  "referenced_modules": ["common"],
+  "open_issues": [
+    "[🟧 已修复 P4] auto_apply 触发响应 status 滞后——TriggerFXSyncRun 事务内 reload run，status 与落库一致(applied)",
+    "[🟧 已修复 P2] GET template 已内嵌 fxSyncRuns，run DTO 对齐 runId/candidateVersion(对外版本号)/diffSummary",
+    "[🟧 已修复 P1] PUT rows 统一 preTaxAmount(major 字符串)+taxRate(字符串)，归一化留后端",
+    "[🟧 已修复 P3] sourceVersion 后端改收 string + Atoi",
+    "[🟧 已处理 P5] GET template 去除内嵌 internal id（templateResponse DTO）",
+    "audit sink 仍 nil，待 audit 模块统一注入",
+    "FX Provider 占位，trigger 未接真实汇率算价",
+    "compact 标注 version 为字符串；当前后端 API 采用数值 version（落库为 VARCHAR 的数字串），仅 sourceVersion 对齐 string。"
+  ],
+  "verification": [
+    {
+      "command": "go build ./... (services/admin-api)",
+      "result": "passed",
+      "note": "cashier-template 后端编译通过"
+    },
+    {
+      "command": "go vet ./... (services/admin-api, post backend-cr fixes)",
+      "result": "passed",
+      "note": "CR 修复后静态检查通过"
+    },
+    {
+      "command": "ls services/admin-api/migrations",
+      "result": "passed",
+      "note": "新增迁移 000007_cashier_template_platform_schema.up.sql 命名顺序正确"
+    },
+    {
+      "command": "pnpm --dir apps/admin-web exec vue-tsc --noEmit",
+      "result": "failed",
+      "note": "仓库既有测试类型问题（缺失 @vue/test-utils、历史测试类型报错），非 cashier 模块新增错误"
+    },
+    {
+      "command": "pnpm --dir apps/admin-web exec vite build",
+      "result": "passed",
+      "note": "构建通过，仅有 chunk size warning"
+    },
+    {
+      "command": "go test ./... (services/admin-api, backend-test)",
+      "result": "passed",
+      "note": "全后端套件 exit 0；新增 L1 8 Test + L3 22 Test + scenario manifest 解析全绿"
+    },
+    {
+      "command": "go test ./internal/testkit/scenario/... -run TestScenarioManifests",
+      "result": "passed",
+      "note": "cashier-template.yaml 解析通过；S2 用例进程内真实跑 401，requiresDB 用例 SKIP（连库 harness SCENARIO_WITH_DB=1 执行）"
+    },
+    {
+      "command": "go vet ./... ; gofmt -l (services/admin-api, backend-test)",
+      "result": "passed",
+      "note": "静态检查通过，测试文件格式无差异"
+    },
+    {
+      "command": "pnpm exec vitest run src/views/cashier (frontend-test)",
+      "result": "passed",
+      "note": "5 spec / 39 passed（矩阵归一化/只读/版本/FX/对话框/权限）"
+    },
+    {
+      "command": "pnpm exec vitest run (frontend-test, 全量)",
+      "result": "passed_with_preexisting_failure",
+      "note": "121 passed / 1 failed；唯一失败 games sync-section-drawer.spec（既有断言陈旧），非 cashier 引入"
+    },
+    {
+      "command": "pnpm exec playwright test cashier.spec.ts --workers=1 --update-snapshots (frontend-test)",
+      "result": "passed",
+      "note": "12 passed，含截图与视觉基线；环境慢已抬超时并串行；首跑 11 passed，修 strict-mode 后复跑该用例通过"
+    },
+    {
+      "command": "go build ./... && go vet ./internal/...cashier/postgres (🟧 集成修复后)",
+      "result": "passed",
+      "note": "P1-P5 修复后后端编译/静态检查通过"
+    },
+    {
+      "command": "go test ./... (services/admin-api, 🟧 集成修复后)",
+      "result": "passed",
+      "note": "全套件 exit 0；cashier L3 改读 runId/candidateVersion/applied、copy 发字符串 sourceVersion；scenario manifest -count=1 重跑 ✅"
+    },
+    {
+      "command": "pnpm exec vitest run src/views/cashier (🟧 集成修复后)",
+      "result": "passed",
+      "note": "39/39；PriceMatrixEditor 保存用例改断言新 PUT 契约(preTaxAmount/taxRate 字符串)，未弱化"
+    },
+    {
+      "command": "pnpm exec vite build (🟧 集成修复后)",
+      "result": "passed",
+      "note": "构建通过，仅 chunk size warning"
+    },
+    {
+      "command": "go build ./... ; go test ./... -count=1 (✅ 功能验收师实跑)",
+      "result": "passed",
+      "note": "全后端套件 exit 0；cashier transport/domain/app/command/scenario 全绿"
+    },
+    {
+      "command": "sh scripts/regression/backend.sh (✅ 功能验收师，统一回归入口)",
+      "result": "passed",
+      "note": "[regression] backend tests PASS"
+    },
+    {
+      "command": "pnpm exec vitest run (admin-web 全量, ✅ 功能验收师实跑)",
+      "result": "passed_with_preexisting_failure",
+      "note": "121 passed / 1 failed；唯一失败 games sync-section-drawer（既有非本模块），cashier 全绿，不计入"
+    },
+    {
+      "command": "pnpm exec vite build (✅ 功能验收师实跑)",
+      "result": "passed",
+      "note": "built in 5.08s；CashierView chunk 产出，仅 chunk size warning"
+    }
+  ],
+  "functional_acceptance": {
+    "verdict": "PASS",
+    "auditor": "✅ 功能验收师 (Cursor Auto)",
+    "date": "2026-06-29",
+    "checklist_total": 29,
+    "checklist_pass": 29,
+    "report": "audit.log.md#✅ 功能验收师 · cashier-template 端到端功能验收（2026-06-29）",
+    "non_blocking_residuals": [
+      "审计 sink 生产仍 nil，待 audit 模块(22)统一注入（与 game/channel/account-auth 同模式，跨模块非本模块阻断）",
+      "FX provider 占位，trigger 未接真实汇率算价",
+      "version 对外数值 / DB VARCHAR，与 compact「字符串型自增」语义兼容"
+    ],
+    "excluded_failure": "apps/admin-web/src/views/games/detail/__tests__/sync-section-drawer.spec.ts（既有非本模块 games 用例，不计入）"
+  },
+  "frontend_test_artifacts": {
+    "vitest_l4": [
+      "apps/admin-web/src/views/cashier/templates/__tests__/PriceMatrixEditor.spec.ts",
+      "apps/admin-web/src/views/cashier/templates/__tests__/TemplateVersionsTab.spec.ts",
+      "apps/admin-web/src/views/cashier/templates/__tests__/FxSyncRunsReviewList.spec.ts",
+      "apps/admin-web/src/views/cashier/__tests__/CashierView.spec.ts",
+      "apps/admin-web/src/views/cashier/templates/components/__tests__/CashierDialogs.spec.ts"
+    ],
+    "e2e_l5": "tests/frontend/e2e/cashier.spec.ts",
+    "screenshots": "tests/frontend/screenshots/cashier-*.png",
+    "visual_baseline": "tests/frontend/visual-baseline/cashier.spec.ts-snapshots/",
+    "test_enabling_changes": [
+      "apps/admin-web/package.json (新增 devDependency @vue/test-utils@^2.4.11——原缺失 peer，整套 vitest 无法启动)"
+    ]
+  },
+  "backend_test_artifacts": {
+    "unit_l1": [
+      "services/admin-api/internal/domain/cashier/template_version_test.go",
+      "services/admin-api/internal/domain/common/currency_test.go",
+      "services/admin-api/internal/app/command/copy_template_version_test.go",
+      "services/admin-api/internal/app/cashier/calc_test.go"
+    ],
+    "api_l3": [
+      "services/admin-api/internal/transport/http/cashier/cashier_http_test.go",
+      "services/admin-api/internal/transport/http/cashier/memstore_test.go"
+    ],
+    "scenarios": "tests/backend/scenarios/cashier-template.yaml",
+    "fixtures": "tests/fixtures/common/cashier-template.sql",
+    "test_enabling_changes": [
+      "services/admin-api/internal/transport/httpserver/admin_wiring.go (降级路由挂载 cashier ready=false)",
+      "services/admin-api/internal/transport/httpserver/router_test.go (copy-to-draft 断言改 401)"
+    ]
+  }
+}

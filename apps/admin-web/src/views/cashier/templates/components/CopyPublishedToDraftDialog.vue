@@ -1,102 +1,62 @@
 <template>
-  <div v-if="open" class="dialog-backdrop">
-    <section class="dialog-panel">
-      <h3>Published v{{ sourceVersion.version }} draft copy</h3>
-      <p>已发布版本不可原地编辑，但可以一键复制为新的 draft 继续修改。</p>
-
-      <div class="dialog-actions">
-        <button class="ghost-button" type="button" @click="$emit('close')">Cancel</button>
-        <button class="primary-button" type="button" @click="submit">Create draft from published v{{ sourceVersion.version }}</button>
-      </div>
-
-      <p v-if="createdLabel" class="dialog-result">{{ createdLabel }}</p>
-    </section>
-  </div>
+  <el-dialog
+    :model-value="open"
+    title="复制 published 为 draft"
+    width="520px"
+    :close-on-click-modal="false"
+    @update:model-value="(v: boolean) => !v && emit('close')"
+  >
+    <el-alert
+      type="info"
+      :closable="false"
+      show-icon
+      title="published 版本只读，复制后会生成新的 draft，且与原版本不再联动。"
+    />
+    <p class="desc">来源版本：v{{ sourceVersion.version }}（{{ sourceVersion.status }}）</p>
+    <template #footer>
+      <el-button @click="emit('close')">取消</el-button>
+      <el-button v-perm="'cashier.write'" type="primary" :loading="submitting" @click="submit">确认复制</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref } from "vue";
-import { copyPublishedToDraft, type TemplateVersion } from "@/api/templateVersions";
+import { ElMessage } from "element-plus";
+import { ApiError } from "@/api/http";
+import { copyTemplateVersionToDraft, type CashierTemplateVersion } from "@/api/modules/cashier";
 
 const props = defineProps<{
   open: boolean;
-  templateId?: string;
-  sourceVersion: TemplateVersion;
+  templateId: string;
+  sourceVersion: CashierTemplateVersion;
 }>();
 
 const emit = defineEmits<{
-  close: [];
-  created: [version: TemplateVersion];
+  (e: "close"): void;
+  (e: "created"): void;
 }>();
 
-const createdLabel = ref("");
+const submitting = ref(false);
 
 async function submit() {
-  const created = await copyPublishedToDraft(props.templateId ?? "template-1", props.sourceVersion.version);
-  createdLabel.value = `draft v${created.version} created`;
-  emit("created", created);
+  submitting.value = true;
+  try {
+    const created = await copyTemplateVersionToDraft(props.templateId, props.sourceVersion.version);
+    ElMessage.success(`已复制为 draft 版本 v${created.version}`);
+    emit("created");
+    emit("close");
+  } catch (err) {
+    ElMessage.error(err instanceof ApiError ? err.message : "复制版本失败");
+  } finally {
+    submitting.value = false;
+  }
 }
 </script>
 
 <style scoped>
-.dialog-backdrop {
-  align-items: center;
-  background: rgba(15, 23, 42, 0.18);
-  display: flex;
-  inset: 0;
-  justify-content: center;
-  position: fixed;
-  z-index: 50;
-}
-
-.dialog-panel {
-  background: #ffffff;
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-soft);
-  display: grid;
-  gap: 16px;
-  max-width: 520px;
-  padding: 24px;
-  width: min(100%, 520px);
-}
-
-.dialog-panel h3,
-.dialog-panel p {
-  margin: 0;
-}
-
-.dialog-panel p {
+.desc {
+  margin: 12px 0 0;
   color: var(--text-subtle);
-}
-
-.dialog-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-}
-
-.dialog-result {
-  color: var(--brand);
-  font-weight: 700;
-}
-
-.ghost-button,
-.primary-button {
-  border: 1px solid transparent;
-  border-radius: 999px;
-  cursor: pointer;
-  font: inherit;
-  font-weight: 600;
-  padding: 10px 14px;
-}
-
-.ghost-button {
-  background: #ffffff;
-  border-color: var(--panel-border);
-}
-
-.primary-button {
-  background: var(--brand);
-  color: #ffffff;
 }
 </style>

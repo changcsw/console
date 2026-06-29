@@ -47,7 +47,7 @@ export const routes: RouteRecordRaw[] = [
         path: "cashier",
         name: "cashier",
         component: () => import("@/views/cashier/CashierView.vue"),
-        meta: { title: "收银台管理", icon: "CreditCard" }
+        meta: { title: "收银台", icon: "CreditCard", perm: "cashier.read" }
       },
       {
         path: "audit",

@@ -9,6 +9,8 @@ import (
 	"github.com/csw/console/services/admin-api/internal/infra/config"
 )
 
+// cashier 路由（含 copy-to-draft）现由真实 cashier 模块路由接管，并在降级模式下
+// 仍挂载路由形状：受保护接口先过 Authn，无令牌即 401（不再走旧 scaffold 的免鉴权 201）。
 func TestTemplateVersionCopyRouteIsRegistered(t *testing.T) {
 	server := New(config.Config{
 		AppName:     "admin-api",
@@ -25,11 +27,11 @@ func TestTemplateVersionCopyRouteIsRegistered(t *testing.T) {
 
 	server.Handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d with body %s", rec.Code, rec.Body.String())
+	// 路由已注册且受鉴权保护：无令牌 → 401 UNAUTHENTICATED。
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d with body %s", rec.Code, rec.Body.String())
 	}
-
-	if !strings.Contains(rec.Body.String(), `"status":"draft"`) {
-		t.Fatalf("expected draft response, got %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "UNAUTHENTICATED") {
+		t.Fatalf("expected UNAUTHENTICATED, got %s", rec.Body.String())
 	}
 }

@@ -1,0 +1,682 @@
+# 模块 cashier-template（收银台价格模板与汇率同步 / 模块 17）接口场景矩阵 manifest
+# 维度定义见 docs/architecture/v2/03-testing.md §4；契约来源：
+# docs/architecture/v2/modules/17-cashier-template/spec.compact.md。
+# 接口前缀 /api/admin/cashier；读 cashier.read / 写 cashier.write / 发布 cashier.publish / 汇率审核 fx.approve。
+#
+# 运行说明（与 game.yaml/channel.yaml 一致）：
+#   进程内 httptest harness（services/admin-api/internal/testkit/scenario）为降级 handler
+#   （无 POSTGRES_DSN/ADMIN_JWT_SECRET → ready=false）。cashier 路由形状已在降级路由挂载
+#   （admin_wiring.go），故：
+#     - requiresDB: false 的 S2 用例（受保护接口先过 Authn，未携带/无效令牌即 401）在沙箱内真实执行并断言。
+#     - requiresDB: true 的用例为「manifest 已声明但运行需 PG + 全装配」，进程内 harness 跳过
+#       （SCENARIO_WITH_DB=1 时由连库 harness 执行），仅保证 YAML 解析校验通过。
+#       这些维度已由 transport/http/cashier 进程内 httptest（内存仓储 + 真实 JWT/审计 spy）等价覆盖
+#       （见 cashier_http_test.go / memstore_test.go）。
+#
+# 维度适用性（compact + 03-testing §4）：
+#   - 本模块为平台级：4 张表均在共享 schema `platform`，业务行无 env 列。
+#     S6「跨 env」按「platform schema 隔离 + search_path」处理：写恒落 platform schema，
+#     不随前端 env 切换、不跨 schema；连库 harness 以 search_path 验证 platform 可见性。
+#   - S8 脱敏 N/A：本模块无 secret/file 密文字段（价格/汇率均为明文业务数据）。
+#   - 状态机/归一化/FX 为模块私有维度，列在每接口「模块私有维度」。
+#
+# auth.role → 实体（连库 harness 用以签发令牌；见 tests/fixtures/common/cashier-template.sql）：
+#   cashier_admin  → cashier.read + cashier.write + cashier.publish + fx.approve（S1/S5/S7/S10 跑通）
+#   cashier_reader → 仅 cashier.read（验缺写/发布/审核权限 403；可读列表/详情/行）
+#   no_perm        → 无任何权限（验缺读权限 403）
+module: cashier-template
+cases:
+  # ───────────────────────── 1) GET /templates — 列表（cashier.read，S9 分页）
+  - name: list_templates_requires_auth
+    dimension: S2
+    requiresDB: false
+    note: "未携带 access → 401（Authn 在 RequireBackend 之前）"
+    request:
+      method: GET
+      path: /api/admin/cashier/templates
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_templates_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    note: "登录但缺 cashier.read → 403 FORBIDDEN"
+    request:
+      method: GET
+      path: /api/admin/cashier/templates
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_templates_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: cashier_reader }
+    fixture: common/cashier-template/base
+    note: "200 + 统一包络；items 为模板摘要"
+    request:
+      method: GET
+      path: /api/admin/cashier/templates
+    expect:
+      status: 200
+  - name: list_templates_pagination
+    dimension: S9
+    requiresDB: true
+    auth: { role: cashier_reader }
+    fixture: common/cashier-template/base
+    note: "page/pageSize/total 正确"
+    request:
+      method: GET
+      path: /api/admin/cashier/templates?page=1&pageSize=20
+    expect:
+      status: 200
+  - name: list_templates_pagesize_clamped
+    dimension: S9
+    requiresDB: true
+    auth: { role: cashier_reader }
+    fixture: common/cashier-template/base
+    note: "pageSize 越界按 00 §7.3 钳制为上限 100"
+    request:
+      method: GET
+      path: /api/admin/cashier/templates?pageSize=99999
+    expect:
+      status: 200
+      jsonContains: { data.pageSize: 100 }
+  - name: list_templates_platform_schema
+    dimension: S6
+    requiresDB: true
+    auth: { role: cashier_reader }
+    fixture: common/cashier-template/base
+    note: "平台级：读 platform schema（search_path 决定），业务行无 env 列，不跨 schema"
+    request:
+      method: GET
+      path: /api/admin/cashier/templates
+    expect:
+      status: 200
+
+  # ───────────────────────── 2) POST /templates — 创建（cashier.write，审计 cashier.template.create）
+  - name: create_template_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/cashier/templates
+      body: { templateId: "global_default", templateName: "Global Default" }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: create_template_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: cashier_reader }
+    note: "仅 cashier.read 缺 cashier.write → 403"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates
+      body: { templateId: "global_default", templateName: "Global Default" }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: create_template_validation_missing_id
+    dimension: S4
+    requiresDB: true
+    auth: { role: cashier_admin }
+    note: "缺 templateId → 400 VALIDATION_FAILED（details 给 field/reason）"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates
+      body: { templateName: "Global Default" }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_template_validation_bad_mode
+    dimension: S4
+    requiresDB: true
+    auth: { role: cashier_admin }
+    note: "fxSyncMode 非枚举 → 400"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates
+      body: { templateId: "x", templateName: "X", fxSyncMode: "bogus" }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_template_conflict_duplicate_id
+    dimension: S5
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/base
+    note: "templateId 唯一（platform 全局）→ 409 CONFLICT"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates
+      body: { templateId: "global_default", templateName: "Dup", fxSyncMode: "manual_confirm", fxSyncSchedule: "monthly" }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: create_template_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: cashier_admin }
+    note: "201 + 模板（status=draft 默认）"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates
+      body: { templateId: "brand_new", templateName: "Brand New", fxSyncEnabled: true, fxSyncMode: "manual_confirm", fxSyncSchedule: "monthly" }
+    expect:
+      status: 201
+      jsonContains: { data.status: "draft" }
+  - name: create_template_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: cashier_admin }
+    note: "写 audit_logs(action=cashier.template.create)"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates
+      body: { templateId: "audited", templateName: "Audited", fxSyncMode: "manual_confirm", fxSyncSchedule: "monthly" }
+    expect:
+      status: 201
+  - name: create_template_lands_in_platform_schema
+    dimension: S6
+    requiresDB: true
+    auth: { role: cashier_admin }
+    note: "平台级：写恒落 platform schema，不随前端 env 切换、不跨 schema"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates
+      body: { templateId: "platform_scoped", templateName: "P", fxSyncMode: "manual_confirm", fxSyncSchedule: "monthly" }
+    expect:
+      status: 201
+
+  # ───────────────────────── 3) GET /templates/{templateId} — 详情（含版本概要，cashier.read）
+  - name: get_template_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/cashier/templates/global_default
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: get_template_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/cashier/templates/global_default
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: get_template_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: cashier_reader }
+    fixture: common/cashier-template/base
+    note: "200 + { template, versions[] }"
+    request:
+      method: GET
+      path: /api/admin/cashier/templates/global_default
+    expect:
+      status: 200
+  - name: get_template_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: cashier_reader }
+    note: "platform 内不存在 → 404 NOT_FOUND"
+    request:
+      method: GET
+      path: /api/admin/cashier/templates/ghost
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+
+  # ───────────────────────── 4) POST /templates/{templateId}/versions — 创建版本（cashier.write）
+  - name: create_version_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions
+      body: {}
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: create_version_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: cashier_reader }
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions
+      body: {}
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: create_version_validation_copy_missing_source
+    dimension: S4
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/base
+    note: "sourceType=copy_* 但缺 sourceVersion → 400 VALIDATION_FAILED"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions
+      body: { sourceType: "copy_published" }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_version_conflict_copy_from_draft
+    dimension: S5
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/with_draft
+    note: "从 draft 复制（来源非 published/archived）→ 409 VERSION_STATE_INVALID"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions
+      body: { sourceType: "copy_published", sourceVersion: "1" }
+    expect:
+      status: 409
+      jsonContains: { error.code: VERSION_STATE_INVALID }
+  - name: create_version_success_draft
+    dimension: S1
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/base
+    note: "产物 status=draft（私有维度：版本生命周期初态）"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions
+      body: {}
+    expect:
+      status: 201
+      jsonContains: { data.status: "draft" }
+  - name: create_version_platform_schema
+    dimension: S6
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/base
+    note: "平台级：写落 platform schema，不跨 schema"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions
+      body: {}
+    expect:
+      status: 201
+
+  # ───────────────────────── 5) POST /templates/{templateId}/versions/{version}/copy-to-draft（cashier.write）
+  - name: copy_to_draft_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions/1/copy-to-draft
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: copy_to_draft_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: cashier_reader }
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions/1/copy-to-draft
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: copy_to_draft_success_from_published
+    dimension: S1
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/with_published
+    note: "私有维度：copy-to-draft 产物恒 draft + 复制价格行 + sourceType=copy_published；复制后与来源不联动"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions/1/copy-to-draft
+    expect:
+      status: 201
+      jsonContains: { data.status: "draft", data.sourceType: "copy_published" }
+  - name: copy_to_draft_conflict_from_draft
+    dimension: S5
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/with_draft
+    note: "来源为 draft（非 published/archived）→ 409 VERSION_STATE_INVALID"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions/1/copy-to-draft
+    expect:
+      status: 409
+      jsonContains: { error.code: VERSION_STATE_INVALID }
+
+  # ───────────────────────── 6) GET /templates/{templateId}/versions/{version}/rows（cashier.read）
+  - name: list_rows_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/cashier/templates/global_default/versions/1/rows
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_rows_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/cashier/templates/global_default/versions/1/rows
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_rows_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: cashier_reader }
+    fixture: common/cashier-template/with_published
+    note: "200 + items[]（价格行，金额为 minor）"
+    request:
+      method: GET
+      path: /api/admin/cashier/templates/global_default/versions/1/rows
+    expect:
+      status: 200
+  - name: list_rows_invalid_version_path
+    dimension: S4
+    requiresDB: true
+    auth: { role: cashier_reader }
+    fixture: common/cashier-template/base
+    note: "version 路径 <=0/非数字 → 400 VALIDATION_FAILED（handler parseVersion 早校验）"
+    request:
+      method: GET
+      path: /api/admin/cashier/templates/global_default/versions/0/rows
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+
+  # ───────────────────────── 7) PUT /templates/{templateId}/versions/{version}/rows（cashier.write，归一化）
+  - name: upsert_rows_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: PUT
+      path: /api/admin/cashier/templates/global_default/versions/1/rows
+      body: { rows: [] }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: upsert_rows_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: cashier_reader }
+    request:
+      method: PUT
+      path: /api/admin/cashier/templates/global_default/versions/1/rows
+      body: { rows: [] }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: upsert_rows_currency_not_supported
+    dimension: S4
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/with_draft
+    note: "currency 不在 currency_specs → 400 CURRENCY_NOT_SUPPORTED（私有维度：金额归一化）"
+    request:
+      method: PUT
+      path: /api/admin/cashier/templates/global_default/versions/1/rows
+      body: { rows: [{ countryCode: "DE", currency: "EUR", priceId: "p", preTaxAmount: "10.00", taxRate: "0", effectiveAt: "2026-01-01T00:00:00Z" }] }
+    expect:
+      status: 400
+      jsonContains: { error.code: CURRENCY_NOT_SUPPORTED }
+  - name: upsert_rows_below_minimum
+    dimension: S4
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/with_draft
+    note: "归一化后低于 currency_specs 下限（USD min_amount_minor=1，0.001→0）→ 400 VALIDATION_FAILED"
+    request:
+      method: PUT
+      path: /api/admin/cashier/templates/global_default/versions/1/rows
+      body: { rows: [{ countryCode: "US", currency: "USD", priceId: "p", preTaxAmount: "0.001", taxRate: "0", effectiveAt: "2026-01-01T00:00:00Z" }] }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: upsert_rows_success_normalizes
+    dimension: S1
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/with_draft
+    note: "私有维度：金额归一化（精度/下限/舍入）→ 存 minor，含 tax/afterTax 计算"
+    request:
+      method: PUT
+      path: /api/admin/cashier/templates/global_default/versions/1/rows
+      body: { rows: [{ countryCode: "US", currency: "USD", priceId: "p_basic", preTaxAmount: "10.00", taxRate: "0.1", effectiveAt: "2026-01-01T00:00:00Z" }] }
+    expect:
+      status: 200
+  - name: upsert_rows_published_readonly_conflict
+    dimension: S5
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/with_published
+    note: "published 版本只读 → 409 VERSION_STATE_INVALID（需 copy-to-draft）"
+    request:
+      method: PUT
+      path: /api/admin/cashier/templates/global_default/versions/1/rows
+      body: { rows: [{ countryCode: "US", currency: "USD", priceId: "p", preTaxAmount: "12.00", taxRate: "0.1", effectiveAt: "2026-01-01T00:00:00Z" }] }
+    expect:
+      status: 409
+      jsonContains: { error.code: VERSION_STATE_INVALID }
+  - name: upsert_rows_transaction_atomic
+    dimension: S10
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/with_draft
+    note: "批量 upsert（ReplaceRows DELETE+INSERT）单事务；任一行归一化失败整体回滚，无部分写入"
+    request:
+      method: PUT
+      path: /api/admin/cashier/templates/global_default/versions/1/rows
+      body: { rows: [{ countryCode: "US", currency: "USD", priceId: "ok", preTaxAmount: "10.00", taxRate: "0.1", effectiveAt: "2026-01-01T00:00:00Z" }, { countryCode: "DE", currency: "EUR", priceId: "bad", preTaxAmount: "10.00", taxRate: "0", effectiveAt: "2026-01-01T00:00:00Z" }] }
+    expect:
+      status: 400
+      jsonContains: { error.code: CURRENCY_NOT_SUPPORTED }
+
+  # ───────────────────────── 8) POST /templates/{templateId}/versions/{version}/publish（cashier.publish）
+  - name: publish_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions/1/publish
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: publish_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: cashier_reader }
+    note: "缺 cashier.publish → 403（仅 write 也不足）"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions/1/publish
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: publish_success_archives_old
+    dimension: S1
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/publishable
+    note: "私有维度：draft→published；旧 published 同事务自动 archived"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions/2/publish
+    expect:
+      status: 200
+  - name: publish_conflict_non_draft
+    dimension: S5
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/with_published
+    note: "发布非 draft（已 published）→ 409 VERSION_STATE_INVALID"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions/1/publish
+    expect:
+      status: 409
+      jsonContains: { error.code: VERSION_STATE_INVALID }
+  - name: publish_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/with_draft
+    note: "写 audit_logs(action=cashier.version.publish)"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions/1/publish
+    expect:
+      status: 200
+  - name: publish_transaction_rollback
+    dimension: S10
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/publishable
+    note: "发布同事务（归档旧 published + 发布新 draft）；第二步失败整体回滚，旧 published 不被归档（故障注入由 transport httptest 覆盖）"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/versions/2/publish
+    expect:
+      status: 200
+
+  # ───────────────────────── 9) POST /templates/{templateId}/fx-sync/runs（cashier.write，触发汇率同步）
+  - name: fx_trigger_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/fx-sync/runs
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: fx_trigger_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: cashier_reader }
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/fx-sync/runs
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: fx_trigger_manual_confirm_pending
+    dimension: S1
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/with_published
+    note: "私有维度：manual_confirm 仅生成候选 draft + run(pending_review)，不自动应用"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/global_default/fx-sync/runs
+    expect:
+      status: 201
+      jsonContains: { data.status: "pending_review" }
+  - name: fx_trigger_auto_apply_publishes
+    dimension: S1
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/auto_apply_published
+    note: "私有维度：auto_apply 触发后自动 approve→publish+applied（候选发布、旧 published 归档）；P4 修复后响应 status 与落库一致（applied）"
+    request:
+      method: POST
+      path: /api/admin/cashier/templates/auto_tpl/fx-sync/runs
+    expect:
+      status: 201
+      jsonContains: { data.status: "applied" }
+
+  # ───────────────────────── 10) POST /fx-sync-runs/{runId}/approve（fx.approve，审核）
+  - name: fx_approve_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/cashier/fx-sync-runs/1/approve
+      body: { reviewNote: "ok" }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: fx_approve_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: cashier_reader }
+    note: "缺 fx.approve → 403"
+    request:
+      method: POST
+      path: /api/admin/cashier/fx-sync-runs/1/approve
+      body: { reviewNote: "ok" }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: fx_approve_success_applies
+    dimension: S1
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/fx_pending
+    note: "私有维度：manual_confirm approve 即 publish+applied（同事务发布候选 + 归档旧 published），无单独 apply"
+    request:
+      method: POST
+      path: /api/admin/cashier/fx-sync-runs/1/approve
+      body: { reviewNote: "looks good" }
+    expect:
+      status: 200
+      jsonContains: { data.status: "applied" }
+  - name: fx_ignore_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/fx_pending
+    note: "私有维度：action=ignore → run ignored，不发布候选、不归档旧 published"
+    request:
+      method: POST
+      path: /api/admin/cashier/fx-sync-runs/1/approve
+      body: { action: "ignore" }
+    expect:
+      status: 200
+      jsonContains: { data.status: "ignored" }
+  - name: fx_approve_conflict_non_pending
+    dimension: S5
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/fx_applied
+    note: "审核非 pending_review 的 run → 409 VERSION_STATE_INVALID"
+    request:
+      method: POST
+      path: /api/admin/cashier/fx-sync-runs/1/approve
+      body: { reviewNote: "again" }
+    expect:
+      status: 409
+      jsonContains: { error.code: VERSION_STATE_INVALID }
+  - name: fx_approve_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/fx_pending
+    note: "写 audit_logs(action=fx.approve)"
+    request:
+      method: POST
+      path: /api/admin/cashier/fx-sync-runs/1/approve
+      body: { reviewNote: "ok" }
+    expect:
+      status: 200
+  - name: fx_approve_transaction_rollback
+    dimension: S10
+    requiresDB: true
+    auth: { role: cashier_admin }
+    fixture: common/cashier-template/fx_pending
+    note: "approve 同事务（归档旧 published + 发布候选 + 置 applied）；中途失败整体回滚，run 仍 pending_review、旧 published 不归档（故障注入由 transport httptest 覆盖）"
+    request:
+      method: POST
+      path: /api/admin/cashier/fx-sync-runs/1/approve
+      body: { reviewNote: "ok" }
+    expect:
+      status: 200

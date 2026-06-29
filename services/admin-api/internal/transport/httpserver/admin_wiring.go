@@ -11,6 +11,7 @@ import (
 
 	accountauthapp "github.com/csw/console/services/admin-api/internal/app/accountauth"
 	adminapp "github.com/csw/console/services/admin-api/internal/app/admin"
+	cashierapp "github.com/csw/console/services/admin-api/internal/app/cashier"
 	channelapp "github.com/csw/console/services/admin-api/internal/app/channel"
 	gameapp "github.com/csw/console/services/admin-api/internal/app/game"
 	domainauth "github.com/csw/console/services/admin-api/internal/domain/auth"
@@ -21,6 +22,7 @@ import (
 	infrajwt "github.com/csw/console/services/admin-api/internal/infra/jwt"
 	"github.com/csw/console/services/admin-api/internal/infra/persistence/postgres"
 	adminhttp "github.com/csw/console/services/admin-api/internal/transport/http/admin"
+	cashierhttp "github.com/csw/console/services/admin-api/internal/transport/http/cashier"
 	channelshttp "github.com/csw/console/services/admin-api/internal/transport/http/channels"
 	gameshttp "github.com/csw/console/services/admin-api/internal/transport/http/games"
 )
@@ -52,6 +54,9 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 		r := adminhttp.NewRouter(adminhttp.NewHandler(adminhttp.Deps{Env: env}), iss, env, logger, false)
 		gameshttp.RegisterRoutes(r, gameshttp.NewHandler(nil, env), iss, env, logger, false)
 		channelshttp.RegisterRoutes(r, channelshttp.NewHandler(nil, env), iss, env, logger, false)
+		// cashier 路由形状降级挂载：受保护路由仍先过 Authn（无令牌 401），通过后由 RequireBackend 返回 503。
+		// 使 scenarios/cashier-template.yaml 的 S2（鉴权）契约用例可在进程内 harness 真实执行。
+		cashierhttp.RegisterRoutes(r, cashierhttp.NewHandler(nil), iss, env, logger, false)
 		return r
 	}
 
@@ -113,6 +118,10 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 	// channel 模块：真实 ChannelService（绑定主连接池，env 由 search_path 钉死）。审计 sink 待 audit 模块落地后注入。
 	channelSvc := channelapp.NewChannelService(postgres.NewChannelStore(pool), time.Now, nil, env)
 	channelshttp.RegisterRoutes(r, channelshttp.NewHandler(channelSvc, env), issuer, env, logger, true)
+
+	// cashier-template 模块：模板/版本/价格行/汇率审核。
+	cashierSvc := cashierapp.NewService(postgres.NewCashierStore(pool), nil, time.Now)
+	cashierhttp.RegisterRoutes(r, cashierhttp.NewHandler(cashierSvc), issuer, env, logger, true)
 
 	return r
 }

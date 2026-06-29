@@ -10,5 +10,14 @@ type CopyTemplateVersionCommand struct {
 }
 
 func BuildDraftFromTemplateVersion(source domaincashier.TemplateVersion, nextVersion int) domaincashier.TemplateVersion {
-	return source.CopyToDraft(nextVersion)
+	draft := source.CopyToDraft(nextVersion)
+	switch source.Status {
+	case domaincashier.StatusPublished:
+		draft.SourceType = domaincashier.SourceTypeCopyPublished
+	case domaincashier.StatusArchived:
+		draft.SourceType = domaincashier.SourceTypeCopyArchived
+	default:
+		draft.SourceType = domaincashier.SourceTypeManual
+	}
+	return draft
 }
