@@ -4,26 +4,147 @@
       <div class="login-card__hero">
         <span class="login-card__eyebrow">Publishing Console</span>
         <h1>后台登录</h1>
-        <p>这里保留密码登录与飞书登录的入口位置，后续接真实认证流程。</p>
+        <p>发行管理后台 · 仅限授权管理员访问，与玩家登录体系完全隔离。</p>
+        <EnvironmentBadge :environment="app.environment" />
       </div>
 
-      <el-form label-position="top">
-        <el-form-item label="用户名">
-          <el-input placeholder="请输入用户名" />
-        </el-form-item>
-        <el-form-item label="密码">
-          <el-input type="password" placeholder="请输入密码" show-password />
-        </el-form-item>
-        <div class="login-card__actions">
-          <el-button type="primary">密码登录</el-button>
-          <el-button plain>飞书登录</el-button>
-        </div>
-      </el-form>
+      <el-tabs v-model="activeTab" class="login-tabs">
+        <!-- 密码登录 -->
+        <el-tab-pane label="密码登录" name="password">
+          <el-form label-position="top" @submit.prevent="onPasswordLogin">
+            <el-form-item label="用户名">
+              <el-input
+                v-model="userName"
+                placeholder="请输入用户名"
+                autocomplete="username"
+                aria-label="userName"
+                @input="passwordError = ''"
+              />
+            </el-form-item>
+            <el-form-item label="密码">
+              <el-input
+                v-model="password"
+                type="password"
+                placeholder="请输入密码"
+                show-password
+                autocomplete="current-password"
+                aria-label="password"
+                @keyup.enter="onPasswordLogin"
+                @input="passwordError = ''"
+              />
+            </el-form-item>
+            <p v-if="passwordError" class="login-error" role="alert">{{ passwordError }}</p>
+            <el-button type="primary" :loading="passwordLoading" class="login-submit" @click="onPasswordLogin">
+              密码登录
+            </el-button>
+          </el-form>
+        </el-tab-pane>
+
+        <!-- 飞书登录 -->
+        <el-tab-pane label="飞书登录" name="feishu">
+          <el-form label-position="top" @submit.prevent="onFeishuLogin">
+            <el-form-item label="飞书授权码">
+              <el-input
+                v-model="feishuCode"
+                placeholder="开发环境可填 mock:用户名"
+                aria-label="feishuCode"
+                @keyup.enter="onFeishuLogin"
+                @input="feishuError = ''"
+              />
+            </el-form-item>
+            <p class="login-hint">未绑定飞书身份的账号无法登录，请先在「系统设置」中为管理员绑定飞书身份。</p>
+            <p v-if="feishuError" class="login-error" role="alert">{{ feishuError }}</p>
+            <el-button type="primary" :loading="feishuLoading" class="login-submit" @click="onFeishuLogin">
+              飞书登录
+            </el-button>
+          </el-form>
+        </el-tab-pane>
+      </el-tabs>
     </section>
   </main>
 </template>
 
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import { ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { ElMessage } from "element-plus";
+import { useAppStore } from "@/stores/app";
+import { useAuthStore } from "@/stores/auth";
+import { ApiError } from "@/api/http";
+import EnvironmentBadge from "@/components/page/EnvironmentBadge.vue";
+
+const app = useAppStore();
+const auth = useAuthStore();
+const router = useRouter();
+const route = useRoute();
+
+const activeTab = ref<"password" | "feishu">("password");
+
+const userName = ref("");
+const password = ref("");
+const passwordLoading = ref(false);
+const passwordError = ref("");
+
+const feishuCode = ref("");
+const feishuLoading = ref(false);
+const feishuError = ref("");
+
+function redirectTarget(): string {
+  const redirect = route.query.redirect;
+  if (typeof redirect === "string" && redirect.startsWith("/")) {
+    return redirect;
+  }
+  return "/dashboard";
+}
+
+function handleError(err: unknown, setInline: (msg: string) => void) {
+  if (err instanceof ApiError) {
+    if (err.code === "UNAUTHENTICATED" || err.code === "VALIDATION_FAILED") {
+      setInline(err.message || "用户名或密码错误");
+      return;
+    }
+    // 飞书不可用 / 服务端错误等
+    ElMessage.error(err.message || "登录失败，请稍后再试");
+    return;
+  }
+  // 网络异常
+  ElMessage.error("网络异常，请检查连接后重试");
+}
+
+async function onPasswordLogin() {
+  passwordError.value = "";
+  if (!userName.value.trim() || !password.value) {
+    passwordError.value = "请输入用户名与密码";
+    return;
+  }
+  passwordLoading.value = true;
+  try {
+    await auth.login(userName.value.trim(), password.value);
+    await router.push(redirectTarget());
+  } catch (err) {
+    handleError(err, (msg) => (passwordError.value = msg));
+  } finally {
+    passwordLoading.value = false;
+  }
+}
+
+async function onFeishuLogin() {
+  feishuError.value = "";
+  if (!feishuCode.value.trim()) {
+    feishuError.value = "请输入飞书授权码";
+    return;
+  }
+  feishuLoading.value = true;
+  try {
+    await auth.feishuLogin({ code: feishuCode.value.trim() });
+    await router.push(redirectTarget());
+  } catch (err) {
+    handleError(err, (msg) => (feishuError.value = msg));
+  } finally {
+    feishuLoading.value = false;
+  }
+}
+</script>
 
 <style scoped>
 .login-page {
@@ -47,7 +168,7 @@
 }
 
 .login-card__hero {
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 
 .login-card__eyebrow {
@@ -66,13 +187,24 @@
 }
 
 .login-card p {
-  margin: 0;
+  margin: 0 0 12px;
   color: var(--text-subtle);
   line-height: 1.6;
 }
 
-.login-card__actions {
-  display: flex;
-  gap: 12px;
+.login-submit {
+  width: 100%;
+}
+
+.login-error {
+  color: var(--danger);
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+
+.login-hint {
+  color: var(--text-subtle);
+  font-size: 12px;
+  margin: 0 0 12px;
 }
 </style>

@@ -27,7 +27,21 @@
           <h1>{{ currentTitle }}</h1>
           <p>围绕游戏、渠道、商品、IAP、收银台和生产同步组织页面。</p>
         </div>
-        <EnvironmentBadge :environment="app.environment" />
+        <div class="topbar__right">
+          <EnvironmentBadge :environment="app.environment" />
+          <el-dropdown v-if="auth.user" trigger="click" @command="onUserCommand">
+            <span class="user-chip">
+              {{ auth.user.displayName || auth.user.userName }}
+              <el-icon><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item disabled>{{ auth.user.userName }}</el-dropdown-item>
+                <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
       </header>
 
       <section class="content__body">
@@ -40,18 +54,34 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { ArrowDown } from "@element-plus/icons-vue";
 import { useAppStore } from "@/stores/app";
+import { useAuthStore } from "@/stores/auth";
+import { usePermissionStore } from "@/stores/permission";
 import EnvironmentBadge from "@/components/page/EnvironmentBadge.vue";
 
 const route = useRoute();
 const router = useRouter();
 const app = useAppStore();
+const auth = useAuthStore();
+const permission = usePermissionStore();
 
 const currentTitle = computed(() => String(route.meta?.title ?? "Publishing Console"));
 
+const layoutRoute = computed(() => router.options.routes.find((item) => item.path === "/"));
+
 const visibleRoutes = computed(() =>
-  (router.options.routes[0]?.children ?? []).filter((item) => !item.meta?.hidden)
+  (layoutRoute.value?.children ?? []).filter(
+    (item) => !item.meta?.hidden && permission.hasPerm(item.meta?.perm as string | undefined)
+  )
 );
+
+async function onUserCommand(command: string) {
+  if (command === "logout") {
+    await auth.logout();
+    void router.push("/login");
+  }
+}
 </script>
 
 <style scoped>
@@ -127,6 +157,25 @@ const visibleRoutes = computed(() =>
   justify-content: space-between;
   gap: 16px;
   padding: 18px 20px;
+}
+
+.topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: var(--text-main);
+  font-weight: 600;
+  font-size: 13px;
 }
 
 .topbar h1 {

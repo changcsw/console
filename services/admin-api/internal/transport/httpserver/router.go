@@ -3,50 +3,32 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
+
 	"github.com/csw/console/services/admin-api/internal/app/command"
-	"github.com/csw/console/services/admin-api/internal/app/dto"
-	appquery "github.com/csw/console/services/admin-api/internal/app/query"
-	domainchannel "github.com/csw/console/services/admin-api/internal/domain/channel"
-	"github.com/csw/console/services/admin-api/internal/domain/common"
-	"github.com/csw/console/services/admin-api/internal/domain/game"
-	"github.com/csw/console/services/admin-api/internal/domain/sync"
 	domaincashier "github.com/csw/console/services/admin-api/internal/domain/cashier"
+	"github.com/csw/console/services/admin-api/internal/domain/sync"
 	"github.com/csw/console/services/admin-api/internal/infra/config"
 	cashierhttp "github.com/csw/console/services/admin-api/internal/transport/http/cashier"
-	channelshttp "github.com/csw/console/services/admin-api/internal/transport/http/channels"
 	syncapi "github.com/csw/console/services/admin-api/internal/transport/http/sync"
 )
 
-type Server struct {
-	mux *http.ServeMux
-}
-
-type marketChannelScaffoldService struct{}
 type sectionSyncScaffoldService struct{}
 type templateVersionScaffoldService struct{}
 
+// New 装配顶层 chi 路由：healthz + auth 模块真实路由（DB/JWT 就绪时）+ 其余未迁移的 scaffold 路由（回退）。
 func New(cfg config.Config) *http.Server {
-	server := &Server{mux: http.NewServeMux()}
-	server.registerRoutes(cfg)
-	return &http.Server{
-		Addr:    cfg.HTTPAddress,
-		Handler: server.mux,
-	}
-}
+	logger := slog.Default()
+	r := chi.NewRouter()
+	r.Use(chimw.RequestID)
+	r.Use(chimw.Recoverer)
 
-func (s *Server) registerRoutes(cfg config.Config) {
-	marketChannelHandler := channelshttp.NewHandler(
-		marketChannelScaffoldService{},
-		marketChannelScaffoldService{},
-		marketChannelScaffoldService{},
-	)
-	sectionSyncHandler := syncapi.NewSectionSyncHandler(sectionSyncScaffoldService{})
-	templateVersionHandler := cashierhttp.NewTemplateVersionHandler(templateVersionScaffoldService{})
-
-	s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"app":         cfg.AppName,
 			"environment": cfg.Environment,
@@ -54,43 +36,42 @@ func (s *Server) registerRoutes(cfg config.Config) {
 		})
 	})
 
-	s.mux.HandleFunc("/api/admin/me", func(w http.ResponseWriter, _ *http.Request) {
+	legacy := buildLegacyMux(cfg)
+
+	adminRouter := buildAdminRouter(cfg, logger)
+	// auth 模块未匹配的 /api/admin/* 回退到尚未迁移的 scaffold 路由（games/channels/cashier/sync）
+	adminRouter.NotFound(legacy.ServeHTTP)
+	r.Mount("/api/admin", adminRouter)
+	// 其余（如 /healthz）回退
+	r.NotFound(legacy.ServeHTTP)
+
+	return &http.Server{
+		Addr:    cfg.HTTPAddress,
+		Handler: r,
+	}
+}
+
+// buildLegacyMux 保留尚未迁移到真实实现的 scaffold 路由（games/channels/cashier/sync）。
+// 注意：这些路由暂未接入鉴权中间件，待各自模块迁移；auth 模块 /me 已由真实实现接管。
+func buildLegacyMux(cfg config.Config) *http.ServeMux {
+	mux := http.NewServeMux()
+	sectionSyncHandler := syncapi.NewSectionSyncHandler(sectionSyncScaffoldService{})
+	templateVersionHandler := cashierhttp.NewTemplateVersionHandler(templateVersionScaffoldService{})
+
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"userId":      1,
-			"displayName": "Admin",
-			"roles":       []string{"admin"},
-			"permissions": []string{"game.read", "game.write", "sync.execute"},
+			"app":         cfg.AppName,
+			"environment": cfg.Environment,
+			"status":      "ok",
 		})
 	})
 
-	s.mux.HandleFunc("/api/admin/games", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			writeJSON(w, http.StatusOK, map[string]any{
-				"items": []game.Game{},
-			})
-		case http.MethodPost:
-			var req dto.CreateGameRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-				return
-			}
-			writeJSON(w, http.StatusCreated, map[string]any{
-				"message": "scaffold route only",
-				"request": req,
-			})
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	})
-
-	s.mux.HandleFunc("/api/admin/games/", func(w http.ResponseWriter, r *http.Request) {
+	// 注意：/api/admin/games（含 /markets|/legal-links）已由 game 模块、/channels|/market-channels 与
+	// /game-channels/*、/channel-packages/* 已由 channel 模块真实路由接管（见 admin_wiring.go）；
+	// 此处仅保留尚未迁移的同步等子路径 scaffold。
+	mux.HandleFunc("/api/admin/games/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/admin/games/")
 		switch {
-		case strings.HasSuffix(path, "/market-channels"):
-			marketChannelHandler.ListMarketChannels(w, r)
-		case strings.Contains(path, "/markets/") && strings.HasSuffix(path, "/channels"):
-			marketChannelHandler.CreateMarketChannel(w, r)
 		case strings.HasSuffix(path, "/sync/preview"):
 			sectionSyncHandler.Preview(w, r)
 		case strings.HasSuffix(path, "/sync/execute"):
@@ -103,22 +84,7 @@ func (s *Server) registerRoutes(cfg config.Config) {
 		}
 	})
 
-	s.mux.HandleFunc("/api/admin/game-market-channels/", func(w http.ResponseWriter, r *http.Request) {
-		path := strings.TrimPrefix(r.URL.Path, "/api/admin/game-market-channels/")
-		switch {
-		case strings.HasSuffix(path, "/hide"):
-			marketChannelHandler.HideMarketChannel(w, r)
-		case strings.HasSuffix(path, "/unhide"):
-			marketChannelHandler.UnhideMarketChannel(w, r)
-		default:
-			writeJSON(w, http.StatusNotImplemented, map[string]string{
-				"message": "route scaffolded but not implemented",
-				"path":    r.URL.Path,
-			})
-		}
-	})
-
-	s.mux.HandleFunc("/api/admin/cashier/templates/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/admin/cashier/templates/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/admin/cashier/templates/")
 		switch {
 		case strings.HasSuffix(path, "/copy-to-draft"):
@@ -130,6 +96,8 @@ func (s *Server) registerRoutes(cfg config.Config) {
 			})
 		}
 	})
+
+	return mux
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -176,83 +144,4 @@ func (templateVersionScaffoldService) CopyToDraft(_ context.Context, cmd command
 	}
 
 	return command.BuildDraftFromTemplateVersion(source, cmd.SourceVersion+1), nil
-}
-
-func (marketChannelScaffoldService) Create(_ context.Context, cmd command.CreateMarketChannelCommand) (domainchannel.GameMarketChannel, error) {
-	source := domainchannel.GameMarketChannel{}
-	if strings.TrimSpace(cmd.CopyFromMarket) != "" {
-		source = domainchannel.GameMarketChannel{
-			GameID:       cmd.GameID,
-			Market:       cmd.CopyFromMarket,
-			ChannelID:    cmd.ChannelID,
-			NormalConfig: map[string]any{"copiedFromMarket": cmd.CopyFromMarket},
-		}
-	}
-
-	return command.BuildCreatedMarketChannel(command.CreateMarketChannelCommand{
-		GameID:         cmd.GameID,
-		Market:         cmd.Market,
-		ChannelID:      cmd.ChannelID,
-		Region:         cmd.Region,
-		CopyFromMarket: cmd.CopyFromMarket,
-		Source:         source,
-	}), nil
-}
-
-func (marketChannelScaffoldService) List(_ context.Context, q appquery.ListMarketChannelsQuery) ([]dto.GameMarketChannelListItem, error) {
-	items := []dto.GameMarketChannelListItem{
-		{
-			ID:                      domainchannel.BuildGameMarketChannelID(q.GameID, string(common.MarketGlobal), "google"),
-			GameID:                  q.GameID,
-			Market:                  string(common.MarketGlobal),
-			ChannelID:               "google",
-			ConfigStatus:            common.ConfigStatusValid,
-			IncludedInSnapshot:      true,
-			IncludedInSync:          true,
-			IncludedInRuntimeConfig: true,
-		},
-		{
-			ID:                      domainchannel.BuildGameMarketChannelID(q.GameID, string(common.MarketJP), "google"),
-			GameID:                  q.GameID,
-			Market:                  string(common.MarketJP),
-			ChannelID:               "google",
-			ConfigStatus:            common.ConfigStatusInvalid,
-			IncludedInSnapshot:      true,
-			IncludedInSync:          true,
-			IncludedInRuntimeConfig: false,
-		},
-	}
-
-	return appquery.FilterMarketChannels(q, items), nil
-}
-
-func (marketChannelScaffoldService) Hide(_ context.Context, cmd command.HideMarketChannelCommand) (domainchannel.GameMarketChannel, error) {
-	item := scaffoldMarketChannelFromID(cmd.ID)
-	command.ApplyHideMarketChannel(cmd, &item)
-	return item, nil
-}
-
-func (marketChannelScaffoldService) Unhide(_ context.Context, cmd command.UnhideMarketChannelCommand) (domainchannel.GameMarketChannel, error) {
-	item := scaffoldMarketChannelFromID(cmd.ID)
-	item.Hidden = true
-	item.HiddenBy = "admin"
-	command.ApplyUnhideMarketChannel(&item)
-	return item, nil
-}
-
-func scaffoldMarketChannelFromID(id string) domainchannel.GameMarketChannel {
-	parts := strings.SplitN(id, ":", 3)
-	item := domainchannel.GameMarketChannel{
-		ID:           id,
-		ConfigStatus: common.ConfigStatusValid,
-	}
-
-	if len(parts) != 3 {
-		return item
-	}
-
-	item.GameID = parts[0]
-	item.Market = parts[1]
-	item.ChannelID = parts[2]
-	return item
 }

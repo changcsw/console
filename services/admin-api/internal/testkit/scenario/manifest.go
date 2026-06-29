@@ -21,6 +21,17 @@ type Case struct {
 	Dimension string  `yaml:"dimension"`
 	Request   Request `yaml:"request"`
 	Expect    Expect  `yaml:"expect"`
+	// RequiresDB 标记该 case 需要真实 PG + 全装配（ready=true）才能运行。
+	// 进程内 httptest harness（无 DSN，降级 ready=false）会跳过此类 case，
+	// 仅校验 manifest 可解析；连库 harness 落地后改由其执行。
+	RequiresDB bool `yaml:"requiresDB"`
+	// Fixture 声明该 case 所需的 fixtures 子集（如 common/auth/base）。
+	// 当前进程内 harness 不消费，仅作前向声明（见 03-testing §4.1/§7）。
+	Fixture string `yaml:"fixture"`
+	// Auth 声明该 case 的鉴权身份（如 {role: super_admin}），连库 harness 用以签发令牌。
+	Auth map[string]string `yaml:"auth"`
+	// Note 人类可读说明（如「manifest 已声明但运行需 PG」）。
+	Note string `yaml:"note"`
 }
 
 type Request struct {

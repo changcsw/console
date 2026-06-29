@@ -1,0 +1,361 @@
+# 模块 account-auth（自有账号认证 / 模块 13）接口场景矩阵 manifest
+# 维度定义见 docs/architecture/v2/03-testing.md §4；契约来源：
+# docs/architecture/v2/modules/13-account-auth/spec.compact.md。
+# 接口挂在 games transport（前缀 /api/admin），读 game.read / 写 game.write。
+#
+# 运行说明（与 auth.yaml/game.yaml/channel.yaml 一致）：
+#   进程内 httptest harness（services/admin-api/internal/testkit/scenario）为降级 handler
+#   （无 POSTGRES_DSN/ADMIN_JWT_SECRET → ready=false），无法签发可通过校验的令牌，也无法落库。
+#   因此：
+#     - requiresDB: false 的 S2 用例（受保护接口先过 Authn，未携带/无效令牌即 401）在沙箱内真实执行并断言。
+#     - requiresDB: true 的用例为「manifest 已声明但运行需 PG + 全装配」，进程内 harness 跳过
+#       （SCENARIO_WITH_DB=1 时由连库 harness 执行），仅保证 YAML 解析校验通过。
+#       这些维度已由 transport/http/games 进程内 httptest（内存仓储 + 真实加密/审计 spy）等价覆盖
+#       （见 account_auth_http_test.go / account_auth_memstore_test.go）。
+#
+# 模块维度适用性（compact + 03-testing §4）：
+#   - 整体替换写（PUT），last-writer-wins，不做乐观并发检测 → 不暴露业务级 CONFLICT(409)；
+#     S5 落在 400 的私有错误码 ACCOUNT_AUTH_TYPE_NOT_ALLOWED / ACCOUNT_AUTH_TEMPLATE_NOT_FOUND。
+#   - 三个 GET 为只读：S1/S2/S3 必覆盖；S8 仅 configs 读含密文需覆盖；类型目录/渠道允许集合不分页 → S9 N/A。
+#   - PUT 写：S1/S2/S3/S4/S5/S7/S8/S10 覆盖；S6 schema 隔离由连库 harness 承担（业务表按 search_path）。
+#
+# auth.role → 实体（连库 harness 用以签发令牌；见 tests/fixtures/sandbox/account-auth.sql）：
+#   game_admin  → game.read + game.write（S1/S5/S7/S8/S10 跑通）
+#   game_reader → 仅 game.read（验缺写权限 403；可读三个 GET）
+#   no_perm     → 无任何权限（验缺读权限 403）
+module: account-auth
+cases:
+  # ───────────────────────── 1) GET /account-auth/types（game.read，只读）
+  - name: list_types_requires_auth
+    dimension: S2
+    requiresDB: false
+    note: "未携带 access → 401（Authn 在 RequireBackend 之前）"
+    request:
+      method: GET
+      path: /api/admin/account-auth/types
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_types_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    note: "登录但缺 game.read → 403 FORBIDDEN"
+    request:
+      method: GET
+      path: /api/admin/account-auth/types
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_types_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: game_reader }
+    fixture: common/account-auth/catalog
+    note: "200 + items[]，每项含模板四件套；google.template.secretFields=[clientSecret]"
+    request:
+      method: GET
+      path: /api/admin/account-auth/types
+    expect:
+      status: 200
+  - name: list_types_template_declares_secret_fields
+    dimension: S8
+    requiresDB: true
+    auth: { role: game_reader }
+    fixture: common/account-auth/catalog
+    note: "目录仅含字段定义（secretFields 名），不含任何密文值"
+    request:
+      method: GET
+      path: /api/admin/account-auth/types
+    expect:
+      status: 200
+
+  # ───────────────────────── 2) GET /channels/{channelId}/account-auth-types（game.read，只读）
+  - name: list_channel_types_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/channels/google/account-auth-types
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_channel_types_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/channels/google/account-auth-types
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_channel_types_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: game_reader }
+    fixture: common/account-auth/catalog
+    note: "200 + items[]: { authTypeId, defaultEnabled, locked }"
+    request:
+      method: GET
+      path: /api/admin/channels/google/account-auth-types
+    expect:
+      status: 200
+  - name: list_channel_types_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: game_reader }
+    note: "未知 channelId → 404 NOT_FOUND"
+    request:
+      method: GET
+      path: /api/admin/channels/ghost-channel/account-auth-types
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+
+  # ───────────────────────── 3) GET /games/{gameId}/account-auth-configs（game.read，只读，含密文）
+  - name: list_configs_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/games/100001/account-auth-configs
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_configs_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/games/100001/account-auth-configs
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_configs_success_merges_allowed
+    dimension: S1
+    requiresDB: true
+    auth: { role: game_reader }
+    fixture: sandbox/account-auth/base
+    note: "200 + items[] = 该游戏渠道允许集合并集（含默认/locked 态计算）"
+    request:
+      method: GET
+      path: /api/admin/games/100001/account-auth-configs
+    expect:
+      status: 200
+  - name: list_configs_not_found
+    dimension: S1
+    requiresDB: true
+    auth: { role: game_reader }
+    note: "当前 schema 内不存在游戏 → 404 NOT_FOUND"
+    request:
+      method: GET
+      path: /api/admin/games/999999/account-auth-configs
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: list_configs_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: game_reader }
+    fixture: sandbox/account-auth/configured
+    note: "已配置 google：configJson.clientSecret 恒 masked，绝不回明文/密文"
+    request:
+      method: GET
+      path: /api/admin/games/100001/account-auth-configs
+    expect:
+      status: 200
+  - name: list_configs_scoped_to_current_env
+    dimension: S6
+    requiresDB: true
+    auth: { role: game_reader }
+    fixture: sandbox/account-auth/base
+    note: "业务表按 search_path 隐式作用域=当前 env schema；不跨 schema 读"
+    request:
+      method: GET
+      path: /api/admin/games/100001/account-auth-configs
+    expect:
+      status: 200
+
+  # ───────────────────────── 4) PUT /games/{gameId}/account-auth-configs（game.write，整体替换）
+  - name: replace_configs_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [] }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: replace_configs_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: game_reader }
+    note: "仅 game.read 缺 game.write → 403"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [] }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: replace_configs_validation_missing_items
+    dimension: S4
+    requiresDB: true
+    auth: { role: game_admin }
+    note: "缺 items 字段 → 400 VALIDATION_FAILED"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: {}
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: replace_configs_type_not_allowed
+    dimension: S5
+    requiresDB: true
+    auth: { role: game_admin }
+    fixture: sandbox/account-auth/base
+    note: "authTypeId 不在该游戏渠道允许集合 → 400 ACCOUNT_AUTH_TYPE_NOT_ALLOWED（整体替换不暴露 CONFLICT）"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [{ authTypeId: "facebook", enabled: true }] }
+    expect:
+      status: 400
+      jsonContains: { error.code: ACCOUNT_AUTH_TYPE_NOT_ALLOWED }
+  - name: replace_configs_template_not_found
+    dimension: S5
+    requiresDB: true
+    auth: { role: game_admin }
+    fixture: sandbox/account-auth/base
+    note: "启用缺可用模板的类型 → 400 ACCOUNT_AUTH_TEMPLATE_NOT_FOUND"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [{ authTypeId: "apple", enabled: true }] }
+    expect:
+      status: 400
+      jsonContains: { error.code: ACCOUNT_AUTH_TEMPLATE_NOT_FOUND }
+  - name: replace_configs_success_empty_template_valid
+    dimension: S1
+    requiresDB: true
+    auth: { role: game_admin }
+    fixture: sandbox/account-auth/base
+    note: "启用空四件套类型（guest）→ 200，该项 configStatus=valid"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [{ authTypeId: "guest", enabled: true }] }
+    expect:
+      status: 200
+  - name: replace_configs_enable_without_secret_invalid
+    dimension: S1
+    requiresDB: true
+    auth: { role: game_admin }
+    fixture: sandbox/account-auth/base
+    note: "仅启用未填密钥（google）→ 200 但该项 configStatus=invalid（不得静默 empty），message 标注 clientSecret"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [{ authTypeId: "google", enabled: true }] }
+    expect:
+      status: 200
+  - name: replace_configs_full_valid
+    dimension: S1
+    requiresDB: true
+    auth: { role: game_admin }
+    fixture: sandbox/account-auth/base
+    note: "google 填全四件套 → 200，该项 configStatus=valid，lastCheckAt 记录"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [{ authTypeId: "google", enabled: true, configJson: { clientId: "client-abc", clientSecret: "topsecret", redirectUri: "https://example.com/oauth/cb" } }] }
+    expect:
+      status: 200
+  - name: replace_configs_masks_secret_in_response
+    dimension: S8
+    requiresDB: true
+    auth: { role: game_admin }
+    fixture: sandbox/account-auth/base
+    note: "响应 configJson.clientSecret 恒 masked，绝不回明文；落库为密文"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [{ authTypeId: "google", enabled: true, configJson: { clientId: "client-abc", clientSecret: "topsecret", redirectUri: "https://example.com/oauth/cb" } }] }
+    expect:
+      status: 200
+  - name: replace_configs_secret_regression_masked_keeps_old
+    dimension: S8
+    requiresDB: true
+    auth: { role: game_admin }
+    fixture: sandbox/account-auth/configured
+    note: "密文更新回归：提交 clientSecret=masked → 还原旧密文，不重新加密（仓储密文恒定）"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [{ authTypeId: "google", enabled: true, configJson: { clientId: "client-abc", clientSecret: "masked", redirectUri: "https://example.com/oauth/cb" } }] }
+    expect:
+      status: 200
+  - name: replace_configs_secret_regression_toggle_only
+    dimension: S8
+    requiresDB: true
+    auth: { role: game_admin }
+    fixture: sandbox/account-auth/configured
+    note: "密文更新回归：仅改 enabled（不带 configJson）→ 已存密文不变，不重新加密"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [{ authTypeId: "google", enabled: false }] }
+    expect:
+      status: 200
+  - name: replace_configs_locked_type_preserved
+    dimension: S1
+    requiresDB: true
+    auth: { role: game_admin }
+    fixture: sandbox/account-auth/base
+    note: "locked 类型（line）游戏侧不可关闭：提交 enabled=false 被忽略，仍启用"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [{ authTypeId: "line", enabled: false }] }
+    expect:
+      status: 200
+  - name: replace_configs_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: game_admin }
+    fixture: sandbox/account-auth/base
+    note: "写 audit_logs(action=game.account_auth.update)；detail 记每项 authTypeId + enabled/configStatus before/after，secret 全脱敏"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [{ authTypeId: "guest", enabled: true }] }
+    expect:
+      status: 200
+  - name: replace_configs_scoped_to_current_env
+    dimension: S6
+    requiresDB: true
+    auth: { role: game_admin }
+    fixture: sandbox/account-auth/base
+    note: "写落当前 env schema（search_path 决定），不跨 schema 写 production"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [{ authTypeId: "guest", enabled: true }] }
+    expect:
+      status: 200
+  - name: replace_configs_transaction_atomic
+    dimension: S10
+    requiresDB: true
+    auth: { role: game_admin }
+    fixture: sandbox/account-auth/base
+    note: "整体替换（DELETE+INSERT 全 allowed 集合）单事务；中途失败整体回滚，无部分写入"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/account-auth-configs
+      body: { items: [{ authTypeId: "guest", enabled: true }, { authTypeId: "google", enabled: true, configJson: { clientId: "client-abc", clientSecret: "topsecret", redirectUri: "https://example.com/oauth/cb" } }] }
+    expect:
+      status: 200

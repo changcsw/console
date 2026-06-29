@@ -6,7 +6,13 @@ export const routes: RouteRecordRaw[] = [
     path: "/login",
     name: "login",
     component: () => import("@/views/login/LoginView.vue"),
-    meta: { title: "后台登录", hidden: true }
+    meta: { title: "后台登录", hidden: true, public: true }
+  },
+  {
+    path: "/403",
+    name: "forbidden",
+    component: () => import("@/views/error/ForbiddenView.vue"),
+    meta: { title: "无权限", hidden: true, public: true }
   },
   {
     path: "/",
@@ -23,13 +29,19 @@ export const routes: RouteRecordRaw[] = [
         path: "games",
         name: "games",
         component: () => import("@/views/games/GamesView.vue"),
-        meta: { title: "游戏管理", icon: "Grid" }
+        meta: { title: "游戏管理", icon: "Grid", perm: "game.read" }
+      },
+      {
+        path: "games/:gameId",
+        name: "game-detail",
+        component: () => import("@/views/games/detail/GameDetailView.vue"),
+        meta: { title: "游戏详情", hidden: true, perm: "game.read" }
       },
       {
         path: "channels",
         name: "channels",
         component: () => import("@/views/channels/ChannelsView.vue"),
-        meta: { title: "渠道管理", icon: "Connection" }
+        meta: { title: "渠道管理", icon: "Connection", perm: "channel.read" }
       },
       {
         path: "cashier",
@@ -41,13 +53,13 @@ export const routes: RouteRecordRaw[] = [
         path: "audit",
         name: "audit",
         component: () => import("@/views/audit/AuditView.vue"),
-        meta: { title: "审计日志", icon: "Document" }
+        meta: { title: "审计日志", icon: "Document", perm: "audit.read" }
       },
       {
         path: "system",
         name: "system",
         component: () => import("@/views/system/SystemView.vue"),
-        meta: { title: "系统设置", icon: "Setting" }
+        meta: { title: "系统设置", icon: "Setting", perm: "system.read" }
       }
     ]
   }

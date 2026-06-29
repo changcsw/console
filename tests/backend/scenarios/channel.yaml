@@ -1,0 +1,339 @@
+# 模块 channel（渠道与渠道实例）接口场景矩阵 manifest
+# 维度定义见 docs/architecture/v2/03-testing.md §4；契约来源：
+# docs/architecture/v2/modules/12-channel/spec.compact.md。
+#
+# 运行说明（与 auth.yaml/game.yaml 一致）：
+#   - requiresDB: false 的 S2 用例可在进程内降级 httptest harness 直接执行（未携带 token → 401）。
+#   - requiresDB: true 的用例需要真实 PG + 全装配（SCENARIO_WITH_DB=1），当前仅声明并解析校验。
+module: channel
+cases:
+  # ───────────────────────── 1) GET /games/{gameId}/channels（channel.read）
+  - name: list_channel_options_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/games/100001/channels
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_channel_options_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: channel_reader }
+    fixture: sandbox/channel/base
+    request:
+      method: GET
+      path: /api/admin/games/100001/channels
+    expect:
+      status: 200
+  - name: list_channel_options_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/games/100001/channels
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+
+  # ───────────────────────── 2) GET /games/{gameId}/market-channels（channel.read）
+  - name: list_market_channels_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/games/100001/market-channels
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_market_channels_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: channel_reader }
+    fixture: sandbox/channel/base
+    request:
+      method: GET
+      path: /api/admin/games/100001/market-channels?page=1&pageSize=20
+    expect:
+      status: 200
+  - name: list_market_channels_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/games/100001/market-channels
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_market_channels_validation_bad_query
+    dimension: S4
+    requiresDB: true
+    auth: { role: channel_reader }
+    note: "market/configStatus/compatible/hidden 非法值应 400 VALIDATION_FAILED"
+    request:
+      method: GET
+      path: /api/admin/games/100001/market-channels?market=US&configStatus=bad&compatible=abc&hidden=abc
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: list_market_channels_pagination
+    dimension: S9
+    requiresDB: true
+    auth: { role: channel_reader }
+    request:
+      method: GET
+      path: /api/admin/games/100001/market-channels?page=1&pageSize=999
+    expect:
+      status: 200
+      jsonContains: { data.pageSize: 100 }
+  - name: list_market_channels_env_scope
+    dimension: S6
+    requiresDB: true
+    auth: { role: channel_reader }
+    note: "隐式作用域=当前 env schema（search_path 决定），不跨 schema 写读"
+    request:
+      method: GET
+      path: /api/admin/games/100001/market-channels
+    expect:
+      status: 200
+
+  # ───────────────────────── 3) POST /games/{gameId}/markets/{market}/channels（channel.write）
+  - name: create_market_channel_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/games/100001/markets/JP/channels
+      body: { channelId: "google" }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: create_market_channel_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: channel_reader }
+    request:
+      method: POST
+      path: /api/admin/games/100001/markets/JP/channels
+      body: { channelId: "google" }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: create_market_channel_validation
+    dimension: S4
+    requiresDB: true
+    auth: { role: channel_admin }
+    request:
+      method: POST
+      path: /api/admin/games/100001/markets/JP/channels
+      body: { channelId: "", mode: "copy" }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_market_channel_incompatible
+    dimension: S4
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "CN 与 overseas / 非CN 与 domestic 不兼容 → MARKET_CHANNEL_INCOMPATIBLE"
+    request:
+      method: POST
+      path: /api/admin/games/100001/markets/CN/channels
+      body: { channelId: "google" }
+    expect:
+      status: 400
+      jsonContains: { error.code: MARKET_CHANNEL_INCOMPATIBLE }
+  - name: create_market_channel_conflict
+    dimension: S5
+    requiresDB: true
+    auth: { role: channel_admin }
+    fixture: sandbox/channel/base
+    request:
+      method: POST
+      path: /api/admin/games/100001/markets/JP/channels
+      body: { channelId: "google" }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: create_market_channel_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: channel_admin }
+    request:
+      method: POST
+      path: /api/admin/games/100001/markets/JP/channels
+      body: { channelId: "google", mode: "empty", enabled: true, remark: "seed" }
+    expect:
+      status: 201
+  - name: create_market_channel_copy_marks_invalid
+    dimension: S1
+    requiresDB: true
+    auth: { role: channel_admin }
+    request:
+      method: POST
+      path: /api/admin/games/100001/markets/KR/channels
+      body: { channelId: "google", mode: "copy", copyFromMarket: "JP" }
+    expect:
+      status: 201
+      jsonContains: { data.configStatus: invalid }
+  - name: create_market_channel_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: channel_admin }
+    request:
+      method: POST
+      path: /api/admin/games/100001/markets/JP/channels
+      body: { channelId: "google" }
+    expect:
+      status: 201
+  - name: create_market_channel_transaction_rollback
+    dimension: S10
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "唯一键冲突或复制来源缺失时整体验证回滚，无部分写入"
+    request:
+      method: POST
+      path: /api/admin/games/100001/markets/JP/channels
+      body: { channelId: "google", mode: "copy", copyFromMarket: "NOT_EXISTS" }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+
+  # ───────────────────────── 4) 单实例读写与隐藏（/game-channels/{id}）
+  - name: get_market_channel_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/game-channels/1
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: patch_market_channel_validation
+    dimension: S4
+    requiresDB: true
+    auth: { role: channel_admin }
+    request:
+      method: PATCH
+      path: /api/admin/game-channels/1
+      body: { remark: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: hide_market_channel_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/hide
+      body: { reason: "manual" }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: hide_market_channel_invalid_state_conflict
+    dimension: S5
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "不得隐藏 invalid/empty 状态实例"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/hide
+      body: { reason: "manual" }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: hide_market_channel_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: channel_admin }
+    request:
+      method: POST
+      path: /api/admin/game-channels/2/hide
+      body: { reason: "manual" }
+    expect:
+      status: 200
+  - name: unhide_market_channel_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: channel_admin }
+    request:
+      method: POST
+      path: /api/admin/game-channels/2/unhide
+    expect:
+      status: 200
+
+  # ───────────────────────── 5) 渠道包（/game-channels/{id}/packages, /channel-packages/{id}）
+  - name: list_packages_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/packages
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: create_package_validation_market_mismatch
+    dimension: S4
+    requiresDB: true
+    auth: { role: channel_admin }
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/packages
+      body: { packageCode: "pkg.a", packageName: "Pkg A", marketCode: "CN" }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_package_conflict
+    dimension: S5
+    requiresDB: true
+    auth: { role: channel_admin }
+    fixture: sandbox/channel/base
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/packages
+      body: { packageCode: "pkg.a", packageName: "Pkg A", marketCode: "JP" }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: create_package_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: channel_admin }
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/packages
+      body: { packageCode: "pkg.b", packageName: "Pkg B", marketCode: "JP", inheritChannelConfig: true, enabled: true }
+    expect:
+      status: 201
+  - name: create_package_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: channel_admin }
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/packages
+      body: { packageCode: "pkg.c", packageName: "Pkg C", marketCode: "JP" }
+    expect:
+      status: 201
+  - name: update_package_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: PATCH
+      path: /api/admin/channel-packages/1
+      body: { enabled: false }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: update_package_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: channel_admin }
+    request:
+      method: PATCH
+      path: /api/admin/channel-packages/1
+      body: { enabled: false, overrideJson: { key: "value" } }
+    expect:
+      status: 200

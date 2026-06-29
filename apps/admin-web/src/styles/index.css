@@ -66,6 +66,11 @@ a {
   padding: 20px;
 }
 
+.perm-disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
+}
+
 @media (max-width: 960px) {
   .app-layout {
     grid-template-columns: 1fr !important;

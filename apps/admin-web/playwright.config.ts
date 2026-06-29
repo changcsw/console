@@ -21,11 +21,11 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "chromium", use: { ...devices["Desktop Chrome"], channel: "chrome" } },
   ],
   webServer: {
     // 强制独立端口 + strictPort，避免复用到其它项目的 5173 dev server。
-    command: `pnpm exec vite --port ${PORT} --strictPort`,
+    command: `pnpm exec vite --host 127.0.0.1 --port ${PORT} --strictPort`,
     url: `http://127.0.0.1:${PORT}`,
     reuseExistingServer: false,
     timeout: 120_000,

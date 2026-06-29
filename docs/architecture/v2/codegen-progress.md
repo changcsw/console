@@ -1,7 +1,8 @@
 # 代码生成进度账本
 
-> 由「🎯 总负责 Agent」维护（见 `codegen-workflow.md` §12）。跨上下文窗口续作时，先读本文件确定从哪个模块/阶段继续。
-> 每阶段开始/完成/打回即更新对应单元格；每模块阶段性结束在「执行日志」追加记录。
+> 由「🎯 总负责 Agent（瘦身版 / 单模块 scope）」维护（见 `codegen-workflow.md` §12）。
+> 本文件是总 Agent 允许持续读取的唯一进度账本；详细执行日志已迁移至 `docs/architecture/v2/codegen-progress.audit.md`，仅供人类审计。
+> 总 Agent 只读本文件，不读审计归档正文、不读 handoff 全文、不读 diff。
 
 **状态图例**：⬜ 未开始 ｜ 🔄 进行中 ｜ ✅ 完成 ｜ ❌ 打回（需返工）
 
@@ -9,11 +10,12 @@
 ```text
    ┌ 🟦开发 → 🟦CR → 🟦测试 ┐
  M ┤                         ├─(均✅)→ 🟪测试专家 ⇄ 🟧全栈修复 → ✅验收
-   └ 🟩开发 → 🟩CR → 🟩测试 ┘   （前后端两车道并行）
+   └ 🟩开发 → 🟩CR → 🟩测试 ┘
 ```
-**跨模块流水线**：模块 M 进入 🟪测试专家阶段后，🟦后端开发 / 🟩前端开发 即可开工模块 M+1。
 
-**模块顺序**：按 `index.json` 的 `code` 升序（依赖拓扑序）。开工某模块前，确认其 `depends_on` 模块的 🟦后端测试已 ✅。
+**并行原则**：同 `lane` 串行，跨 `lane` 在 `depends_on` 满足时可并行。
+
+**总 Agent 输入**：`docs/architecture/v2/index.json` + 本文件 + 当前模块 `spec.compact.md`
 
 ---
 
@@ -21,48 +23,68 @@
 
 > 列含义：🟦开发/CR/测试 = 后端车道三阶段；🟩开发/CR/测试 = 前端车道三阶段；🟪 = 测试专家（集成）；🟧 = 高级全栈工程师修复回路（有修复时标 🔄，回路结束标 ✅，无需修复留 ⬜）；✅ = 功能验收。
 
-| # | 模块 id | depends_on（需先完成后端） | 🟦开发 | 🟦CR | 🟦测试 | 🟩开发 | 🟩CR | 🟩测试 | 🟪测试专家 | 🟧全栈修复 | ✅验收 | 备注 |
-| --- | --- | --- | :--: | :--: | :--: | :--: | :--: | :--: | :--: | :--: | :--: | --- |
-| 10 | `auth` | common | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 11 | `game` | common | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 12 | `channel` | game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 13 | `account-auth` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 14 | `channel-login` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 15 | `feature-plugin` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 16 | `product` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 17 | `cashier-template` | common | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 18 | `game-cashier` | cashier-template, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 19 | `payment` | channel, product, cashier-template, game-cashier, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 20 | `snapshot` | channel, account-auth, channel-login, feature-plugin, product, cashier-template, game-cashier, payment, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 21 | `sync` | snapshot, +上游全部 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 22 | `audit` | common | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| 23 | `dashboard` | cashier-template, snapshot, sync | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
+| # | 模块 id | lane | depends_on（需先完成后端） | 🟦开发 | 🟦CR | 🟦测试 | 🟩开发 | 🟩CR | 🟩测试 | 🟪测试专家 | 🟧全栈修复 | ✅验收 | 备注 |
+| --- | --- | --- | --- | :--: | :--: | :--: | :--: | :--: | :--: | :--: | :--: | :--: | --- |
+| 10 | `auth` | `platform-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 旧模块，详细审计已归档 |
+| 11 | `game` | `games-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 旧模块，详细审计已归档 |
+| 12 | `channel` | `channels-surface` | game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 旧模块，详细审计已归档 |
+| 13 | `account-auth` | `games-surface` | channel, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 旧模块，详细审计已归档 |
+| 14 | `channel-login` | `channels-surface` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 与 `feature-plugin` 同 lane，二选一先开 |
+| 15 | `feature-plugin` | `channels-surface` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 与 `channel-login` 同 lane，二选一先开 |
+| 16 | `product` | `games-surface` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | `account-auth` 已完成，可开工 |
+| 17 | `cashier-template` | `cashier-surface` | common | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 可开工 |
+| 18 | `game-cashier` | `cashier-surface` | cashier-template, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `cashier-template` |
+| 19 | `payment` | `payment-surface` | channel, product, cashier-template, game-cashier, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `product + game-cashier` |
+| 20 | `snapshot` | `runtime-surface` | channel, account-auth, channel-login, feature-plugin, product, cashier-template, game-cashier, payment, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 14/15/16/17/18/19 |
+| 21 | `sync` | `runtime-surface` | snapshot, +上游全部 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `snapshot` |
+| 22 | `audit` | `audit-surface` | common | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 可开工 |
+| 23 | `dashboard` | `dashboard-surface` | cashier-template, snapshot, sync | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `sync` |
 
-> 注：`common`（00）是所有模块的通用上游契约（`always_read`）。其 `code_paths`（`internal/domain/common`、`stores/dictionary.ts`）若需公共基建，由首个开工模块的 🟦后端开发/🟩前端开发按需补齐并在此备注。
+> 注：`artifacts_dir` 统一在 `index.json.docs[].artifacts_dir` 中定义；旧模块若尚无 `artifacts` 目录，仅在后续续作时回填。
 
 ---
 
-## 在制看板（流水线快照）
+## 可并行开工建议（按当前进度）
 
-> 总负责 Agent 实时更新：当前各模块停在哪一阶段，便于把握并行/流水线状态。
-
-| 模块 | 当前阶段 | 负责角色 | 说明 |
+| lane | 推荐起始模块 | 当前状态 | 说明 |
 | --- | --- | --- | --- |
-| — | — | — | 尚未开工 |
+| `games-surface` | `product` | ✅ 可开工 | `account-auth` 已完成，同 lane 空闲 |
+| `channels-surface` | `channel-login` | ✅ 可开工 | `feature-plugin` 与其同 lane，暂不并开 |
+| `cashier-surface` | `cashier-template` | ✅ 可开工 | `game-cashier` 依赖它 |
+| `audit-surface` | `audit` | ✅ 可开工 | 与其他 lane 可并行 |
+| `payment-surface` | `payment` | ⛔ 阻塞 | 等待 `product + game-cashier` |
+| `runtime-surface` | `snapshot` | ⛔ 阻塞 | 等待 14/15/16/17/18/19 |
+| `dashboard-surface` | `dashboard` | ⛔ 阻塞 | 等待 `sync` |
+
+> 如果你选择 `feature-plugin` 而不是 `channel-login` 先开，也可以；但 **`channels-surface` 同时只能跑一个模块**。
 
 ---
 
-## 模块执行日志
+## 在制看板（只放当前仍在推进的模块）
 
-> 每模块阶段性结束后追加。
+| 模块 | lane | 当前阶段 | worktree / branch | handoff.summary.md | 说明 |
+| --- | --- | --- | --- | --- | --- |
+| — | — | — | — | — | 当前无在制模块 |
 
-### 模板（复制使用）
-```text
-## <code> · <module-id>  —  <开始/更新时间>
-- 🟦 后端：开发<状态> / CR<通过·阻断n> / 测试<通过n·失败n>。API <n>、表/迁移 <n>、纯函数 <n>。handoff 摘要：…
-- 🟩 前端：开发<状态> / CR<通过·阻断n> / 测试<通过n·失败n>。页面/组件 <n>。handoff 摘要：…
-- 🟪 测试专家：复测 <轮次>。契约对账：<结论>。集成 e2e/回归：通过 <n>/失败 <n>。
-- 🟧 全栈修复：修复 <n> 项（问题→根因→改动）。
-- ✅ 验收：<通过/不通过>。验收清单 <通过/总数>。遗留风险：…
-- 偏差/未决：…
-```
+> 总 Agent 每次只维护当前模块这一行；模块完成或阻塞后即清空或转历史，不把长日志写回本文件。
+
+---
+
+## 产物路径约定（速记）
+
+- 模块产物目录：`docs/architecture/v2/modules/<code>-<module-id>/artifacts`
+- 标准文件：
+  - `bootstrap.module.txt`
+  - `bootstrap.integration.txt`
+  - `module.manifest.json`
+  - `integration.checklist.md`
+  - `handoff.summary.md`
+  - `audit.log.md`
+
+---
+
+## 审计归档
+
+- 详细执行日志：`docs/architecture/v2/codegen-progress.audit.md`
+- 默认只给人类审计使用；总 Agent、集成 Agent、后续模块 Agent **默认不读**
+- 旧模块 `10~13` 的历史日志已迁入归档；后续若续作这些模块，再按新协议回填各自 `artifacts` 目录

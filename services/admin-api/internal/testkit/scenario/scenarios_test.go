@@ -1,12 +1,27 @@
 package scenario
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/csw/console/services/admin-api/internal/infra/config"
 	"github.com/csw/console/services/admin-api/internal/transport/httpserver"
 )
+
+// scenarioDBReady 报告进程内 harness 是否接入了真实 PG + 全装配。
+// 当前进程内 httptest handler 不连库（降级 ready=false），故标记 requiresDB
+// 的 case 默认跳过；待连库 harness 落地后置 SCENARIO_WITH_DB=1 由其执行。
+func scenarioDBReady() bool {
+	return os.Getenv("SCENARIO_WITH_DB") == "1"
+}
+
+func noteSuffix(note string) string {
+	if note == "" {
+		return ""
+	}
+	return ": " + note
+}
 
 func TestScenarioManifests(t *testing.T) {
 	dir, ok := ScenariosDir()
@@ -33,6 +48,11 @@ func TestScenarioManifests(t *testing.T) {
 			for _, c := range m.Cases {
 				c := c
 				t.Run(c.Name, func(t *testing.T) {
+					if c.RequiresDB && !scenarioDBReady() {
+						t.Skipf("[%s] requires PG + full wiring (set SCENARIO_WITH_DB=1); manifest parsed OK%s",
+							c.Dimension, noteSuffix(c.Note))
+						return
+					}
 					res := RunCase(handler, c)
 					if !res.Passed {
 						t.Errorf("[%s] %s", res.Dimension, res.Message)

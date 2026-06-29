@@ -10,23 +10,25 @@ cases:
       jsonContains:
         status: ok
 
-  - name: me_returns_identity
+  - name: me_requires_auth
     dimension: S1
     request:
       method: GET
       path: /api/admin/me
     expect:
-      status: 200
+      status: 401
       jsonContains:
-        displayName: Admin
+        error.code: UNAUTHENTICATED
 
-  - name: games_list_ok
-    dimension: S1
+  - name: games_list_requires_auth
+    dimension: S2
     request:
       method: GET
       path: /api/admin/games
     expect:
-      status: 200
+      status: 401
+      jsonContains:
+        error.code: UNAUTHENTICATED
 
   - name: sync_preview_valid_section_ok
     dimension: S1
