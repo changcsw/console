@@ -65,7 +65,7 @@ func newLoginHarness(t *testing.T) *loginHarness {
 	root := chi.NewRouter()
 	sub := chi.NewRouter()
 	// channel svc 传 nil：本测试只打 login-config 路由，不触达 channel 编排。
-	RegisterRoutes(sub, NewHandler(nil, testEnv, loginSvc), issuer, testEnv, slog.New(slog.NewTextHandler(io.Discard, nil)), true)
+	RegisterRoutes(sub, NewHandler(nil, testEnv, loginSvc), issuer, testEnv, slog.New(slog.NewTextHandler(io.Discard, nil)), true, nil)
 	root.Mount("/api/admin", sub)
 
 	return &loginHarness{router: root, store: store, cipher: cipher, audit: audit, issuer: issuer}

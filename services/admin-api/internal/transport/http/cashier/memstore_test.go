@@ -355,8 +355,9 @@ func (r *memRepo) UpdateFXSyncRunReview(_ context.Context, runID int64, status d
 // fakeAudit 记录审计调用，供 S7/S8 断言。
 type fakeAudit struct{ entries []cashierapp.AuditEntry }
 
-func (a *fakeAudit) Write(_ context.Context, e cashierapp.AuditEntry) {
+func (a *fakeAudit) Write(_ context.Context, e cashierapp.AuditEntry) error {
 	a.entries = append(a.entries, e)
+	return nil
 }
 
 func (a *fakeAudit) byAction(action string) (cashierapp.AuditEntry, bool) {

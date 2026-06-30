@@ -401,8 +401,9 @@ func (spyFile) NormalizeReference(value string) (string, error) { return value, 
 // spyAudit 记录所有审计写入，供断言 action / detail 脱敏。
 type spyAudit struct{ entries []adminapp.AuditEntry }
 
-func (a *spyAudit) Write(_ context.Context, entry adminapp.AuditEntry) {
+func (a *spyAudit) Write(_ context.Context, entry adminapp.AuditEntry) error {
 	a.entries = append(a.entries, entry)
+	return nil
 }
 
 func fixedNow() time.Time { return time.Unix(1700000100, 0).UTC() }
