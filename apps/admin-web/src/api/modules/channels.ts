@@ -137,6 +137,63 @@ export interface UpdateChannelPackageRequest {
   overrideJson?: Record<string, unknown>;
 }
 
+export type FormFieldComponent = "input" | "password" | "textarea" | "number" | "select" | "switch" | "file" | "json";
+
+export interface TemplateFieldOption {
+  label: string;
+  value: string | number | boolean;
+}
+
+export interface ChannelLoginTemplateField {
+  key: string;
+  label: string;
+  component: FormFieldComponent;
+  required?: boolean;
+  placeholder?: string;
+  order?: number;
+  group?: string;
+  options?: TemplateFieldOption[];
+}
+
+export interface ChannelLoginTemplateFileField {
+  key: string;
+  accept?: string[];
+  maxSizeKB?: number;
+}
+
+export interface ChannelLoginTemplate {
+  templateVersion: string;
+  formSchemaJson: ChannelLoginTemplateField[];
+  secretFieldsJson: string[];
+  fileFieldsJson: ChannelLoginTemplateFileField[];
+  validationRulesJson: Record<string, unknown>;
+}
+
+export interface ChannelLoginConfig {
+  enabled: boolean;
+  configJson: Record<string, unknown>;
+  configStatus: ConfigStatus;
+  lastCheckAt: string | null;
+  lastCheckMessage: string;
+}
+
+export interface ChannelLoginConfigResponse {
+  gameChannelId: number;
+  env: string;
+  channelId: string;
+  marketCode: Market;
+  loginMode: LoginMode;
+  loginLocked: boolean;
+  config: ChannelLoginConfig;
+  template: ChannelLoginTemplate;
+}
+
+export interface PutChannelLoginConfigPayload {
+  enabled?: boolean;
+  configJson: Record<string, unknown>;
+  templateVersion?: string;
+}
+
 function buildQuery(params: Record<string, unknown>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -234,6 +291,22 @@ export function updateChannelPackage(
 ): Promise<ChannelPackage> {
   return request<ChannelPackage>(`/api/admin/channel-packages/${packageId}`, {
     method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+// GET /game-channels/{gameChannelId}/login-config — 渠道登录配置与模板（channel.read）
+export function getLoginConfig(gameChannelId: number): Promise<ChannelLoginConfigResponse> {
+  return request<ChannelLoginConfigResponse>(`/api/admin/game-channels/${gameChannelId}/login-config`);
+}
+
+// PUT /game-channels/{gameChannelId}/login-config — 渠道登录整体 upsert（channel.write）
+export function putLoginConfig(
+  gameChannelId: number,
+  payload: PutChannelLoginConfigPayload
+): Promise<ChannelLoginConfigResponse> {
+  return request<ChannelLoginConfigResponse>(`/api/admin/game-channels/${gameChannelId}/login-config`, {
+    method: "PUT",
     body: JSON.stringify(payload)
   });
 }

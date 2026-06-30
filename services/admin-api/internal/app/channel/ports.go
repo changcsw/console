@@ -101,6 +101,21 @@ type GameChannelRepository interface {
 	Unhide(ctx context.Context, id int64) error
 }
 
+// ChannelLoginTemplateReader 渠道登录模板只读端口（复制创建时用于区分普通/secret/file 字段）。
+type ChannelLoginTemplateReader interface {
+	// GetPublishedByChannel 取该渠道 enabled 最新版本模板；不存在返回 (nil, nil)。
+	GetPublishedByChannel(ctx context.Context, channelIDRef int64) (*domainchannel.ChannelLoginTemplate, error)
+}
+
+// ChannelLoginConfigStore 渠道登录配置窄仓储（game_channel_login_configs）。
+// 复制创建时读取源配置并向新实例落库（复制普通字段、清空 secret/file、强制 invalid）。
+type ChannelLoginConfigStore interface {
+	// GetByGameChannel 取实例登录配置；不存在返回 (nil, nil)。
+	GetByGameChannel(ctx context.Context, gameChannelID int64) (*domainchannel.ChannelLoginConfig, error)
+	// Upsert 按 (game_channel_id_ref) upsert。
+	Upsert(ctx context.Context, cfg *domainchannel.ChannelLoginConfig) error
+}
+
 // ChannelPackageRepository 渠道包窄仓储（channel_packages）。
 type ChannelPackageRepository interface {
 	ListByGameChannel(ctx context.Context, gameChannelID int64) ([]domainchannel.ChannelPackage, error)
@@ -112,9 +127,11 @@ type ChannelPackageRepository interface {
 
 // Repositories 一组仓储句柄（绑定到 pool 或某事务连接）。
 type Repositories struct {
-	Channels     ChannelRepository
-	GameChannels GameChannelRepository
-	Packages     ChannelPackageRepository
+	Channels       ChannelRepository
+	GameChannels   GameChannelRepository
+	Packages       ChannelPackageRepository
+	LoginTemplates ChannelLoginTemplateReader
+	LoginConfigs   ChannelLoginConfigStore
 }
 
 // TxManager 提供事务边界，跨聚合写编排在 app 层用 InTx 包裹（01 §4.2）。

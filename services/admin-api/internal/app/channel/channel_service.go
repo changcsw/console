@@ -146,6 +146,7 @@ func (s *ChannelService) CreateMarketChannel(ctx context.Context, cmd dto.Create
 		}
 
 		var inst domainchannel.GameMarketChannel
+		var copySource *domainchannel.GameMarketChannel
 		if mode == modeCopy {
 			source, err := repos.GameChannels.FindInstance(ctx, gameIDRef, cmd.CopyFromMarket, channelID)
 			if err != nil {
@@ -154,6 +155,7 @@ func (s *ChannelService) CreateMarketChannel(ctx context.Context, cmd dto.Create
 				}
 				return err
 			}
+			copySource = &source
 			inst = domainchannel.NewCopiedMarketChannel(cmd.GameID, market, channelID, region, source)
 		} else {
 			inst = domainchannel.NewBlankMarketChannel(cmd.GameID, market, channelID, region)
@@ -170,6 +172,15 @@ func (s *ChannelService) CreateMarketChannel(ctx context.Context, cmd dto.Create
 			return err
 		}
 		created = saved
+
+		// 复制创建强约束（00 §3.4 / channel-login compact §业务规则3/4）：
+		// channel_only 渠道复制实例时，同步向 game_channel_login_configs 落库
+		// （仅普通字段、清空 secret/file、config_status=invalid），避免 GET login-config 仍返回 empty 占位。
+		if mode == modeCopy && copySource != nil && ch.Policy.LoginMode == common.LoginModeChannelOnly {
+			if err := copyLoginConfig(ctx, repos, ch.Channel.ID, *copySource, saved.ID); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -359,6 +370,26 @@ func (s *ChannelService) UpdatePackage(ctx context.Context, cmd dto.UpdatePackag
 }
 
 // ===== helpers =====
+
+// copyLoginConfig 复制创建 channel_only 实例时，向新实例写入渠道登录配置：
+// 取该渠道 enabled 最新模板区分普通/secret/file 字段，读取源实例登录配置，
+// 只复制普通字段、清空 secret/file，强制 config_status=invalid（复制后不联动源实例）。
+// 落当前 env schema（仓储 SQL 不带 schema 前缀/不带 env 谓词），不存明文密钥（secret 字段直接清空）。
+func copyLoginConfig(ctx context.Context, repos Repositories, channelIDRef int64, source domainchannel.GameMarketChannel, newGameChannelID int64) error {
+	if repos.LoginTemplates == nil || repos.LoginConfigs == nil {
+		return nil
+	}
+	tpl, err := repos.LoginTemplates.GetPublishedByChannel(ctx, channelIDRef)
+	if err != nil {
+		return err
+	}
+	srcCfg, err := repos.LoginConfigs.GetByGameChannel(ctx, source.ID)
+	if err != nil {
+		return err
+	}
+	cfg := domainchannel.NewCopiedLoginConfig(newGameChannelID, tpl, srcCfg)
+	return repos.LoginConfigs.Upsert(ctx, &cfg)
+}
 
 func (s *ChannelService) loadInstance(ctx context.Context, id int64) (domainchannel.GameMarketChannel, error) {
 	inst, err := s.tx.Repositories().GameChannels.GetByID(ctx, id)

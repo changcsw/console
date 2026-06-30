@@ -2,15 +2,15 @@
   <div class="runtime-flags">
     <el-tooltip v-if="reason" :content="reason" placement="top">
       <span class="runtime-flags__group is-blocked">
-        <PageStatusTag tone="neutral" label="快照" />
-        <PageStatusTag tone="neutral" label="同步" />
-        <PageStatusTag tone="warning" label="客户端" />
+        <PageStatusTag tone="neutral" label="Included in Snapshot" />
+        <PageStatusTag tone="neutral" label="Included in Sync" />
+        <PageStatusTag tone="warning" label="Included in Runtime Config" />
       </span>
     </el-tooltip>
     <span v-else class="runtime-flags__group">
-      <PageStatusTag :tone="includedInSnapshot ? 'success' : 'neutral'" label="快照" />
-      <PageStatusTag :tone="includedInSync ? 'success' : 'neutral'" label="同步" />
-      <PageStatusTag :tone="includedInRuntimeConfig ? 'success' : 'warning'" label="客户端" />
+      <PageStatusTag :tone="includedInSnapshot ? 'success' : 'neutral'" label="Included in Snapshot" />
+      <PageStatusTag :tone="includedInSync ? 'success' : 'neutral'" label="Included in Sync" />
+      <PageStatusTag :tone="includedInRuntimeConfig ? 'success' : 'warning'" label="Included in Runtime Config" />
     </span>
   </div>
 </template>
@@ -22,6 +22,7 @@ import type { ConfigStatus } from "@/api/modules/channels";
 import { runtimeBlockReason } from "../constants";
 
 const props = defineProps<{
+  enabled?: boolean;
   hidden: boolean;
   compatible: boolean;
   configStatus: ConfigStatus;
@@ -31,7 +32,12 @@ const props = defineProps<{
 }>();
 
 const reason = computed(() =>
-  runtimeBlockReason({ hidden: props.hidden, compatible: props.compatible, configStatus: props.configStatus })
+  runtimeBlockReason({
+    enabled: props.enabled,
+    hidden: props.hidden,
+    compatible: props.compatible,
+    configStatus: props.configStatus
+  })
 );
 </script>
 
