@@ -5,6 +5,7 @@ import { nextTick } from "vue";
 import permDirective from "@/directives/perm";
 import { usePermissionStore } from "@/stores/permission";
 import ChannelInstanceDetailDrawer from "@/views/channels/components/ChannelInstanceDetailDrawer.vue";
+import ChannelLoginConfigPanel from "@/views/channels/components/ChannelLoginConfigPanel.vue";
 
 const getMarketChannelApi = vi.fn();
 const listChannelPackagesApi = vi.fn();
@@ -13,6 +14,8 @@ const hideMarketChannelApi = vi.fn();
 const unhideMarketChannelApi = vi.fn();
 const createChannelPackageApi = vi.fn();
 const updateChannelPackageApi = vi.fn();
+const getLoginConfigApi = vi.fn();
+const putLoginConfigApi = vi.fn();
 
 vi.mock("@/api/modules/channels", () => ({
   getMarketChannel: (...args: unknown[]) => getMarketChannelApi(...args),
@@ -21,12 +24,17 @@ vi.mock("@/api/modules/channels", () => ({
   hideMarketChannel: (...args: unknown[]) => hideMarketChannelApi(...args),
   unhideMarketChannel: (...args: unknown[]) => unhideMarketChannelApi(...args),
   createChannelPackage: (...args: unknown[]) => createChannelPackageApi(...args),
-  updateChannelPackage: (...args: unknown[]) => updateChannelPackageApi(...args)
+  updateChannelPackage: (...args: unknown[]) => updateChannelPackageApi(...args),
+  getLoginConfig: (...args: unknown[]) => getLoginConfigApi(...args),
+  putLoginConfig: (...args: unknown[]) => putLoginConfigApi(...args)
 }));
+
+import { loginConfigResponse } from "./fixtures/channelLogin";
 
 describe("ChannelInstanceDetailDrawer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    document.body.innerHTML = "";
     setActivePinia(createPinia());
     getMarketChannelApi.mockResolvedValue({
       gameChannelId: 1,
@@ -72,5 +80,64 @@ describe("ChannelInstanceDetailDrawer", () => {
     await flushPromises();
 
     expect(vm.canWrite).toBe(true);
+  });
+
+  test("仅 channel_only 实例展示「渠道登录」页签并挂载配置面板", async () => {
+    setActivePinia(createPinia());
+    usePermissionStore().setFromUser({ roles: [], permissions: ["channel.read", "channel.write"] });
+    getMarketChannelApi.mockResolvedValue({
+      gameChannelId: 101,
+      displayKey: "100001:CN:huawei_cn",
+      gameId: "100001",
+      market: "CN",
+      channelId: "huawei_cn",
+      region: "domestic",
+      compatible: true,
+      hidden: false,
+      configStatus: "valid",
+      includedInSnapshot: true,
+      includedInSync: true,
+      includedInRuntimeConfig: true,
+      copiedFromMarket: "",
+      updatedAt: "2026-01-01T00:00:00Z",
+      loginMode: "channel_only",
+      loginLocked: false,
+      enabled: true,
+      remark: "",
+      hiddenBy: "",
+      hiddenAt: null,
+      lastCheckAt: null,
+      lastCheckMessage: "",
+      createdAt: "2026-01-01T00:00:00Z"
+    });
+    getLoginConfigApi.mockResolvedValue(loginConfigResponse());
+
+    // 抽屉详情加载由 open false→true 触发（与真实打开行为一致）
+    const wrapper = mount(ChannelInstanceDetailDrawer, {
+      props: { open: false, gameChannelId: 101 },
+      global: { directives: { perm: permDirective } }
+    });
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+
+    // channel_only → 「渠道登录」页签内容（ChannelLoginConfigPanel）已挂载
+    expect(wrapper.findComponent(ChannelLoginConfigPanel).exists()).toBe(true);
+    expect(getLoginConfigApi).toHaveBeenCalledWith(101);
+  });
+
+  test("account_system 实例不展示「渠道登录」页签且不拉取 login-config", async () => {
+    setActivePinia(createPinia());
+    usePermissionStore().setFromUser({ roles: [], permissions: ["channel.read", "channel.write"] });
+    // 默认 mock 的 loginMode 为 undefined（account_system 非 channel_only）
+    const wrapper = mount(ChannelInstanceDetailDrawer, {
+      props: { open: false, gameChannelId: 1 },
+      global: { directives: { perm: permDirective } }
+    });
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+
+    // account_system → 不渲染「渠道登录」页签，亦不拉取 login-config
+    expect(wrapper.findComponent(ChannelLoginConfigPanel).exists()).toBe(false);
+    expect(getLoginConfigApi).not.toHaveBeenCalled();
   });
 });

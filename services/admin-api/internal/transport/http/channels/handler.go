@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	channelapp "github.com/csw/console/services/admin-api/internal/app/channel"
+	channelloginapp "github.com/csw/console/services/admin-api/internal/app/channellogin"
 	"github.com/csw/console/services/admin-api/internal/app/dto"
 	"github.com/csw/console/services/admin-api/internal/domain/common"
 	"github.com/csw/console/services/admin-api/internal/transport/http/httpx"
@@ -19,13 +20,18 @@ import (
 
 // Handler 持有 ChannelService 与运行环境。
 type Handler struct {
-	svc *channelapp.ChannelService
-	env common.Environment
+	svc      *channelapp.ChannelService
+	loginSvc *channelloginapp.Service
+	env      common.Environment
 }
 
 // NewHandler 构造 Handler（svc 在后端未就绪时可为 nil，路由用 RequireBackend 拦截）。
-func NewHandler(svc *channelapp.ChannelService, env common.Environment) *Handler {
-	return &Handler{svc: svc, env: env}
+func NewHandler(svc *channelapp.ChannelService, env common.Environment, loginSvc ...*channelloginapp.Service) *Handler {
+	var ls *channelloginapp.Service
+	if len(loginSvc) > 0 {
+		ls = loginSvc[0]
+	}
+	return &Handler{svc: svc, loginSvc: ls, env: env}
 }
 
 // ===== 请求 DTO =====
@@ -62,6 +68,12 @@ type updatePackageRequest struct {
 	InheritChannelConfig *bool          `json:"inheritChannelConfig"`
 	Enabled              *bool          `json:"enabled"`
 	OverrideJSON         map[string]any `json:"overrideJson"`
+}
+
+type upsertLoginConfigRequest struct {
+	Enabled         *bool          `json:"enabled"`
+	ConfigJSON      map[string]any `json:"configJson"`
+	TemplateVersion string         `json:"templateVersion"`
 }
 
 // ===== handlers =====
@@ -267,6 +279,55 @@ func (h *Handler) UpdatePackage(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteData(w, http.StatusOK, result)
 }
 
+// GetLoginConfig GET /game-channels/{gameChannelId}/login-config（channel.read）。
+func (h *Handler) GetLoginConfig(w http.ResponseWriter, r *http.Request) {
+	if h.loginSvc == nil {
+		httpx.WriteError(w, http.StatusServiceUnavailable, httpx.CodeInternal, "channel login backend unavailable")
+		return
+	}
+	id, ok := parseID(w, r, "gameChannelId")
+	if !ok {
+		return
+	}
+	result, err := h.loginSvc.GetLoginConfig(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpx.WriteData(w, http.StatusOK, result)
+}
+
+// PutLoginConfig PUT /game-channels/{gameChannelId}/login-config（channel.write）。
+func (h *Handler) PutLoginConfig(w http.ResponseWriter, r *http.Request) {
+	if h.loginSvc == nil {
+		httpx.WriteError(w, http.StatusServiceUnavailable, httpx.CodeInternal, "channel login backend unavailable")
+		return
+	}
+	id, ok := parseID(w, r, "gameChannelId")
+	if !ok {
+		return
+	}
+	var req upsertLoginConfigRequest
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w)
+		return
+	}
+	if req.ConfigJSON == nil {
+		req.ConfigJSON = map[string]any{}
+	}
+	result, err := h.loginSvc.UpsertLoginConfig(r.Context(), dto.UpsertChannelLoginConfigCmd{
+		GameChannelID:   id,
+		Enabled:         req.Enabled,
+		ConfigJSON:      req.ConfigJSON,
+		TemplateVersion: req.TemplateVersion,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpx.WriteData(w, http.StatusOK, result)
+}
+
 // ===== helpers =====
 
 func decodeJSON(r *http.Request, target any) error {
@@ -336,6 +397,11 @@ func parseBoolParamWithDefault(name, s string, def bool) (bool, error) {
 
 // writeError 把 app 层 *channelapp.Error 写为精确包络；其它（仓储映射的哨兵）回退 httpx.WriteAppError。
 func writeError(w http.ResponseWriter, err error) {
+	var loginErr *channelloginapp.Error
+	if errors.As(err, &loginErr) {
+		httpx.WriteError(w, loginErr.Status, loginErr.Code, loginErr.Message, loginErr.Details...)
+		return
+	}
 	var appErr *channelapp.Error
 	if errors.As(err, &appErr) {
 		httpx.WriteError(w, appErr.Status, appErr.Code, appErr.Message, appErr.Details...)

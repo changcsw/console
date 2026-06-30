@@ -43,7 +43,11 @@ export function runtimeBlockReason(item: {
   hidden: boolean;
   compatible: boolean;
   configStatus: ConfigStatus;
+  enabled?: boolean;
 }): string | null {
+  if (item.enabled === false) {
+    return "实例未启用";
+  }
   if (item.hidden) {
     return "已隐藏，已移出生效集";
   }

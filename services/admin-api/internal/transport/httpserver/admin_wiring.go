@@ -12,6 +12,7 @@ import (
 	accountauthapp "github.com/csw/console/services/admin-api/internal/app/accountauth"
 	adminapp "github.com/csw/console/services/admin-api/internal/app/admin"
 	channelapp "github.com/csw/console/services/admin-api/internal/app/channel"
+	channelloginapp "github.com/csw/console/services/admin-api/internal/app/channellogin"
 	gameapp "github.com/csw/console/services/admin-api/internal/app/game"
 	domainauth "github.com/csw/console/services/admin-api/internal/domain/auth"
 	"github.com/csw/console/services/admin-api/internal/domain/common"
@@ -51,6 +52,7 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 	degraded := func(iss adminapp.TokenIssuer) chi.Router {
 		r := adminhttp.NewRouter(adminhttp.NewHandler(adminhttp.Deps{Env: env}), iss, env, logger, false)
 		gameshttp.RegisterRoutes(r, gameshttp.NewHandler(nil, env), iss, env, logger, false)
+		// login-config 路由已由 RegisterRoutes（combined Handler）注册，无需再调 RegisterLoginRoutes 以免重复注册（chi 覆盖语义）。
 		channelshttp.RegisterRoutes(r, channelshttp.NewHandler(nil, env), iss, env, logger, false)
 		return r
 	}
@@ -112,7 +114,8 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 
 	// channel 模块：真实 ChannelService（绑定主连接池，env 由 search_path 钉死）。审计 sink 待 audit 模块落地后注入。
 	channelSvc := channelapp.NewChannelService(postgres.NewChannelStore(pool), time.Now, nil, env)
-	channelshttp.RegisterRoutes(r, channelshttp.NewHandler(channelSvc, env), issuer, env, logger, true)
+	channelLoginSvc := channelloginapp.NewService(postgres.NewChannelLoginStore(pool), cipher, nil, nil, time.Now, env)
+	channelshttp.RegisterRoutes(r, channelshttp.NewHandler(channelSvc, env, channelLoginSvc), issuer, env, logger, true)
 
 	return r
 }

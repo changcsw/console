@@ -1,0 +1,252 @@
+# 模块 channel-login（渠道强制登录配置 / 模块 14）接口场景矩阵 manifest
+# 维度定义见 docs/architecture/v2/03-testing.md §4；契约来源：
+# docs/architecture/v2/modules/14-channel-login/spec.compact.md。
+# 接口挂在 channels transport（前缀 /api/admin），读 channel.read / 写 channel.write。
+#
+# 运行说明（与 auth.yaml/game.yaml/channel.yaml/account-auth.yaml 一致）：
+#   进程内 httptest harness（services/admin-api/internal/testkit/scenario）为降级 handler
+#   （无 POSTGRES_DSN/ADMIN_JWT_SECRET → ready=false）：
+#     - requiresDB: false 的 S2 用例（受保护接口先过 Authn，未携带/无效令牌即 401）在沙箱内真实执行并断言。
+#     - requiresDB: true 的用例为「manifest 已声明但运行需 PG + 全装配」，进程内 harness 跳过
+#       （SCENARIO_WITH_DB=1 时由连库 harness 执行），仅保证 YAML 解析校验通过。
+#       这些维度已由 transport/http/channels 进程内 httptest（内存仓储 + 真实加密/审计 spy）等价覆盖
+#       （见 login_http_test.go / login_memstore_test.go）与 domain/channel L1（login_config_test.go）。
+#
+# 模块维度适用性（compact + 03-testing §4）：
+#   GET /login-config（只读，含密文）：S1/S2/S3 必覆盖；S4 覆盖非 channel_only / 非法路径参数；
+#     S8 密文脱敏必覆盖；S6 schema 隔离连库承担；S9 单实例读取（非列表）→ N/A；S5/S7/S10 → N/A。
+#   PUT /login-config（整体 upsert，含密文）：S1/S2/S3/S4/S5/S6/S7/S8/S10 覆盖；S9 单实例写 → N/A。
+#     S5 = 唯一键 game_channel_id_ref 冲突 → CONFLICT(409)。
+module: channel-login
+cases:
+  # ───────────────────────── 1) GET /game-channels/{id}/login-config（channel.read）
+  - name: get_login_config_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/login-config
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: get_login_config_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    note: "缺 channel.read → 403 FORBIDDEN"
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/login-config
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: get_login_config_success_with_template
+    dimension: S1
+    requiresDB: true
+    auth: { role: channel_reader }
+    fixture: sandbox/channel-login/base
+    note: "channel_only 实例未配置 → 返回空配置占位 + 驱动模板四件套"
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/login-config
+    expect:
+      status: 200
+      jsonContains: { data.config.configStatus: empty, data.loginMode: channel_only }
+  - name: get_login_config_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: channel_reader }
+    fixture: sandbox/channel-login/configured
+    note: "已配置实例密文恒脱敏 ******，绝不回明文"
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/login-config
+    expect:
+      status: 200
+      jsonContains: { data.config.configJson.appSecret: "******" }
+  - name: get_login_config_rejects_non_channel_only
+    dimension: S4
+    requiresDB: true
+    auth: { role: channel_reader }
+    note: "account_system 实例 GET 拒绝（非 channel_only）"
+    request:
+      method: GET
+      path: /api/admin/game-channels/2/login-config
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: get_login_config_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: channel_reader }
+    note: "gameChannelId 不存在 → 404 NOT_FOUND"
+    request:
+      method: GET
+      path: /api/admin/game-channels/999999/login-config
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: get_login_config_env_scope
+    dimension: S6
+    requiresDB: true
+    auth: { role: channel_reader }
+    note: "隐式作用域=当前 env schema（search_path 决定），不跨 schema 读"
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/login-config
+    expect:
+      status: 200
+
+  # ───────────────────────── 2) PUT /game-channels/{id}/login-config（channel.write）
+  - name: put_login_config_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: PUT
+      path: /api/admin/game-channels/1/login-config
+      body: { enabled: true, configJson: { appId: "app-1", appSecret: "supersecret" } }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: put_login_config_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: channel_reader }
+    note: "仅 channel.read 写 → 403 FORBIDDEN"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/1/login-config
+      body: { enabled: true, configJson: { appId: "app-1", appSecret: "supersecret" } }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: put_login_config_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: channel_admin }
+    fixture: sandbox/channel-login/base
+    note: "完整配置 → 200 + configStatus=valid；密文加密落库、回显脱敏"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/1/login-config
+      body: { enabled: true, configJson: { appId: "app-123", appSecret: "supersecret" } }
+    expect:
+      status: 200
+      jsonContains: { data.config.configStatus: valid, data.config.configJson.appSecret: "******" }
+  - name: put_login_config_missing_secret_invalid
+    dimension: S4
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "缺必填密钥 → 400 VALIDATION_FAILED（落库 invalid 行内态）"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/1/login-config
+      body: { enabled: true, configJson: { appId: "app-1" } }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_login_config_unknown_field
+    dimension: S4
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "未知字段（不在 form_schema）→ 400 VALIDATION_FAILED"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/1/login-config
+      body: { enabled: true, configJson: { appId: "app-1", appSecret: "supersecret", bogus: "x" } }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_login_config_rule_violation
+    dimension: S4
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "validation_rules 未过（appId pattern）→ 400 VALIDATION_FAILED"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/1/login-config
+      body: { enabled: true, configJson: { appId: "bad id!", appSecret: "supersecret" } }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_login_config_template_missing
+    dimension: S4
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "channel_only 但无模板 → 400 VALIDATION_FAILED（无模板拒绝写）"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/3/login-config
+      body: { enabled: true, configJson: { appId: "x" } }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_login_config_rejects_non_channel_only
+    dimension: S4
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "account_system 实例 PUT 拒绝（非 channel_only）"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/2/login-config
+      body: { enabled: true, configJson: { appId: "app-1", appSecret: "supersecret" } }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_login_config_conflict
+    dimension: S5
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "唯一键 game_channel_id_ref 冲突 → 409 CONFLICT"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/1/login-config
+      body: { enabled: true, configJson: { appId: "app-123", appSecret: "supersecret" } }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: put_login_config_env_scope
+    dimension: S6
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "写落当前 env schema（search_path 决定），不接受前端指定/跨 schema 写"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/1/login-config
+      body: { enabled: true, configJson: { appId: "app-123", appSecret: "supersecret" } }
+    expect:
+      status: 200
+  - name: put_login_config_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "成功 PUT 写 audit_logs channel.login_config.update（detail 脱敏，仅记 changed 位）；失败不写"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/1/login-config
+      body: { enabled: true, configJson: { appId: "app-123", appSecret: "supersecret" } }
+    expect:
+      status: 200
+  - name: put_login_config_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "响应密文恒 ******；明文/密文绝不泄漏；明文禁落库"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/1/login-config
+      body: { enabled: true, configJson: { appId: "app-123", appSecret: "supersecret" } }
+    expect:
+      status: 200
+      jsonContains: { data.config.configJson.appSecret: "******" }
+  - name: put_login_config_transaction_rollback
+    dimension: S10
+    requiresDB: true
+    auth: { role: channel_admin }
+    note: "upsert 中途失败 → 整体回滚，无部分写入，不写审计"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/1/login-config
+      body: { enabled: true, configJson: { appId: "app-123", appSecret: "supersecret" } }
+    expect:
+      status: 500

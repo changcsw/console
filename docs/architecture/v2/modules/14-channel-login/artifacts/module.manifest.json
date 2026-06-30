@@ -1,0 +1,102 @@
+{
+  "module_id": "channel-login",
+  "lane": "channels-surface",
+  "spec_path": "docs/architecture/v2/modules/14-channel-login/spec.compact.md",
+  "worktree": "/Users/csw/gitproject/console-channel-login",
+  "branch": "codex/channel-login",
+  "shared_surfaces_touched": [
+    "services/admin-api/internal/domain/channel",
+    "services/admin-api/internal/app/channel",
+    "services/admin-api/internal/infra/persistence/postgres",
+    "services/admin-api/internal/transport/http/channels",
+    "services/admin-api/internal/transport/httpserver",
+    "apps/admin-web/src/views/channels",
+    "apps/admin-web/src/api/modules/channels.ts"
+  ],
+  "backend_routes": [
+    "GET /api/admin/game-channels/{gameChannelId}/login-config",
+    "PUT /api/admin/game-channels/{gameChannelId}/login-config"
+  ],
+  "frontend_routes": [
+    "/channels"
+  ],
+  "frontend_views": [
+    "apps/admin-web/src/views/channels/components/ChannelInstanceDetailDrawer.vue",
+    "apps/admin-web/src/views/channels/components/ChannelLoginConfigPanel.vue",
+    "apps/admin-web/src/views/channels/components/ChannelInstanceRuntimeFlags.vue",
+    "apps/admin-web/src/views/channels/constants.ts",
+    "apps/admin-web/src/api/modules/channels.ts"
+  ],
+  "referenced_modules": [
+    "channel",
+    "game",
+    "common"
+  ],
+  "open_issues": [
+    "[P3·非阻断] 后端 mapFormSchema 未回传模板 options/placeholder；当前 seed 无 select 选项不影响 huawei 路径，引入含 select 的模板时需补传 options（测试专家集成对账观察）",
+    "[P3·非阻断] game_channels.config_status 与 login 配置表双轨，channel_only 列表/运行态宜以登录配置为准",
+    "[P3·非阻断] file 字段上传仍为占位，待 infra/file 接口联通后切换 storage key 引用",
+    "[P3·非阻断] 模板驱动表单为组件内联实现，后续可抽取统一渲染器（与 AccountAuthTab 同债）",
+    "[P3·非阻断] AuditSink 仍为 nil，待 audit 模块 22 统一注入",
+    "[限制·非阻断] 真实后端+前端全链路联调 e2e 未跑（harness 降级不连库 / e2e 走 stub / migrate CLI 缺失·网络受限）；已以契约对账+持久层实证+两车道用例判定，建议集成阶段补冒烟"
+  ],
+  "resolved_issues": [
+    "【已闭环·测试专家集成核对】transport/http/channels/login_handler.go(LoginHandler+RegisterLoginRoutes) 重复实现已删除：全仓仅余 admin_wiring.go 一处注释引用，login-config 路由由 combined Handler 单点注册，无重复",
+    "【已闭环·后端返工】channel 复制创建已写入 game_channel_login_configs：channel_only 复制实例同事务落库（普通字段+config_status=invalid，secret/file 清空，last_check_message='缺少必填敏感字段或文件字段'），不联动源实例（00 §3.4）",
+    "【已闭环·后端返工2】[D1] PUT login-config 哨兵 '******' 校验顺序：UpsertLoginConfig 改为校验前用存量值替换哨兵（service.go:87-99），按'已存在且合法值'过必填/validation_rules/config_status，避免带 minLen/pattern 的 secret 字段被字面 '******' 误判 invalid；未改密钥可二次保存；复现 TestPutLoginConfigSentinelKeepsCiphertext 已转绿"
+  ],
+  "verification": [
+    "pnpm --dir \"/Users/csw/gitproject/console-channel-login/apps/admin-web\" exec tsc --noEmit (failed: 基线缺失 vue shims/@vue/test-utils 解析；本模块改动文件无新增错误)",
+    "pnpm --dir \"/Users/csw/gitproject/console-channel-login/apps/admin-web\" exec vite build (passed, 前端开发+CR)",
+    "go build ./... (services/admin-api) => PASS（后端 CR 复审复验）",
+    "go vet ./... (services/admin-api) => PASS（后端 CR 复审复验）",
+    "前端 CR: compact 前端要点逐条核对通过；CR 直修 2 项",
+    "后端 CR(初): 契约主体通过；阻断 1（复制创建）；CR 直修 2（哨兵落库、失败不写审计）",
+    "后端返工: 复制创建接入 game_channel_login_configs（阻断项已闭环）；go build/vet PASS",
+    "后端 CR(复审): 通过——阻断闭环（NewCopiedLoginConfig+copyLoginConfig 同事务落 invalid，channel_only 判定正确，CR 直修仍在位）；复审直修 degraded 重复注册 login-config",
+    "后端测试: 新增 L1 domain/channel/login_config_test.go(16) + L3 transport/http/channels/login_http_test.go+login_memstore_test.go(19) + tests/backend/scenarios/channel-login.yaml(20) + fixtures common/sandbox channel-login.sql",
+    "后端测试·矩阵: GET=S1/S2/S3/S4/S6/S8(S9 N/A,S5/S7/S10 N/A)；PUT=S1/S2/S3/S4/S5/S6/S7/S8/S10(S9 N/A)；脱敏/事务回滚/审计/跨env/复制强约束红线均覆盖",
+    "后端测试·缺陷[D1·已闭环]: 哨兵 \"******\" 保留密钥误判 invalid → 后端修复(service.go:87-99 校验前用存量替换，对齐 account-auth)；复现用例 TestPutLoginConfigSentinelKeepsCiphertext 已转绿",
+    "后端返工2: [D1] 已修复——哨兵校验顺序修正（service.go:87-99 校验前用存量值替换哨兵）；go build/vet PASS",
+    "后端测试·复测(收口): go test ./... (services/admin-api) => 全部 PASS（35 测试 func / 0 失败，-count=1 复跑确认）；scenario channel-login.yaml(20) 解析有效；未回退既有用例；无需返工",
+    "后端迁移前向校验: 连库 harness（docker compose postgres + scripts/regression/db.sh）全新库 migrate up 1/u..7/u 全部成功+seed 正常；platform.channel_login_templates / game_channel_login_configs 结构与约束核对通过；huawei_cn v1 seed 落库 => PASS",
+    "后端迁移收口: 修正 000007 up.sql DO 块守卫（同时识别 *_status_check 与 *_config_status_check），消除与 000001 内联 CHECK 的重复约束；修复后全新库仅余 1 条 config_status CHECK；go build/vet PASS",
+    "前端测试: 新增 vitest ChannelLoginConfigPanel.spec.ts(13)+ChannelInstanceDetailDrawer.spec.ts(3) + Playwright tests/frontend/e2e/channel-login.spec.ts(3,含 valid/invalid 截图基线) + fixtures __tests__/fixtures/channelLogin.ts",
+    "前端测试·覆盖: 四件套 order/component/group/required·密文脱敏与哨兵 ****** 提交语义·config_status 三色·enabled+invalid 告警条·复制 invalid 提示·validationRules 即时校验·仅 channel_only 页签·channel.write 权限置灰·PUT VALIDATION_FAILED 二次 GET 回显",
+    "前端测试·运行: npx vitest run（本模块 16/16 PASS；全量 19 文件 98/98 PASS 无回归）；npx playwright test channel-login.spec.ts --workers=1（3/3 PASS，toHaveScreenshot 视觉基线匹配）；channels.spec.ts 单 worker 复跑 2/2 PASS（抽屉页签化无回归）",
+    "前端测试·结论: 通过（19 用例实跑全绿，0 失败，无疑似实现缺陷，无需返工）；历史 tsc TS2307 与本模块无关不作判据；高并发跑 games/channels 偶发冷启动 flake，单 worker 隔离全绿",
+    "测试专家·契约对账: 前端 channels.ts(getLoginConfig/putLoginConfig) vs 后端 router/handler/dto.ChannelLoginView/channellogin —— 路径/方法/权限/PUT 请求体/响应 data/config/template 四件套/错误码/details{field,rule,message}/哨兵 ****** 逐项一致，零契约漂移（仅观察 mapFormSchema 暂未回传 options，记 P3）",
+    "测试专家·后端回归: go test ./... (services/admin-api,-count=1) => 全部 PASS / 0 失败（独立复跑确认）",
+    "测试专家·场景矩阵: scenario harness 加载 channel-login.yaml 20 case 解析有效；进程内实跑 requiresDB:false S2×2(401) PASS，18 个 requiresDB:true SKIP（harness 降级不连库），等价由 L3 login_http_test.go(19)+domain login_config_test.go(16) 覆盖全 PASS",
+    "测试专家·前端回归: npx vitest run 全量 19 文件/98 用例 PASS；npx playwright test channel-login.spec.ts --workers=1 => 3/3 PASS（视觉基线匹配）",
+    "测试专家·真实 PG 集成: 连库 console-test-pg 复核 => public.game_channel_login_configs 表存在；config_status CHECK 约束仅 1 条(000007 收口去重确认)；platform.channel_login_templates 含 huawei_cn v1 seed(secretFields=[appSecret],enabled)",
+    "测试专家·红线核验: 脱敏/权限401·403·前端置灰/事务回滚/复制强约束 invalid/哨兵保留密钥(D1)/审计仅成功写/三套登录分离/无模板拒绝/非 channel_only 拒绝 —— 全部映射实跑用例 PASS",
+    "测试专家·集成点: admin_wiring.go 真实装配 channelLoginSvc 并单点注册 login-config（不再调 RegisterLoginRoutes 避免重复）；前端复用 /channels 入口、channels.ts 经 http.ts 解包 {data} —— 与 integration.checklist 一致",
+    "测试专家·下游 impacts: snapshot 未落地 / sync 仅脚手架，均未消费 channel_login；本模块正确暴露 config_status·enabled·脱敏·按 market 实例事实，下游 gating 待对应模块落地验证（本阶段 N/A，无回归风险）",
+    "测试专家·限制: 未跑真实后端+前端全链路联调 e2e（harness 降级不连库/e2e 走 stub/migrate CLI 缺失·网络受限）；以契约对账+持久层实证+两车道用例为判定依据",
+    "测试专家·结论: 通过——可进入功能验收；无阻断、0 新增缺陷、regression 0 失败；遗留 4 项 P3 非阻断移交 🟧；login_handler.go 重复实现遗留项实际已删除转 resolved",
+    "功能验收·构建: go build ./... + go vet ./... + go test ./... (services/admin-api) => 全 PASS / 0 失败；login 用例 go test -run 'Login' -v => 19 channels-http + 2 domain copied = 21/21 PASS",
+    "功能验收·前端: npx vite build => PASS（沙箱内 .vite-temp EPERM 为沙箱写限制非真实错误，解除后 PASS）；npx vitest run ChannelLoginConfigPanel+ChannelInstanceDetailDrawer => 16/16 PASS；npx playwright test channel-login.spec.ts --workers=1 => 3/3 PASS（valid/invalid 视觉基线匹配）",
+    "功能验收·回归入口: scripts/regression/run.sh WITH_DB=1 受限（连库 harness 需 docker+migrate CLI，缺失/网络受限）；以进程内 go test ./... + vitest + playwright 等价覆盖",
+    "功能验收·清单: 据 compact API/页面/状态机/规则 + operation-flow 步骤5 推导 15 验收点（F1-F15），全部 PASS / 0 FAIL（适用性 channel_only / GET 空占位四件套 / 密文脱敏 / 模板驱动校验 details[] / config_status 后端推导 / 失败落库 invalid+400 / 哨兵保留原密文 / 审计仅成功写 / 复制创建强约束 invalid / enabled+invalid 告警不进快照同步客户端 / 权限 401·403·前端置灰 / 无模板拒绝·409·事务回滚 / 三套登录分离+跨env schema 隔离 / 前端四件套渲染 / operation-flow 步骤5 闭环)",
+    "功能验收·下游 impacts: snapshot 域目录不存在(未落地) + sync 仅脚手架(SectionChannels='channels' 常量,未消费 channel_login) => 契约无破坏；下游 gating 待 snapshot/sync 落地验证(N/A,无回归风险)",
+    "功能验收·限制: 真实「admin-api 连 PG 起服+前端指向真实后端」全链路联调 e2e 未跑（harness 降级/migrate CLI 缺失/e2e 走 stub/网络受限）；以契约逐条核对+持久层与领域用例实证+三车道全量用例实跑全绿为判定依据；建议集成阶段补冒烟",
+    "功能验收·结论: 通过（PASS）——端到端功能成立、满足 compact 业务规则与红线、符合 operation-flow 主线；15/15 PASS / 0 FAIL；无阻断、0 新增缺陷；遗留 4 项 P3 非阻断（mapFormSchema options 未回传 / config_status 双轨 / file 上传占位 / AuditSink 待注入）移交 🟧"
+  ],
+  "verification_final": {
+    "stage": "feature-acceptance",
+    "result": "PASS",
+    "checklist": "15/15 PASS, 0 FAIL",
+    "builds": {
+      "go_build_vet_test": "PASS",
+      "vite_build": "PASS",
+      "vitest": "16/16 PASS",
+      "playwright_channel_login": "3/3 PASS"
+    },
+    "blocking": 0,
+    "new_defects": 0,
+    "open_issues_p3": 4,
+    "limitations": "real full-stack e2e not run (env limited); judged by contract + persistence + 3-lane cases",
+    "next": "handoff to integration; P3 items to 🟧"
+  }
+}

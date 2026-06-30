@@ -18,9 +18,11 @@ func NewChannelStore(pool *pgxpool.Pool) *ChannelStore { return &ChannelStore{po
 
 func channelReposFrom(db DBTX) channelapp.Repositories {
 	return channelapp.Repositories{
-		Channels:     &ChannelRepo{db: db},
-		GameChannels: &GameChannelRepo{db: db},
-		Packages:     &ChannelPackageRepo{db: db},
+		Channels:       &ChannelRepo{db: db},
+		GameChannels:   &GameChannelRepo{db: db},
+		Packages:       &ChannelPackageRepo{db: db},
+		LoginTemplates: &ChannelLoginTemplateRepo{db: db},
+		LoginConfigs:   &ChannelLoginConfigRepo{db: db},
 	}
 }
 

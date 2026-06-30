@@ -24,6 +24,7 @@
 
           <ChannelInstanceRuntimeFlags
             class="block__flags"
+            :enabled="detail.enabled"
             :hidden="detail.hidden"
             :compatible="detail.compatible"
             :config-status="detail.configStatus"
@@ -36,110 +37,131 @@
             <el-descriptions-item label="区域">{{ regionLabel(detail.region) }}</el-descriptions-item>
             <el-descriptions-item label="复制来源">{{ detail.copiedFromMarket || "—" }}</el-descriptions-item>
             <el-descriptions-item label="最近校验">{{ detail.lastCheckMessage || "—" }}</el-descriptions-item>
+            <el-descriptions-item label="登录模式">{{ detail.loginMode || "—" }}</el-descriptions-item>
+            <el-descriptions-item label="登录锁定">{{ detail.loginLocked ? "是" : "否" }}</el-descriptions-item>
             <el-descriptions-item v-if="detail.hidden" label="隐藏操作人">
               {{ detail.hiddenBy || "—" }}
             </el-descriptions-item>
           </el-descriptions>
         </section>
 
-        <section class="block">
-          <h4 class="block__title">基础设置</h4>
-          <el-form label-width="80px" label-position="top">
-            <el-form-item label="启用">
-              <el-switch v-model="editEnabled" :disabled="!canWrite" />
-            </el-form-item>
-            <el-form-item label="备注">
-              <el-input
-                v-model="editRemark"
-                type="textarea"
-                :rows="2"
-                maxlength="255"
-                show-word-limit
-                :disabled="!canWrite"
-              />
-            </el-form-item>
-            <div class="actions-row">
-              <el-button v-perm="'channel.write'" type="primary" :loading="savingBasic" @click="saveBasic">
-                保存基础设置
-              </el-button>
-              <el-tooltip
-                v-if="!detail.hidden && detail.configStatus !== 'valid'"
-                content="仅 valid 配置可隐藏；invalid/empty 不得隐藏"
-                placement="top"
-              >
-                <span><el-button disabled>隐藏</el-button></span>
-              </el-tooltip>
-              <el-popconfirm
-                v-else-if="!detail.hidden"
-                title="隐藏后将移出快照/同步/客户端最终配置，可恢复。确认隐藏？"
-                width="240"
-                @confirm="doHide"
-              >
-                <template #reference>
-                  <el-button v-perm="'channel.write'" type="warning">隐藏</el-button>
+        <el-tabs v-model="activeTab">
+          <el-tab-pane label="基础设置" name="basic">
+            <section class="block">
+              <el-form label-width="80px" label-position="top">
+                <el-form-item label="启用">
+                  <el-switch v-model="editEnabled" :disabled="!canWrite" />
+                </el-form-item>
+                <el-form-item label="备注">
+                  <el-input
+                    v-model="editRemark"
+                    type="textarea"
+                    :rows="2"
+                    maxlength="255"
+                    show-word-limit
+                    :disabled="!canWrite"
+                  />
+                </el-form-item>
+                <div class="actions-row">
+                  <el-button v-perm="'channel.write'" type="primary" :loading="savingBasic" @click="saveBasic">
+                    保存基础设置
+                  </el-button>
+                  <el-tooltip
+                    v-if="!detail.hidden && detail.configStatus !== 'valid'"
+                    content="仅 valid 配置可隐藏；invalid/empty 不得隐藏"
+                    placement="top"
+                  >
+                    <span><el-button disabled>隐藏</el-button></span>
+                  </el-tooltip>
+                  <el-popconfirm
+                    v-else-if="!detail.hidden"
+                    title="隐藏后将移出快照/同步/客户端最终配置，可恢复。确认隐藏？"
+                    width="240"
+                    @confirm="doHide"
+                  >
+                    <template #reference>
+                      <el-button v-perm="'channel.write'" type="warning">隐藏</el-button>
+                    </template>
+                  </el-popconfirm>
+                  <el-popconfirm
+                    v-else
+                    title="恢复后将按规则重新参与生效集。确认恢复？"
+                    width="220"
+                    @confirm="doUnhide"
+                  >
+                    <template #reference>
+                      <el-button v-perm="'channel.write'" type="primary" plain>恢复</el-button>
+                    </template>
+                  </el-popconfirm>
+                </div>
+                <p class="form-hint">身份（market/渠道）不可修改；如需变更请删除旧实例后另建。</p>
+              </el-form>
+            </section>
+          </el-tab-pane>
+
+          <el-tab-pane label="渠道包" name="packages">
+            <section class="block">
+              <div class="block__title-row">
+                <h4 class="block__title">渠道包</h4>
+                <el-button v-perm="'channel.write'" size="small" @click="toggleCreatePkg">
+                  {{ creatingPkg ? "取消" : "新建渠道包" }}
+                </el-button>
+              </div>
+
+              <el-form v-if="creatingPkg" :model="pkgForm" label-width="92px" label-position="top" class="pkg-form">
+                <el-form-item label="包标识 packageCode" required>
+                  <el-input v-model="pkgForm.packageCode" placeholder="同实例下唯一" />
+                </el-form-item>
+                <el-form-item label="包名称 packageName" required>
+                  <el-input v-model="pkgForm.packageName" />
+                </el-form-item>
+                <el-form-item label="Market">
+                  <el-input :model-value="detail.market" disabled />
+                  <span class="form-hint">须与所属渠道实例 market 一致。</span>
+                </el-form-item>
+                <el-form-item label="Bundle ID">
+                  <el-input v-model="pkgForm.bundleId" />
+                </el-form-item>
+                <el-form-item label="继承渠道配置">
+                  <el-switch v-model="pkgForm.inheritChannelConfig" />
+                </el-form-item>
+                <el-form-item label="启用">
+                  <el-switch v-model="pkgForm.enabled" />
+                </el-form-item>
+                <el-button type="primary" :loading="savingPkg" @click="createPkg">提交</el-button>
+              </el-form>
+
+              <el-table :data="packages" border size="small" class="pkg-table">
+                <el-table-column prop="packageCode" label="包标识" min-width="140" />
+                <el-table-column prop="packageName" label="包名称" min-width="140" />
+                <el-table-column label="继承" width="80">
+                  <template #default="{ row }">{{ row.inheritChannelConfig ? "是" : "否" }}</template>
+                </el-table-column>
+                <el-table-column label="启用" width="90">
+                  <template #default="{ row }">
+                    <el-switch
+                      :model-value="row.enabled"
+                      :disabled="!canWrite"
+                      @change="(v: boolean) => togglePkgEnabled(row, v)"
+                    />
+                  </template>
+                </el-table-column>
+                <template #empty>
+                  <span class="text-muted">暂无渠道包</span>
                 </template>
-              </el-popconfirm>
-              <el-popconfirm v-else title="恢复后将按规则重新参与生效集。确认恢复？" width="220" @confirm="doUnhide">
-                <template #reference>
-                  <el-button v-perm="'channel.write'" type="primary" plain>恢复</el-button>
-                </template>
-              </el-popconfirm>
-            </div>
-            <p class="form-hint">身份（market/渠道）不可修改；如需变更请删除旧实例后另建。</p>
-          </el-form>
-        </section>
+              </el-table>
+            </section>
+          </el-tab-pane>
 
-        <section class="block">
-          <div class="block__title-row">
-            <h4 class="block__title">渠道包</h4>
-            <el-button v-perm="'channel.write'" size="small" @click="toggleCreatePkg">
-              {{ creatingPkg ? "取消" : "新建渠道包" }}
-            </el-button>
-          </div>
-
-          <el-form v-if="creatingPkg" :model="pkgForm" label-width="92px" label-position="top" class="pkg-form">
-            <el-form-item label="包标识 packageCode" required>
-              <el-input v-model="pkgForm.packageCode" placeholder="同实例下唯一" />
-            </el-form-item>
-            <el-form-item label="包名称 packageName" required>
-              <el-input v-model="pkgForm.packageName" />
-            </el-form-item>
-            <el-form-item label="Market">
-              <el-input :model-value="detail.market" disabled />
-              <span class="form-hint">须与所属渠道实例 market 一致。</span>
-            </el-form-item>
-            <el-form-item label="Bundle ID">
-              <el-input v-model="pkgForm.bundleId" />
-            </el-form-item>
-            <el-form-item label="继承渠道配置">
-              <el-switch v-model="pkgForm.inheritChannelConfig" />
-            </el-form-item>
-            <el-form-item label="启用">
-              <el-switch v-model="pkgForm.enabled" />
-            </el-form-item>
-            <el-button type="primary" :loading="savingPkg" @click="createPkg">提交</el-button>
-          </el-form>
-
-          <el-table :data="packages" border size="small" class="pkg-table">
-            <el-table-column prop="packageCode" label="包标识" min-width="140" />
-            <el-table-column prop="packageName" label="包名称" min-width="140" />
-            <el-table-column label="继承" width="80">
-              <template #default="{ row }">{{ row.inheritChannelConfig ? "是" : "否" }}</template>
-            </el-table-column>
-            <el-table-column label="启用" width="90">
-              <template #default="{ row }">
-                <el-switch
-                  :model-value="row.enabled"
-                  :disabled="!canWrite"
-                  @change="(v: boolean) => togglePkgEnabled(row, v)"
-                />
-              </template>
-            </el-table-column>
-            <template #empty>
-              <span class="text-muted">暂无渠道包</span>
-            </template>
-          </el-table>
-        </section>
+          <el-tab-pane v-if="detail.loginMode === 'channel_only'" label="渠道登录" name="channel-login">
+            <ChannelLoginConfigPanel
+              :game-channel-id="detail.gameChannelId"
+              :detail="detail"
+              :can-write="canWrite"
+              @changed="onLoginConfigChanged"
+            />
+          </el-tab-pane>
+        </el-tabs>
       </template>
     </div>
   </el-drawer>
@@ -163,6 +185,7 @@ import {
 } from "@/api/modules/channels";
 import ChannelInstanceStatusTag from "./ChannelInstanceStatusTag.vue";
 import ChannelInstanceRuntimeFlags from "./ChannelInstanceRuntimeFlags.vue";
+import ChannelLoginConfigPanel from "./ChannelLoginConfigPanel.vue";
 import { regionLabel } from "../constants";
 
 const props = defineProps<{
@@ -185,6 +208,7 @@ const packages = ref<ChannelPackage[]>([]);
 const editEnabled = ref(true);
 const editRemark = ref("");
 const savingBasic = ref(false);
+const activeTab = ref<"basic" | "packages" | "channel-login">("basic");
 
 const creatingPkg = ref(false);
 const savingPkg = ref(false);
@@ -216,6 +240,7 @@ watch(
   () => [props.open, props.gameChannelId] as const,
   ([open, id]) => {
     creatingPkg.value = false;
+    activeTab.value = "basic";
     if (open && typeof id === "number") {
       void load(id);
     }
@@ -226,6 +251,13 @@ function applyDetail(next: MarketChannelDetail) {
   detail.value = next;
   editEnabled.value = next.enabled;
   editRemark.value = next.remark;
+}
+
+async function onLoginConfigChanged() {
+  if (typeof props.gameChannelId === "number") {
+    await load(props.gameChannelId);
+  }
+  emit("changed");
 }
 
 async function saveBasic() {

@@ -29,6 +29,8 @@ func RegisterRoutes(r chi.Router, h *Handler, issuer adminapp.TokenIssuer, env c
 		gr.With(mw.RequirePerm("channel.write")).Patch("/game-channels/{gameChannelId}", h.UpdateMarketChannel)
 		gr.With(mw.RequirePerm("channel.write")).Post("/game-channels/{gameChannelId}/hide", h.HideMarketChannel)
 		gr.With(mw.RequirePerm("channel.write")).Post("/game-channels/{gameChannelId}/unhide", h.UnhideMarketChannel)
+		gr.With(mw.RequirePerm("channel.read")).Get("/game-channels/{gameChannelId}/login-config", h.GetLoginConfig)
+		gr.With(mw.RequirePerm("channel.write")).Put("/game-channels/{gameChannelId}/login-config", h.PutLoginConfig)
 
 		// 渠道包。
 		gr.With(mw.RequirePerm("channel.read")).Get("/game-channels/{gameChannelId}/packages", h.ListPackages)
