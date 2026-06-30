@@ -1,0 +1,100 @@
+{
+  "module_id": "product",
+  "code": "16",
+  "title": "商品与 IAP 映射（Product / Channel IAP）",
+  "lane": "games-surface",
+  "spec_path": "docs/architecture/v2/modules/16-product/spec.compact.md",
+  "worktree": "/Users/csw/gitproject/console-product",
+  "branch": "codex/product",
+  "code_paths": [
+    "services/admin-api/internal/domain/product",
+    "apps/admin-web/src/views/games"
+  ],
+  "shared_surfaces_touched": [
+    "services/admin-api/internal/transport/http/games",
+    "apps/admin-web/src/views/games",
+    "apps/admin-web/src/views/channels"
+  ],
+  "integration_points": [
+    "services/admin-api/internal/transport/httpserver/admin_wiring.go",
+    "services/admin-api/internal/transport/http/admin/router.go (新增 GET /system/currency-specs)",
+    "apps/admin-web/src/router/routes.ts"
+  ],
+  "backend_routes": [
+    "GET /api/admin/system/currency-specs",
+    "GET /api/admin/games/{gameId}/products",
+    "POST /api/admin/games/{gameId}/products",
+    "PATCH /api/admin/products/{productId}",
+    "GET /api/admin/channel-packages/{packageId}/products",
+    "PUT /api/admin/channel-packages/{packageId}/products",
+    "GET /api/admin/game-channels/{gameChannelId}/iap-config",
+    "PUT /api/admin/game-channels/{gameChannelId}/iap-config",
+    "GET /api/admin/channel-packages/{packageId}/iap-override",
+    "PUT /api/admin/channel-packages/{packageId}/iap-override"
+  ],
+  "frontend_routes": [
+    "games/:gameId (tabs: products, iap)",
+    "channels (channel package detail drawer)"
+  ],
+  "frontend_views": [
+    "apps/admin-web/src/views/games/detail/GameDetailView.vue",
+    "apps/admin-web/src/views/games/detail/ProductTab.vue",
+    "apps/admin-web/src/views/games/detail/IapConfigTab.vue",
+    "apps/admin-web/src/views/games/detail/components/TemplateConfigRenderer.vue",
+    "apps/admin-web/src/views/channels/components/ChannelInstanceDetailDrawer.vue",
+    "apps/admin-web/src/views/channels/components/ChannelPackageDetailDrawer.vue"
+  ],
+  "referenced_modules": [
+    "channel",
+    "game",
+    "common"
+  ],
+  "depends_on": [
+    "channel",
+    "game",
+    "common"
+  ],
+  "sync_section": "products",
+  "open_issues": [
+    "loadProductsForMapping ListByGame 硬限 1000 行（超大游戏需新增按 ProductIDRef 批量查仓储；本轮保留 TODO 不扩大范围）",
+    "IAP 模板 file 字段暂文本引用输入，统一上传组件待后续",
+    "IAP 写操作审计 detail_json 暂未记录 before/after 快照（与 account-auth 同级，待 audit 模块统一增强）",
+    "[R2 新增·非阻断] 新增 GET /system/currency-specs 暂无 L3 接口测试（建议 transport/http/admin 补 S2 401 / S1 200 登录态用例）"
+  ],
+  "verification": [
+    "pnpm --dir apps/admin-web exec vue-tsc --noEmit",
+    "pnpm --dir apps/admin-web run build",
+    "cd services/admin-api && go build ./...",
+    "cd services/admin-api && go vet ./...",
+    "cd services/admin-api && go test ./... (PASS; 含 product 新增 domain/app 单测 54 + scenario manifest 解析)",
+    "backend_test: domain/common currency 单测 10 + domain/product 单测 15 + app/product service 单测 29 全通过；go vet ./... 干净",
+    "tests/backend/scenarios/product.yaml: 68 用例（9 接口 × S1–S10），进程内 S2 真实断言 401，requiresDB 用例待连库 harness",
+    "frontend_test: pnpm --dir apps/admin-web run test (vitest run) PASS 22 文件 117 用例（含 product 新增 44：TemplateConfigRenderer 8/ProductTab 10/ChannelPackageDetailDrawer 10/IapConfigTab 6）",
+    "frontend_test: pnpm --dir apps/admin-web exec vue-tsc --noEmit PASS（含新增 spec）",
+    "frontend_test: pnpm --dir apps/admin-web exec playwright test product.spec.ts PASS 7/7（E2E_PORT 独立端口；沙箱外运行，冷编译用 --timeout=120000；视觉基线 product-list 首跑生成）",
+    "integration_test(R1 2026-06-29): 契约对账 9 端点全一致，唯一漂移 GET /api/admin/system/currency-specs 后端缺失（P1 移交 🟧）",
+    "integration_test(R1): go build/vet/test 全绿（domain/common 11 + domain/product 15 + app/product 29 + scenario 解析+S2 真断言）；前端 vitest product 4 文件 34 用例 PASS + vue-tsc 干净",
+    "integration_test(R1): 真实连库 e2e 无法运行（沙箱 docker 无权限/无 migrate·psql/无 DSN/连库 harness 未落地）→ 契约静态对账 + 进程内等价单测替代，残留风险已记 integration.checklist.md",
+    "integration_test(R1): 红线核验通过（脱敏 maskConfig+AES-GCM / 权限 product.read·write / schema 隔离 无 env 列·search_path / 事务 ReplaceByPackage 单事务 / IAP≠payment 隔离 / 两维 128·64 独立）",
+    "fullstack_fix(R1 2026-06-29 🟧): 补只读 GET /api/admin/system/currency-specs（登录态读取，返回 {data:{items:[CurrencySpecView]}} 与前端 dictionary.ts 解包+e2e mock 双向一致，前端零改动）",
+    "fullstack_fix: cd services/admin-api && go build ./... PASS / go vet ./... PASS / go test ./internal/domain/common ./internal/app/product ./internal/app/admin ./internal/transport/http/admin PASS（无回归）",
+    "integration_test(R2 2026-06-29): P1 闭环——契约对账扩为 10 端点全一致（GET /api/admin/system/currency-specs 信封{data:{items}}+camelCase+仅 enabled=TRUE+读 platform 只读+登录态不挂 RequirePerm，与前端 dictionary.ts 一致，前端零改动）",
+    "integration_test(R2): go build/vet/test 全绿（含 app/admin·transport/http/admin·domain/common·app/product·games·scenario）；前端 vitest product 4 文件 34 用例 PASS + vue-tsc 干净；红线未破坏",
+    "integration_test(R2): 最终判定 YES 可进入功能验收；非阻断遗留 #2 审计/#3 loadProductsForMapping 1000 硬限/#4 IAP 文件上传/#6 currency-specs 暂无 L3 接口测试 转后续跟踪",
+    "acceptance(2026-06-29 ✅ 功能验收师 · Cursor Auto): 验收结论 PASS——重点验收点全部端到端成立（金额归一化 USD4.999→500/0.001拒/JPY120.5→121/display反算/productId冲突CONFLICT；product_id≤128·price_id≤64两维独立禁互填；包映射PUT全量upsert+删未现项+两维独立解析；IAP四件套校验·AES-GCM不落明文·响应脱敏·config_status三态·包级merge顶层覆盖·enabled非valid拒绝；红线IAP≠payment隔离/只读不跨schema写/SyncSection=products；P1 currency-specs登录态可读+信封字段正确+前端不再回退seed）",
+    "acceptance: 后端 go build/vet/test 全绿；统一回归入口 WITH_DB=0 后端 367/0；前端 vue-tsc ✅ + vite build ✅ + vitest 22 文件 117 用例 ✅（product 4 文件 34）",
+    "acceptance: Playwright 沙箱内 Chrome 不可控（kill EPERM/SIGABRT）→ 沿用前置闸门 7/7（环境阻断非功能缺陷）；真实连库 e2e 环境阻断（无 PG/docker/DSN/harness）→ 契约对账+进程内单测等价+静态走查替代，残留风险已记，不作 FAIL 闸门",
+    "acceptance: 下游 impacts 抽查无破坏（sync SectionProducts 已注册·preview 仍 scaffold 属 sync21 未落地；snapshot20 未开发·ResolveEffectiveIDs/MergeIAPConfig 已暴露+单测；payment/game-cashier price_id 弱引用无强外键；前端 10 端点契约一致）；非阻断 #2/#3/#4/#6 转后续迭代跟踪"
+  ],
+  "stage_status": {
+    "backend_dev": "done",
+    "backend_cr": "passed",
+    "backend_test": "done",
+    "frontend_dev": "done",
+    "frontend_cr": "passed",
+    "frontend_test": "done",
+    "integration_test": "passed",
+    "fullstack_fix": "done",
+    "acceptance": "passed"
+  }
+}

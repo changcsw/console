@@ -146,6 +146,11 @@
                     />
                   </template>
                 </el-table-column>
+                <el-table-column label="操作" width="88" fixed="right">
+                  <template #default="{ row }">
+                    <el-button link type="primary" @click="openPackageDetail(row)">详情</el-button>
+                  </template>
+                </el-table-column>
                 <template #empty>
                   <span class="text-muted">暂无渠道包</span>
                 </template>
@@ -164,6 +169,7 @@
         </el-tabs>
       </template>
     </div>
+    <ChannelPackageDetailDrawer :open="packageDetailOpen" :pkg="activePackage" @close="packageDetailOpen = false" />
   </el-drawer>
 </template>
 
@@ -186,6 +192,7 @@ import {
 import ChannelInstanceStatusTag from "./ChannelInstanceStatusTag.vue";
 import ChannelInstanceRuntimeFlags from "./ChannelInstanceRuntimeFlags.vue";
 import ChannelLoginConfigPanel from "./ChannelLoginConfigPanel.vue";
+import ChannelPackageDetailDrawer from "./ChannelPackageDetailDrawer.vue";
 import { regionLabel } from "../constants";
 
 const props = defineProps<{
@@ -212,6 +219,8 @@ const activeTab = ref<"basic" | "packages" | "channel-login">("basic");
 
 const creatingPkg = ref(false);
 const savingPkg = ref(false);
+const packageDetailOpen = ref(false);
+const activePackage = ref<ChannelPackage | null>(null);
 const pkgForm = reactive({
   packageCode: "",
   packageName: "",
@@ -317,6 +326,11 @@ function toggleCreatePkg() {
     pkgForm.inheritChannelConfig = true;
     pkgForm.enabled = true;
   }
+}
+
+function openPackageDetail(row: ChannelPackage) {
+  activePackage.value = row;
+  packageDetailOpen.value = true;
 }
 
 async function createPkg() {

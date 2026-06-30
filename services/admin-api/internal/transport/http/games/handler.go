@@ -13,6 +13,7 @@ import (
 	accountauthapp "github.com/csw/console/services/admin-api/internal/app/accountauth"
 	"github.com/csw/console/services/admin-api/internal/app/dto"
 	gameapp "github.com/csw/console/services/admin-api/internal/app/game"
+	productapp "github.com/csw/console/services/admin-api/internal/app/product"
 	"github.com/csw/console/services/admin-api/internal/domain/common"
 	"github.com/csw/console/services/admin-api/internal/transport/http/httpx"
 )
@@ -21,6 +22,8 @@ import (
 type Handler struct {
 	svc            *gameapp.GameService
 	accountAuthSvc *accountauthapp.Service
+	productSvc     *productapp.ProductService
+	iapSvc         *productapp.IAPConfigService
 	env            common.Environment
 }
 
@@ -31,6 +34,13 @@ func NewHandler(svc *gameapp.GameService, env common.Environment, accountAuthSvc
 		aas = accountAuthSvc[0]
 	}
 	return &Handler{svc: svc, accountAuthSvc: aas, env: env}
+}
+
+// WithProductServices 注入 product 模块服务（模块 16）。
+func (h *Handler) WithProductServices(productSvc *productapp.ProductService, iapSvc *productapp.IAPConfigService) *Handler {
+	h.productSvc = productSvc
+	h.iapSvc = iapSvc
+	return h
 }
 
 // ===== 请求 DTO =====
@@ -320,6 +330,11 @@ func atoiDefault(s string) int {
 
 // writeError 把 app 层 *gameapp.Error 写为精确包络；其它（仓储映射的哨兵）回退 httpx.WriteAppError。
 func writeError(w http.ResponseWriter, err error) {
+	var productErr *productapp.Error
+	if errors.As(err, &productErr) {
+		httpx.WriteError(w, productErr.Status, productErr.Code, productErr.Message, productErr.Details...)
+		return
+	}
 	var aaErr *accountauthapp.Error
 	if errors.As(err, &aaErr) {
 		httpx.WriteError(w, aaErr.Status, aaErr.Code, aaErr.Message, aaErr.Details...)

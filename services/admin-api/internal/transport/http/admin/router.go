@@ -35,6 +35,10 @@ func NewRouter(h *Handler, issuer adminapp.TokenIssuer, env common.Environment, 
 		pr.Get("/me", h.Me)
 
 		pr.Route("/system", func(sr chi.Router) {
+			// 平台级币种字典：跨页只读公共参考数据（商品/收银台等编辑均需），仅要求登录态，
+			// 不挂特定权限码（不耦合 system.read，亦不臆造 product.*），与 /me 的登录态读取一致。
+			sr.Get("/currency-specs", h.ListCurrencySpecs)
+
 			sr.With(mw.RequirePerm("system.read")).Get("/admin-users", h.ListUsers)
 			sr.With(mw.RequirePerm("admin_user.write")).Post("/admin-users", h.CreateUser)
 			sr.With(mw.RequirePerm("system.read")).Get("/admin-users/{id}", h.GetUser)

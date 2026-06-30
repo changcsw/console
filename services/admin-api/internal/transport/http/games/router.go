@@ -31,5 +31,16 @@ func RegisterRoutes(r chi.Router, h *Handler, issuer adminapp.TokenIssuer, env c
 		gr.With(mw.RequirePerm("game.read")).Get("/channels/{channelId}/account-auth-types", h.ListChannelAccountAuthTypes)
 		gr.With(mw.RequirePerm("game.read")).Get("/games/{gameId}/account-auth-configs", h.GetGameAccountAuthConfigs)
 		gr.With(mw.RequirePerm("game.write")).Put("/games/{gameId}/account-auth-configs", h.ReplaceGameAccountAuthConfigs)
+
+		// product（模块 16）路由组，挂载在 games 共享 surface。
+		gr.With(mw.RequirePerm("product.read")).Get("/games/{gameId}/products", h.ListProducts)
+		gr.With(mw.RequirePerm("product.write")).Post("/games/{gameId}/products", h.CreateProduct)
+		gr.With(mw.RequirePerm("product.write")).Patch("/products/{productId}", h.UpdateProduct)
+		gr.With(mw.RequirePerm("product.read")).Get("/channel-packages/{packageId}/products", h.GetPackageProducts)
+		gr.With(mw.RequirePerm("product.write")).Put("/channel-packages/{packageId}/products", h.PutPackageProducts)
+		gr.With(mw.RequirePerm("product.read")).Get("/game-channels/{gameChannelId}/iap-config", h.GetGameChannelIAPConfig)
+		gr.With(mw.RequirePerm("product.write")).Put("/game-channels/{gameChannelId}/iap-config", h.PutGameChannelIAPConfig)
+		gr.With(mw.RequirePerm("product.read")).Get("/channel-packages/{packageId}/iap-override", h.GetPackageIAPOverride)
+		gr.With(mw.RequirePerm("product.write")).Put("/channel-packages/{packageId}/iap-override", h.PutPackageIAPOverride)
 	})
 }

@@ -27,7 +27,9 @@ type FormField struct {
 
 // FileField 文件字段定义（来自 file_fields_json）。
 type FileField struct {
-	Key string `json:"key"`
+	Key       string   `json:"key"`
+	Accept    []string `json:"accept"`
+	MaxSizeKB int      `json:"maxSizeKB"`
 }
 
 // ValidationRule 模板字段校验规则（来自 validation_rules_json）。

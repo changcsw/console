@@ -49,7 +49,9 @@ function mountView() {
         BasicInfoTab: true,
         MarketsTab: true,
         LegalLinksTab: true,
-        AccountAuthTab: true
+        AccountAuthTab: true,
+        ProductTab: true,
+        IapConfigTab: true
       }
     }
   });
