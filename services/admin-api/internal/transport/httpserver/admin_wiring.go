@@ -16,6 +16,7 @@ import (
 	channelapp "github.com/csw/console/services/admin-api/internal/app/channel"
 	channelloginapp "github.com/csw/console/services/admin-api/internal/app/channellogin"
 	gameapp "github.com/csw/console/services/admin-api/internal/app/game"
+	pluginapp "github.com/csw/console/services/admin-api/internal/app/plugin"
 	productapp "github.com/csw/console/services/admin-api/internal/app/product"
 	domainauth "github.com/csw/console/services/admin-api/internal/domain/auth"
 	"github.com/csw/console/services/admin-api/internal/domain/common"
@@ -125,7 +126,8 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 
 	channelSvc := channelapp.NewChannelService(postgres.NewChannelStore(pool), time.Now, auditSink, env)
 	channelLoginSvc := channelloginapp.NewService(postgres.NewChannelLoginStore(pool), cipher, nil, auditSink, time.Now, env)
-	channelshttp.RegisterRoutes(r, channelshttp.NewHandler(channelSvc, env, channelLoginSvc), issuer, env, logger, true, auditSvc)
+	channelPluginSvc := pluginapp.NewService(postgres.NewPluginStore(pool), cipher, auditSink, env)
+	channelshttp.RegisterRoutes(r, channelshttp.NewHandler(channelSvc, env, channelLoginSvc).WithPluginService(channelPluginSvc), issuer, env, logger, true, auditSvc)
 
 	cashierSvc := cashierapp.NewService(postgres.NewCashierStore(pool), auditSink, time.Now)
 	cashierhttp.RegisterRoutes(r, cashierhttp.NewHandler(cashierSvc), issuer, env, logger, true, auditSvc)

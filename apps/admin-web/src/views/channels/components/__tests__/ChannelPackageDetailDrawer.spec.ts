@@ -7,6 +7,8 @@ const getPackageProductsApi = vi.fn();
 const getPackageIapOverrideApi = vi.fn();
 const putPackageProductsApi = vi.fn();
 const putPackageIapOverrideApi = vi.fn();
+const listChannelPackagePluginsApi = vi.fn();
+const upsertChannelPackagePluginApi = vi.fn();
 
 vi.mock("@/api/modules/products", () => ({
   getPackageProducts: (...a: unknown[]) => getPackageProductsApi(...a),
@@ -15,12 +17,19 @@ vi.mock("@/api/modules/products", () => ({
   putPackageIapOverride: (...a: unknown[]) => putPackageIapOverrideApi(...a)
 }));
 
+vi.mock("@/api/modules/channels", () => ({
+  listChannelPackagePlugins: (...a: unknown[]) => listChannelPackagePluginsApi(...a),
+  upsertChannelPackagePlugin: (...a: unknown[]) => upsertChannelPackagePluginApi(...a)
+}));
+
 import { ApiError } from "@/api/http";
 import permDirective from "@/directives/perm";
 import { usePermissionStore } from "@/stores/permission";
 import ChannelPackageDetailDrawer from "@/views/channels/components/ChannelPackageDetailDrawer.vue";
-import type { ChannelPackage } from "@/api/modules/channels";
+import TemplateConfigRenderer from "@/views/games/detail/components/TemplateConfigRenderer.vue";
+import type { ChannelPackage, ChannelPackagePluginItem } from "@/api/modules/channels";
 import type { PackageProductItem } from "@/api/modules/products";
+import { channelPackagePluginItem } from "./fixtures/featurePlugin";
 
 function makePkg(): ChannelPackage {
   return {
@@ -67,18 +76,27 @@ interface DrawerVM {
   overrideEnabled: boolean;
   overrideDraftConfig: Record<string, unknown>;
   overrideSecretInputs: Record<string, string>;
+  packagePlugins: ChannelPackagePluginItem[];
   effectiveProductId: (row: PackageProductItem) => string;
   effectivePriceId: (row: PackageProductItem) => string;
   onModeChange: (row: PackageProductItem, target: "product" | "price") => void;
   saveMappings: () => Promise<void>;
   saveIapOverride: () => Promise<void>;
+  pluginCanEdit: (item: ChannelPackagePluginItem) => boolean;
+  updatePluginSecrets: (item: ChannelPackagePluginItem, value: Record<string, string>) => void;
+  savePackagePlugin: (item: ChannelPackagePluginItem) => Promise<void>;
 }
 
-async function mountDrawer(perms: string[] = ["product.read", "product.write"], rows: PackageProductItem[] = [makeProduct()]) {
+async function mountDrawer(
+  perms: string[] = ["product.read", "product.write"],
+  rows: PackageProductItem[] = [makeProduct()],
+  plugins: ChannelPackagePluginItem[] = []
+) {
   setActivePinia(createPinia());
   usePermissionStore().setFromUser({ roles: [], permissions: perms });
   getPackageProductsApi.mockResolvedValue(rows);
   getPackageIapOverrideApi.mockResolvedValue(JSON.parse(JSON.stringify(OVERRIDE_RESP)));
+  listChannelPackagePluginsApi.mockResolvedValue(plugins);
   // 抽屉用非 immediate watch（open false→true 才加载），故先关后开触发 loadData。
   const wrapper = mount(ChannelPackageDetailDrawer, {
     props: { open: false, pkg: makePkg() },
@@ -216,5 +234,88 @@ describe("ChannelPackageDetailDrawer · 商品映射两组覆盖", () => {
     await wrapper.setProps({ open: true });
     await flushPromises();
     expect(ElMessage.error).toHaveBeenCalledWith("boom");
+  });
+});
+
+describe("ChannelPackageDetailDrawer · 功能插件继承/覆盖", () => {
+  const PLUGIN_PERMS = ["product.read", "product.write", "plugin.write"];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(ElMessage, "warning").mockImplementation(() => ({}) as never);
+    vi.spyOn(ElMessage, "success").mockImplementation(() => ({}) as never);
+    vi.spyOn(ElMessage, "error").mockImplementation(() => ({}) as never);
+  });
+
+  // IAP 覆盖区也固定挂载一个 TemplateConfigRenderer，用 formSchema 长度区分插件渲染器。
+  function pluginRenderers(wrapper: Awaited<ReturnType<typeof mountDrawer>>["wrapper"]) {
+    return wrapper
+      .findAllComponents(TemplateConfigRenderer)
+      .filter((r) => (r.props("template").formSchema?.length ?? 0) === 2);
+  }
+
+  test("inherit=true 时不渲染自定义模板，保存下发空 config 且继承标记为真", async () => {
+    const { wrapper, vm } = await mountDrawer(PLUGIN_PERMS, [makeProduct()], [channelPackagePluginItem()]);
+    // 继承态：插件模板渲染器不挂载（IAP 覆盖区的渲染器除外）
+    expect(pluginRenderers(wrapper)).toHaveLength(0);
+    expect(wrapper.html()).toContain("继承渠道插件");
+
+    upsertChannelPackagePluginApi.mockResolvedValue(channelPackagePluginItem());
+    await vm.savePackagePlugin(vm.packagePlugins[0]);
+    await flushPromises();
+    const [packageId, payload] = upsertChannelPackagePluginApi.mock.calls[0] as [
+      number,
+      { inheritChannelConfig: boolean; config: Record<string, unknown> }
+    ];
+    expect(packageId).toBe(9001);
+    expect(payload.inheritChannelConfig).toBe(true);
+    expect(payload.config).toEqual({});
+  });
+
+  test("自定义覆盖：模板渲染器消费四件套并渲染 scope=server 提示", async () => {
+    const { wrapper } = await mountDrawer(PLUGIN_PERMS, [makeProduct()], [
+      channelPackagePluginItem({ inheritChannelConfig: false })
+    ]);
+    const renderers = pluginRenderers(wrapper);
+    expect(renderers).toHaveLength(1);
+    expect(renderers[0].props("template").formSchema).toHaveLength(2);
+    expect(renderers[0].props("template").secretFields).toContain("apiKey");
+    expect(wrapper.html()).toContain("仅服务端，不下发客户端");
+  });
+
+  test("自定义覆盖保存：密文留空不下发，重填下发明文", async () => {
+    const { vm } = await mountDrawer(PLUGIN_PERMS, [makeProduct()], [
+      channelPackagePluginItem({ inheritChannelConfig: false })
+    ]);
+    const plugin = vm.packagePlugins[0];
+
+    upsertChannelPackagePluginApi.mockResolvedValue(channelPackagePluginItem({ inheritChannelConfig: false }));
+    vm.updatePluginSecrets(plugin, { apiKey: "" });
+    await vm.savePackagePlugin(plugin);
+    await flushPromises();
+    const firstConfig = (upsertChannelPackagePluginApi.mock.calls[0][1] as { config: Record<string, unknown> }).config;
+    expect("apiKey" in firstConfig).toBe(false);
+    expect(firstConfig.endpoint).toBe("https://example.com/aa");
+
+    vm.updatePluginSecrets(plugin, { apiKey: "new-key" });
+    await vm.savePackagePlugin(plugin);
+    await flushPromises();
+    const lastConfig = (upsertChannelPackagePluginApi.mock.calls.at(-1)![1] as { config: Record<string, unknown> }).config;
+    expect(lastConfig.apiKey).toBe("new-key");
+  });
+
+  test("locked 插件展示锁定提示且不可编辑", async () => {
+    const { wrapper, vm } = await mountDrawer(PLUGIN_PERMS, [makeProduct()], [
+      channelPackagePluginItem({ locked: true })
+    ]);
+    expect(vm.pluginCanEdit(vm.packagePlugins[0])).toBe(false);
+    expect(wrapper.html()).toContain("该插件已锁定，渠道包不可编辑");
+  });
+
+  test("无 plugin.write 权限插件覆盖置灰", async () => {
+    const { vm } = await mountDrawer(["product.read", "product.write"], [makeProduct()], [
+      channelPackagePluginItem()
+    ]);
+    expect(vm.pluginCanEdit(vm.packagePlugins[0])).toBe(false);
   });
 });

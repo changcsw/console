@@ -1,0 +1,84 @@
+{
+  "module_id": "feature-plugin",
+  "lane": "channels-surface",
+  "spec_path": "docs/architecture/v2/modules/15-feature-plugin/spec.compact.md",
+  "worktree": "/Users/csw/gitproject/console-feature-plugin",
+  "branch": "codex/feature-plugin",
+  "shared_surfaces_touched": [
+    "services/admin-api/internal/transport/httpserver/admin_wiring.go",
+    "services/admin-api/internal/transport/http/channels/router.go",
+    "services/admin-api/internal/transport/http/channels/handler.go",
+    "apps/admin-web/src/views/channels"
+  ],
+  "backend_routes": [
+    "GET /api/admin/game-channels/{gameChannelId}/plugins",
+    "POST /api/admin/game-channels/{gameChannelId}/plugins",
+    "PATCH /api/admin/game-channel-plugins/{id}",
+    "GET /api/admin/channel-packages/{packageId}/plugins",
+    "POST /api/admin/channel-packages/{packageId}/plugins"
+  ],
+  "frontend_routes": [],
+  "frontend_views": [
+    "apps/admin-web/src/api/modules/channels.ts",
+    "apps/admin-web/src/views/channels/components/FeaturePluginConfigPanel.vue",
+    "apps/admin-web/src/views/channels/components/ChannelInstanceDetailDrawer.vue",
+    "apps/admin-web/src/views/channels/components/ChannelPackageDetailDrawer.vue"
+  ],
+  "referenced_modules": [
+    "channel",
+    "game",
+    "common"
+  ],
+  "open_issues": [
+    "P2（非阻断遗留）：ChannelPackageDetailDrawer 插件覆盖区 file 字段未走 el-upload 统一上传（保留为后续增强；实例侧已正确实现）",
+    "迁移 000012 与 #18 game-cashier 编号冲突：合并 main 前由集成阶段重编号（仅登记）",
+    "scenario requiresDB 用例待连库 harness 执行（S3/S6/S10 等运行态；本轮以契约对账+L1+组件/e2e 替代覆盖）",
+    "审计事件粒度（观察·非阻断）：plugin.enable/disable 未从 plugin.configure 拆分，如下游审计页需区分可后续增强",
+    "既有非 #15 阻塞（不计入 #15）：全量 vue-tsc / 全量 vitest 唯一失败为仓内 src/api/modules/cashier.ts(173) 与 src/views/games/detail/__tests__/sync-section-drawer.spec.ts(23)，本模块文件不受影响"
+  ],
+  "closed_issues": [
+    "I-1（第 2 轮复测闭合）：渠道包覆盖项 config 序列化键 → configJson（query/command 两处同步），实例项未误伤，请求侧 POST config 入参保持；app/dto/plugin_test.go 序列化回归 PASS",
+    "P3（第 2 轮复测闭合）：ResolvePluginConfigStatus 的 allowed 集合并入 secret/file 键；SecretFileOnlyFieldsAllowed 用例 PASS"
+  ],
+  "verification": [
+    "go build ./... (services/admin-api) ✅",
+    "go vet ./... (services/admin-api) ✅",
+    "backend-cr: 契约核对通过（CR 已修复 7 项，见 audit.log.md §CR）",
+    "pnpm --dir apps/admin-web exec vitest run src/views/channels/components/__tests__/FeaturePluginConfigPanel.spec.ts src/views/channels/components/__tests__/ChannelInstanceDetailDrawer.spec.ts src/views/channels/components/__tests__/ChannelPackageDetailDrawer.spec.ts ✅",
+    "pnpm --dir apps/admin-web exec vue-tsc --noEmit ❌（被既有 cashier/games 测试类型问题阻塞，非 #15）",
+    "pnpm --dir apps/admin-web exec vite build ✅",
+    "frontend-cr: compact 核对通过；CR 修复 plugin.write/密文提交/env badge/scope 提示 ✅",
+    "backend-test: go test ./... ✅（全包通过，0 失败）",
+    "backend-test: domain/plugin L1 单测 ✅（compatibility_test.go + plugin_config_test.go，15 Test/32 子用例 PASS；覆盖 ValidatePluginRegionCompatibility / ResolvePluginConfigStatus / ResolveRuntimeFlags）",
+    "backend-test: tests/backend/scenarios/feature-plugin.yaml ✅（5 接口×S1–S10；manifest 解析+S2 进程内 401 PASS，requiresDB 用例待连库 harness）",
+    "backend-test: fixtures common/feature-plugin.sql（自动挂回归入口）+ sandbox/feature-plugin.sql（连库前向声明）",
+    "backend-test: 疑似实现缺陷 P3（非阻断）— ResolvePluginConfigStatus 的 allowed 集合未纳入 secret/file 键，仅 secret_fields/file_fields 声明的字段提交会误判 unknown（现网模板均同列 form_schema 不触发），详见 audit.log.md §4",
+    "frontend-test: vitest 本模块 33/33 ✅（FeaturePluginConfigPanel 13 + ChannelInstanceDetailDrawer 5 + ChannelPackageDetailDrawer 15；原 16 → 新增 17，未破坏既有）",
+    "frontend-test: vitest 全量 215/216（唯一失败 sync-section-drawer.spec.ts 为既有阻塞，非 #15，未触碰）",
+    "frontend-test: Playwright tests/frontend/e2e/feature-plugin.spec.ts 3/3 ✅（含截图基线 visual-baseline/.../feature-plugin-list-chromium-darwin.png，toHaveScreenshot 比对绿）",
+    "integration-test: 契约对账 5 接口方法/路径/权限/请求 DTO/错误码/包络/实例项响应全一致；发现 1 处漂移 I-1（包覆盖 config vs configJson）",
+    "integration-test: go test ./... ✅ 全包 0 失败（复跑）；scenario feature-plugin manifest 解析 OK + S2 进程内 401 PASS；requiresDB 用例 SKIP（连库 harness 为前向声明，SCENARIO_WITH_DB 仍无 DSN 装配，本机缺 migrate/PG）",
+    "integration-test: 前端模块 vitest 33/33 ✅；全量 215/216（唯一失败 sync-section-drawer.spec.ts 既有非 #15）；Playwright feature-plugin 3/3 ✅",
+    "integration-test: 红线核验 — scope=server 标注/隐藏·不兼容·非 valid 三标全 false（ResolveRuntimeFlags）/secret masked/权限 plugin.read·write/跨env 无 schema 前缀/InTx 回滚/required 缺口引导 均经代码+单测+组件/e2e 核验（S6/S10/S3 运行待连库）",
+    "integration-test: 下游 snapshot(#20 未落地)/sync(#21 骨架) 无消费方可对账；口径单一来源 ResolveRuntimeFlags 三标同口径，列前向兼容备忘",
+    "integration-test 通过判定: 否（暂不进入功能验收）— 需先修复 I-1 漂移（并建议顺带 P3）后回测渠道包覆盖 round-trip；主链路/红线/回归均通过",
+    "fullstack-fix: I-1 修复 — PackagePluginItemView.Config → ConfigJSON（json:\"configJson\"），统一前后端响应键；新增 app/dto/plugin_test.go 序列化回归（含实例/包两视图 key 一致）✅",
+    "fullstack-fix: P3 修复 — ResolvePluginConfigStatus 的 allowed 集合并入 secret/file 键；新增 domain/plugin 用例 TestResolvePluginConfigStatus_SecretFileOnlyFieldsAllowed ✅",
+    "fullstack-fix: P2 处置 — 保留为非阻断遗留（未触及 ChannelPackageDetailDrawer，按约束不扩大改动）",
+    "fullstack-fix: go build ./... && go vet ./... && go test ./... (services/admin-api) ✅ 全包 0 失败",
+    "fullstack-fix: vitest 本模块三件套 33/33 ✅；vite build ✅（apps/admin-web，worktree 本地 bin）",
+    "integration-retest（第2轮）: I-1 闭合 — dto/plugin.go:76 ConfigJSON json:\"configJson\"；query_list_channel_plugins.go:104,133 + command_override_package_plugin.go:76,98 赋值同步；前端 channels.ts:275 + drawer:297 读 configJson 一致；实例项 service.go:157 未误伤；POST 入参仍 config（compact）",
+    "integration-retest（第2轮）: P3 闭合 — plugin_config.go:52,57 secret/file 键并入 allowed；TestResolvePluginConfigStatus_SecretFileOnlyFieldsAllowed PASS，既有 32 子用例无回归",
+    "integration-retest（第2轮）: go build ./... ✅；go test ./... ✅ 全包 0 失败（dto 序列化回归 TestPackagePluginItemView_ConfigJSONFieldName/TestChannelAndPackageViews_ConfigKeyConsistent PASS）；前端模块 vitest 33/33 ✅",
+    "integration-retest（第2轮）: Playwright 未重跑（前端代码未改、mock e2e 与第1轮 3/3 等价）；契约对账现无漂移；红线复核仍成立（S3/S6/S10 运行待连库）",
+    "integration-retest（第2轮）通过判定: 是（可进入 ✅ 功能验收）— I-1/P3 已闭合，回归红线全绿；仅余 P2/迁移编号/连库 harness 为非阻断遗留",
+    "acceptance（功能验收 / Cursor Auto）通过判定: 是（PASS）— 端到端验收清单 29 项全 PASS / 0 FAIL（含 AC-13 审计粒度一条非阻断观察）；功能端到端成立、满足 compact 业务规则与 operation-flow B-步骤4 主线",
+    "acceptance: 数据模型 5 表（platform 3 + env 业务 2）字段/约束/默认/UNIQUE/FK/索引与 compact 一致；业务表无 env 列、无 schema 前缀、跨 schema FK 指 platform、down 迁移幂等",
+    "acceptance: API 5 接口 方法/路径/权限码(plugin.read|write)/请求 DTO/错误码(MARKET_CHANNEL_INCOMPATIBLE|VALIDATION_FAILED|CONFLICT)/统一包络/审计(plugin.configure) 全对账一致",
+    "acceptance: 状态机/规则 全 PASS — region 兼容(CN↔domestic/非CN↔overseas)、ResolvePluginConfigStatus(enabled+缺必填→invalid / disabled→empty)、ResolveRuntimeFlags 三标同口径+scope 过滤+required 缺口异常、必接/selectable/locked",
+    "acceptance: 前端 Tab/渠道包继承覆盖/模板四件套渲染/secret masked·留空不改/权限置灰/必接引导/scope=server 提示 全 PASS",
+    "acceptance: 红线 全 PASS — scope=server 不下发、隐藏·不兼容·非valid 三标 false 不进列表/快照/同步、密钥加密不存明文响应恒 masked、业务表不跨 schema 写",
+    "acceptance: 下游 impacts 抽查 — snapshot(#20) 目录未落地、sync(#21) 无 plugin 引用，无消费方破坏；ResolveRuntimeFlags 单一口径前向兼容",
+    "acceptance: 构建测试真实输出 — go build/vet/test ./... ✅ 全包0失败；domain/plugin 32 子用例 PASS；scenario feature-plugin S2×5 进程内401 PASS + requiresDB SKIP；前端模块 vitest 33/33 ✅；全量 215/216(唯一失败 sync-section-drawer 既有非#15)；vite build ✅；Playwright feature-plugin 3/3 ✅(视觉基线绿)"
+  ]
+}

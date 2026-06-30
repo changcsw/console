@@ -83,6 +83,72 @@
         </article>
       </section>
 
+      <section class="panel">
+        <header class="panel__head">
+          <h4 class="panel__title">功能插件覆盖</h4>
+        </header>
+        <el-alert
+          type="info"
+          :closable="false"
+          title="支持“继承渠道插件 / 自定义覆盖”切换；仅 plugin.write 可编辑。"
+          class="panel__alert"
+        />
+        <div v-if="!packagePlugins.length" class="empty">该渠道包暂无插件覆盖项。</div>
+        <article v-for="plugin in packagePlugins" :key="plugin.pluginId" class="plugin-row">
+          <header class="plugin-row__head">
+            <div class="plugin-row__title">
+              <b>{{ plugin.pluginName }}</b>
+              <code>{{ plugin.pluginId }}</code>
+              <el-tag v-if="plugin.required" size="small" type="danger">必接</el-tag>
+              <el-tag v-if="plugin.locked" size="small" type="warning">锁定</el-tag>
+              <el-tag size="small" :type="plugin.includedInRuntimeConfig ? 'success' : 'info'">
+                {{ plugin.includedInRuntimeConfig ? "进入最终配置" : "未进入最终配置" }}
+              </el-tag>
+              <PageStatusTag :tone="pluginStatusTone(plugin.configStatus)" :label="pluginStatusLabel(plugin.configStatus)" />
+            </div>
+            <div class="plugin-row__switch">
+              <el-switch
+                v-model="plugin.inheritChannelConfig"
+                :disabled="!pluginCanEdit(plugin)"
+                active-text="继承渠道插件"
+                inactive-text="自定义覆盖"
+              />
+              <el-switch v-model="plugin.enabled" :disabled="!pluginCanEdit(plugin)" active-text="启用" inactive-text="停用" />
+            </div>
+          </header>
+
+          <el-alert
+            v-if="plugin.locked"
+            type="info"
+            :closable="false"
+            title="该插件已锁定，渠道包不可编辑。"
+            class="panel__alert"
+          />
+          <p class="status-text">{{ plugin.lastCheckMessage || "最近校验：-" }}</p>
+
+          <TemplateConfigRenderer
+            v-if="!plugin.inheritChannelConfig"
+            :model-value="pluginDraft(plugin)"
+            :secret-values="pluginSecrets(plugin)"
+            :template="pluginTemplateOf(plugin)"
+            :disabled="!pluginCanEdit(plugin)"
+            @update:model-value="(v) => updatePluginDraft(plugin, v)"
+            @update:secret-values="(v) => updatePluginSecrets(plugin, v)"
+            @json-error-change="(v) => onPluginJsonError(plugin, v)"
+          />
+
+          <el-button
+            v-perm="'plugin.write'"
+            type="primary"
+            :loading="savingPluginId === plugin.pluginId"
+            :disabled="!pluginCanEdit(plugin)"
+            @click="savePackagePlugin(plugin)"
+          >
+            保存插件覆盖
+          </el-button>
+        </article>
+      </section>
+
       <section v-if="iapOverride" class="panel">
         <header class="panel__head">
           <h4 class="panel__title">IAP 覆盖</h4>
@@ -127,19 +193,26 @@
 import { computed, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { usePermissionStore } from "@/stores/permission";
-import type { ChannelPackage } from "@/api/modules/channels";
+import {
+  listChannelPackagePlugins,
+  upsertChannelPackagePlugin,
+  type ChannelPackage,
+  type ChannelPackagePluginItem
+} from "@/api/modules/channels";
 import {
   getPackageIapOverride,
   getPackageProducts,
   putPackageIapOverride,
   putPackageProducts,
   type ConfigStatus,
+  type IapTemplate,
   type PackageIapOverrideResponse,
   type PackageProductItem
 } from "@/api/modules/products";
 import { ApiError } from "@/api/http";
 import PageStatusTag from "@/components/page/PageStatusTag.vue";
 import TemplateConfigRenderer from "@/views/games/detail/components/TemplateConfigRenderer.vue";
+import { configStatusMeta } from "../constants";
 
 type EditableRow = PackageProductItem;
 
@@ -154,17 +227,23 @@ const emit = defineEmits<{
 
 const permission = usePermissionStore();
 const canWrite = computed(() => permission.hasPerm("product.write"));
+const canPluginWrite = computed(() => permission.hasPerm("plugin.write"));
 
 const loading = ref(false);
 const savingProducts = ref(false);
 const savingIap = ref(false);
+const savingPluginId = ref("");
 const jsonError = ref(false);
 
 const productRows = ref<EditableRow[]>([]);
 const iapOverride = ref<PackageIapOverrideResponse | null>(null);
+const packagePlugins = ref<ChannelPackagePluginItem[]>([]);
 const overrideEnabled = ref(false);
 const overrideDraftConfig = ref<Record<string, unknown>>({});
 const overrideSecretInputs = ref<Record<string, string>>({});
+const pluginDraftConfig = ref<Record<string, Record<string, unknown>>>({});
+const pluginSecretInputs = ref<Record<string, Record<string, string>>>({});
+const pluginJsonError = ref<Record<string, boolean>>({});
 
 function statusTone(status: ConfigStatus): "neutral" | "success" | "warning" {
   if (status === "valid") {
@@ -178,6 +257,72 @@ function statusTone(status: ConfigStatus): "neutral" | "success" | "warning" {
 
 function statusClass(status: ConfigStatus): string {
   return status === "invalid" ? "status-text status-text--warning" : "status-text";
+}
+
+function pluginStatusTone(status: ConfigStatus): "neutral" | "success" | "warning" | "danger" {
+  return configStatusMeta(status).tone;
+}
+
+function pluginStatusLabel(status: ConfigStatus): string {
+  return configStatusMeta(status).label;
+}
+
+function pluginTemplateOf(item: ChannelPackagePluginItem): IapTemplate {
+  return {
+    templateVersion: item.template.templateVersion,
+    formSchema: item.template.formSchemaJson,
+    secretFields: item.template.secretFieldsJson,
+    fileFields: item.template.fileFieldsJson,
+    validationRules: item.template.validationRulesJson
+  };
+}
+
+function pluginCanEdit(item: ChannelPackagePluginItem): boolean {
+  return canPluginWrite.value && !item.locked;
+}
+
+function buildPluginSubmitConfig(item: ChannelPackagePluginItem): Record<string, unknown> {
+  const next: Record<string, unknown> = JSON.parse(JSON.stringify(pluginDraft(item) ?? {})) as Record<string, unknown>;
+  for (const key of item.template.secretFieldsJson ?? []) {
+    delete next[key];
+    const value = (pluginSecrets(item)[key] ?? "").trim();
+    if (value) {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
+function initPluginDraft(item: ChannelPackagePluginItem) {
+  pluginDraftConfig.value[item.pluginId] = JSON.parse(JSON.stringify(item.configJson ?? {})) as Record<string, unknown>;
+  pluginSecretInputs.value[item.pluginId] = {};
+  pluginJsonError.value[item.pluginId] = false;
+}
+
+function pluginDraft(item: ChannelPackagePluginItem): Record<string, unknown> {
+  if (!pluginDraftConfig.value[item.pluginId]) {
+    initPluginDraft(item);
+  }
+  return pluginDraftConfig.value[item.pluginId];
+}
+
+function pluginSecrets(item: ChannelPackagePluginItem): Record<string, string> {
+  if (!pluginSecretInputs.value[item.pluginId]) {
+    pluginSecretInputs.value[item.pluginId] = {};
+  }
+  return pluginSecretInputs.value[item.pluginId];
+}
+
+function updatePluginDraft(item: ChannelPackagePluginItem, value: Record<string, unknown>) {
+  pluginDraftConfig.value[item.pluginId] = value;
+}
+
+function updatePluginSecrets(item: ChannelPackagePluginItem, value: Record<string, string>) {
+  pluginSecretInputs.value[item.pluginId] = value;
+}
+
+function onPluginJsonError(item: ChannelPackagePluginItem, hasError: boolean) {
+  pluginJsonError.value[item.pluginId] = hasError;
 }
 
 function effectiveProductId(row: EditableRow): string {
@@ -241,13 +386,24 @@ function validateRows(): boolean {
 async function loadData(packageId: number) {
   loading.value = true;
   try {
-    const [products, override] = await Promise.all([getPackageProducts(packageId), getPackageIapOverride(packageId)]);
+    const [products, override, plugins] = await Promise.all([
+      getPackageProducts(packageId),
+      getPackageIapOverride(packageId),
+      listChannelPackagePlugins(packageId)
+    ]);
     productRows.value = products.map((item) => ({
       ...item,
       productIdOverride: item.productIdMode === "default" ? "" : item.productIdOverride,
       priceIdOverride: item.priceIdMode === "default" ? "" : item.priceIdOverride
     }));
     iapOverride.value = override;
+    packagePlugins.value = plugins;
+    pluginDraftConfig.value = {};
+    pluginSecretInputs.value = {};
+    pluginJsonError.value = {};
+    for (const item of plugins) {
+      initPluginDraft(item);
+    }
     overrideEnabled.value = override.override.enabled;
     overrideDraftConfig.value = JSON.parse(JSON.stringify(override.override.configJson ?? {})) as Record<string, unknown>;
     overrideSecretInputs.value = {};
@@ -255,6 +411,7 @@ async function loadData(packageId: number) {
   } catch (err) {
     productRows.value = [];
     iapOverride.value = null;
+    packagePlugins.value = [];
     ElMessage.error(err instanceof ApiError ? err.message : "加载渠道包详情失败");
   } finally {
     loading.value = false;
@@ -317,6 +474,33 @@ async function saveIapOverride() {
   }
 }
 
+async function savePackagePlugin(item: ChannelPackagePluginItem) {
+  if (!props.pkg) {
+    return;
+  }
+  if (pluginJsonError.value[item.pluginId]) {
+    ElMessage.warning("请先修复 JSON 字段格式错误");
+    return;
+  }
+  savingPluginId.value = item.pluginId;
+  try {
+    const payload = {
+      pluginId: item.pluginId,
+      inheritChannelConfig: item.inheritChannelConfig,
+      enabled: item.enabled,
+      config: item.inheritChannelConfig ? {} : buildPluginSubmitConfig(item)
+    };
+    const saved = await upsertChannelPackagePlugin(props.pkg.packageId, payload);
+    packagePlugins.value = packagePlugins.value.map((entry) => (entry.pluginId === item.pluginId ? saved : entry));
+    initPluginDraft(saved);
+    ElMessage.success("渠道包插件覆盖已保存");
+  } catch (err) {
+    ElMessage.error(err instanceof ApiError ? err.message : "保存渠道包插件覆盖失败");
+  } finally {
+    savingPluginId.value = "";
+  }
+}
+
 watch(
   () => [props.open, props.pkg?.packageId] as const,
   ([open, packageId]) => {
@@ -366,6 +550,34 @@ watch(
   border-radius: var(--radius-sm);
   padding: 12px;
   margin-top: 10px;
+}
+
+.plugin-row {
+  border: 1px dashed var(--panel-border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-top: 10px;
+}
+
+.plugin-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.plugin-row__title {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plugin-row__switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .mapping-row__head {

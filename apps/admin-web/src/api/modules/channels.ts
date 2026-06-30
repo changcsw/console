@@ -194,6 +194,97 @@ export interface PutChannelLoginConfigPayload {
   templateVersion?: string;
 }
 
+export type TemplateScope = "client" | "server" | "both";
+
+export interface PluginTemplateField {
+  key: string;
+  label: string;
+  component: FormFieldComponent;
+  required?: boolean;
+  placeholder?: string;
+  order?: number;
+  group?: string;
+  scope?: TemplateScope;
+  options?: TemplateFieldOption[];
+}
+
+export interface PluginTemplateFileField {
+  key: string;
+  accept?: string[];
+  maxSizeKB?: number;
+}
+
+export interface FeaturePluginTemplate {
+  templateVersion: string;
+  formSchemaJson: PluginTemplateField[];
+  secretFieldsJson: string[];
+  fileFieldsJson: PluginTemplateFileField[];
+  validationRulesJson: Record<string, unknown>;
+}
+
+export interface FeaturePluginConfig {
+  id: number;
+  enabled: boolean;
+  configJson: Record<string, unknown>;
+  configStatus: ConfigStatus;
+  lastCheckAt: string | null;
+  lastCheckMessage: string;
+}
+
+export interface GameChannelPluginItem {
+  id: number;
+  pluginId: string;
+  pluginName: string;
+  region: ChannelRegion;
+  required: boolean;
+  selectable: boolean;
+  locked: boolean;
+  enabled: boolean;
+  configStatus: ConfigStatus;
+  includedInRuntimeConfig: boolean;
+  configJson: Record<string, unknown>;
+  lastCheckAt: string | null;
+  lastCheckMessage: string;
+  template: FeaturePluginTemplate;
+}
+
+export interface UpsertGameChannelPluginPayload {
+  pluginId: string;
+  enabled?: boolean;
+  config?: Record<string, unknown>;
+}
+
+export interface PatchGameChannelPluginPayload {
+  enabled?: boolean;
+  config?: Record<string, unknown>;
+}
+
+export interface ChannelPackagePluginItem {
+  id: number;
+  packageId: number;
+  pluginId: string;
+  pluginName: string;
+  region: ChannelRegion;
+  required: boolean;
+  selectable: boolean;
+  locked: boolean;
+  inheritChannelConfig: boolean;
+  enabled: boolean;
+  configStatus: ConfigStatus;
+  includedInRuntimeConfig: boolean;
+  configJson: Record<string, unknown>;
+  lastCheckAt: string | null;
+  lastCheckMessage: string;
+  template: FeaturePluginTemplate;
+}
+
+export interface UpsertChannelPackagePluginPayload {
+  pluginId: string;
+  inheritChannelConfig?: boolean;
+  enabled?: boolean;
+  config?: Record<string, unknown>;
+}
+
 function buildQuery(params: Record<string, unknown>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -307,6 +398,51 @@ export function putLoginConfig(
 ): Promise<ChannelLoginConfigResponse> {
   return request<ChannelLoginConfigResponse>(`/api/admin/game-channels/${gameChannelId}/login-config`, {
     method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+// GET /game-channels/{gameChannelId}/plugins — 列渠道实例可接入插件（plugin.read）
+export async function listGameChannelPlugins(gameChannelId: number): Promise<GameChannelPluginItem[]> {
+  const res = await request<{ items: GameChannelPluginItem[] }>(`/api/admin/game-channels/${gameChannelId}/plugins`);
+  return res.items ?? [];
+}
+
+// POST /game-channels/{gameChannelId}/plugins — 勾选/配置插件（plugin.write）
+export function upsertGameChannelPlugin(
+  gameChannelId: number,
+  payload: UpsertGameChannelPluginPayload
+): Promise<GameChannelPluginItem> {
+  return request<GameChannelPluginItem>(`/api/admin/game-channels/${gameChannelId}/plugins`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+// PATCH /game-channel-plugins/{id} — 修改单插件配置（plugin.write）
+export function patchGameChannelPlugin(
+  id: number,
+  payload: PatchGameChannelPluginPayload
+): Promise<GameChannelPluginItem> {
+  return request<GameChannelPluginItem>(`/api/admin/game-channel-plugins/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+// GET /channel-packages/{packageId}/plugins — 渠道包插件覆盖列表（plugin.read）
+export async function listChannelPackagePlugins(packageId: number): Promise<ChannelPackagePluginItem[]> {
+  const res = await request<{ items: ChannelPackagePluginItem[] }>(`/api/admin/channel-packages/${packageId}/plugins`);
+  return res.items ?? [];
+}
+
+// POST /channel-packages/{packageId}/plugins — 渠道包插件覆盖写入（plugin.write）
+export function upsertChannelPackagePlugin(
+  packageId: number,
+  payload: UpsertChannelPackagePluginPayload
+): Promise<ChannelPackagePluginItem> {
+  return request<ChannelPackagePluginItem>(`/api/admin/channel-packages/${packageId}/plugins`, {
+    method: "POST",
     body: JSON.stringify(payload)
   });
 }

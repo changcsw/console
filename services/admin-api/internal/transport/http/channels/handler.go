@@ -14,15 +14,17 @@ import (
 	channelapp "github.com/csw/console/services/admin-api/internal/app/channel"
 	channelloginapp "github.com/csw/console/services/admin-api/internal/app/channellogin"
 	"github.com/csw/console/services/admin-api/internal/app/dto"
+	pluginapp "github.com/csw/console/services/admin-api/internal/app/plugin"
 	"github.com/csw/console/services/admin-api/internal/domain/common"
 	"github.com/csw/console/services/admin-api/internal/transport/http/httpx"
 )
 
 // Handler 持有 ChannelService 与运行环境。
 type Handler struct {
-	svc      *channelapp.ChannelService
-	loginSvc *channelloginapp.Service
-	env      common.Environment
+	svc       *channelapp.ChannelService
+	loginSvc  *channelloginapp.Service
+	pluginSvc *pluginapp.Service
+	env       common.Environment
 }
 
 // NewHandler 构造 Handler（svc 在后端未就绪时可为 nil，路由用 RequireBackend 拦截）。
@@ -32,6 +34,11 @@ func NewHandler(svc *channelapp.ChannelService, env common.Environment, loginSvc
 		ls = loginSvc[0]
 	}
 	return &Handler{svc: svc, loginSvc: ls, env: env}
+}
+
+func (h *Handler) WithPluginService(svc *pluginapp.Service) *Handler {
+	h.pluginSvc = svc
+	return h
 }
 
 // ===== 请求 DTO =====
@@ -74,6 +81,24 @@ type upsertLoginConfigRequest struct {
 	Enabled         *bool          `json:"enabled"`
 	ConfigJSON      map[string]any `json:"configJson"`
 	TemplateVersion string         `json:"templateVersion"`
+}
+
+type configureChannelPluginRequest struct {
+	PluginID string         `json:"pluginId"`
+	Enabled  *bool          `json:"enabled"`
+	Config   map[string]any `json:"config"`
+}
+
+type patchChannelPluginRequest struct {
+	Enabled *bool          `json:"enabled"`
+	Config  map[string]any `json:"config"`
+}
+
+type overridePackagePluginRequest struct {
+	PluginID             string         `json:"pluginId"`
+	InheritChannelConfig *bool          `json:"inheritChannelConfig"`
+	Enabled              *bool          `json:"enabled"`
+	Config               map[string]any `json:"config"`
 }
 
 // ===== handlers =====
@@ -328,6 +353,126 @@ func (h *Handler) PutLoginConfig(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteData(w, http.StatusOK, result)
 }
 
+// ListChannelPlugins GET /game-channels/{gameChannelId}/plugins（plugin.read）。
+func (h *Handler) ListChannelPlugins(w http.ResponseWriter, r *http.Request) {
+	if h.pluginSvc == nil {
+		httpx.WriteError(w, http.StatusServiceUnavailable, httpx.CodeInternal, "plugin backend unavailable")
+		return
+	}
+	id, ok := parseID(w, r, "gameChannelId")
+	if !ok {
+		return
+	}
+	result, err := h.pluginSvc.ListChannelPlugins(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpx.WriteData(w, http.StatusOK, result)
+}
+
+// ConfigureChannelPlugin POST /game-channels/{gameChannelId}/plugins（plugin.write）。
+func (h *Handler) ConfigureChannelPlugin(w http.ResponseWriter, r *http.Request) {
+	if h.pluginSvc == nil {
+		httpx.WriteError(w, http.StatusServiceUnavailable, httpx.CodeInternal, "plugin backend unavailable")
+		return
+	}
+	id, ok := parseID(w, r, "gameChannelId")
+	if !ok {
+		return
+	}
+	var req configureChannelPluginRequest
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w)
+		return
+	}
+	result, err := h.pluginSvc.ConfigureChannelPlugin(r.Context(), dto.ConfigureChannelPluginCmd{
+		GameChannelID: id,
+		PluginID:      req.PluginID,
+		Enabled:       req.Enabled,
+		Config:        req.Config,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpx.WriteData(w, http.StatusOK, result)
+}
+
+// PatchChannelPlugin PATCH /game-channel-plugins/{id}（plugin.write）。
+func (h *Handler) PatchChannelPlugin(w http.ResponseWriter, r *http.Request) {
+	if h.pluginSvc == nil {
+		httpx.WriteError(w, http.StatusServiceUnavailable, httpx.CodeInternal, "plugin backend unavailable")
+		return
+	}
+	id, ok := parseID(w, r, "id")
+	if !ok {
+		return
+	}
+	var req patchChannelPluginRequest
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w)
+		return
+	}
+	result, err := h.pluginSvc.PatchChannelPlugin(r.Context(), dto.PatchChannelPluginCmd{
+		ID:      id,
+		Enabled: req.Enabled,
+		Config:  req.Config,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpx.WriteData(w, http.StatusOK, result)
+}
+
+// ListPackagePlugins GET /channel-packages/{packageId}/plugins（plugin.read）。
+func (h *Handler) ListPackagePlugins(w http.ResponseWriter, r *http.Request) {
+	if h.pluginSvc == nil {
+		httpx.WriteError(w, http.StatusServiceUnavailable, httpx.CodeInternal, "plugin backend unavailable")
+		return
+	}
+	id, ok := parseID(w, r, "packageId")
+	if !ok {
+		return
+	}
+	items, err := h.pluginSvc.ListPackagePlugins(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpx.WriteData(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// OverridePackagePlugin POST /channel-packages/{packageId}/plugins（plugin.write）。
+func (h *Handler) OverridePackagePlugin(w http.ResponseWriter, r *http.Request) {
+	if h.pluginSvc == nil {
+		httpx.WriteError(w, http.StatusServiceUnavailable, httpx.CodeInternal, "plugin backend unavailable")
+		return
+	}
+	id, ok := parseID(w, r, "packageId")
+	if !ok {
+		return
+	}
+	var req overridePackagePluginRequest
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w)
+		return
+	}
+	item, err := h.pluginSvc.OverridePackagePlugin(r.Context(), dto.OverridePackagePluginCmd{
+		PackageID:            id,
+		PluginID:             req.PluginID,
+		InheritChannelConfig: req.InheritChannelConfig,
+		Enabled:              req.Enabled,
+		Config:               req.Config,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpx.WriteData(w, http.StatusOK, item)
+}
+
 // ===== helpers =====
 
 func decodeJSON(r *http.Request, target any) error {
@@ -405,6 +550,11 @@ func writeError(w http.ResponseWriter, err error) {
 	var appErr *channelapp.Error
 	if errors.As(err, &appErr) {
 		httpx.WriteError(w, appErr.Status, appErr.Code, appErr.Message, appErr.Details...)
+		return
+	}
+	var pluginErr *pluginapp.Error
+	if errors.As(err, &pluginErr) {
+		httpx.WriteError(w, pluginErr.Status, pluginErr.Code, pluginErr.Message, pluginErr.Details...)
 		return
 	}
 	httpx.WriteAppError(w, err)
