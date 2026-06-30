@@ -1,6 +1,13 @@
 package cashier
 
-import "time"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
 
 type FXRunStatus string
 
@@ -48,6 +55,44 @@ type TemplateVersionRecord struct {
 	PublishedAt   *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+// ComputeVersionChecksum 对某个模板版本的价格行集合计算确定性校验和（sha256 hex）。
+// 用途：发布版本时固化该版本的价格内容指纹，游戏绑定时记录为 snapshot_checksum（00 §3.3 版本生命周期、
+// game-cashier 绑定快照语义）。排序后仅纳入业务字段（不含 DB 主键/时间戳），保证同内容跨进程/库稳定一致。
+func ComputeVersionChecksum(rows []PriceRow) string {
+	keyed := make([]PriceRow, len(rows))
+	copy(keyed, rows)
+	sort.Slice(keyed, func(i, j int) bool {
+		return rowChecksumKey(keyed[i]) < rowChecksumKey(keyed[j])
+	})
+	var b strings.Builder
+	for _, row := range keyed {
+		b.WriteString(row.CountryCode)
+		b.WriteByte('|')
+		b.WriteString(row.RegionCode)
+		b.WriteByte('|')
+		b.WriteString(row.Currency)
+		b.WriteByte('|')
+		b.WriteString(row.PriceID)
+		b.WriteByte('|')
+		b.WriteString(strconv.FormatInt(row.PreTaxAmountMinor, 10))
+		b.WriteByte('|')
+		b.WriteString(strings.TrimSpace(row.TaxRate))
+		b.WriteByte('|')
+		b.WriteString(strconv.FormatInt(row.TaxAmountMinor, 10))
+		b.WriteByte('|')
+		b.WriteString(strconv.FormatInt(row.AfterTaxAmountMinor, 10))
+		b.WriteByte('|')
+		b.WriteString(row.EffectiveAt)
+		b.WriteByte('\n')
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
+}
+
+func rowChecksumKey(r PriceRow) string {
+	return r.CountryCode + "|" + r.RegionCode + "|" + r.Currency + "|" + r.PriceID
 }
 
 type FXSyncRun struct {

@@ -51,7 +51,8 @@ function mountView() {
         LegalLinksTab: true,
         AccountAuthTab: true,
         ProductTab: true,
-        IapConfigTab: true
+        IapConfigTab: true,
+        GameCashierTab: true
       }
     }
   });
@@ -94,6 +95,7 @@ describe("GameDetailView", () => {
     expect(text).toContain("市场");
     expect(text).toContain("法务链接");
     expect(text).toContain("自有账号认证");
+    expect(text).toContain("收银台");
     // 下游占位 Tab（渠道/支付路由等）
     expect(text).toContain("渠道");
     expect(text).toContain("支付路由");

@@ -53,6 +53,26 @@ type approveFXRunRequest struct {
 	Action     string `json:"action"`
 }
 
+type bindGameProfileRequest struct {
+	TemplateID      string `json:"templateId"`
+	TemplateVersion string `json:"templateVersion"`
+}
+
+type savePriceOverridesRequest struct {
+	Items []struct {
+		CountryCode         string `json:"countryCode"`
+		RegionCode          string `json:"regionCode"`
+		Currency            string `json:"currency"`
+		PriceID             string `json:"priceId"`
+		PreTaxAmountMinor   int64  `json:"preTaxAmountMinor"`
+		TaxRate             string `json:"taxRate"`
+		TaxAmountMinor      int64  `json:"taxAmountMinor"`
+		AfterTaxAmountMinor int64  `json:"afterTaxAmountMinor"`
+		Reason              string `json:"reason"`
+		EffectiveAt         string `json:"effectiveAt"`
+	} `json:"items"`
+}
+
 type versionResponse struct {
 	Version       int     `json:"version"`
 	Status        string  `json:"status"`
@@ -82,6 +102,26 @@ type templateResponse struct {
 	Status         string `json:"status"`
 }
 
+type gameProfileResponse struct {
+	TemplateID             string `json:"templateId"`
+	AppliedTemplateVersion string `json:"appliedTemplateVersion"`
+	SnapshotChecksum       string `json:"snapshotChecksum"`
+	AppliedAt              string `json:"appliedAt"`
+}
+
+type gamePriceOverrideResponse struct {
+	CountryCode         string `json:"countryCode"`
+	RegionCode          string `json:"regionCode"`
+	Currency            string `json:"currency"`
+	PriceID             string `json:"priceId"`
+	PreTaxAmountMinor   int64  `json:"preTaxAmountMinor"`
+	TaxRate             string `json:"taxRate"`
+	TaxAmountMinor      int64  `json:"taxAmountMinor"`
+	AfterTaxAmountMinor int64  `json:"afterTaxAmountMinor"`
+	Reason              string `json:"reason"`
+	EffectiveAt         string `json:"effectiveAt"`
+}
+
 func toTemplateResponse(t domaincashier.PriceTemplate) templateResponse {
 	return templateResponse{
 		TemplateID:     t.TemplateID,
@@ -90,6 +130,30 @@ func toTemplateResponse(t domaincashier.PriceTemplate) templateResponse {
 		FXSyncMode:     t.FXSyncMode,
 		FXSyncSchedule: t.FXSyncSchedule,
 		Status:         t.Status,
+	}
+}
+
+func toGameProfileResponse(v cashierapp.GameCashierProfileView) gameProfileResponse {
+	return gameProfileResponse{
+		TemplateID:             v.TemplateID,
+		AppliedTemplateVersion: strconv.Itoa(v.AppliedTemplateVersion),
+		SnapshotChecksum:       v.SnapshotChecksum,
+		AppliedAt:              v.AppliedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func toGamePriceOverrideResponse(v domaincashier.GameCashierPriceOverride) gamePriceOverrideResponse {
+	return gamePriceOverrideResponse{
+		CountryCode:         v.CountryCode,
+		RegionCode:          v.RegionCode,
+		Currency:            v.Currency,
+		PriceID:             v.PriceID,
+		PreTaxAmountMinor:   v.PreTaxAmountMinor,
+		TaxRate:             v.TaxRate,
+		TaxAmountMinor:      v.TaxAmountMinor,
+		AfterTaxAmountMinor: v.AfterTaxAmountMinor,
+		Reason:              v.Reason,
+		EffectiveAt:         v.EffectiveAt.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -332,6 +396,92 @@ func (h *Handler) ApproveFXRun(w http.ResponseWriter, r *http.Request) {
 		status = "ignored"
 	}
 	httpx.WriteData(w, http.StatusOK, map[string]any{"status": status})
+}
+
+func (h *Handler) GetGameProfile(w http.ResponseWriter, r *http.Request) {
+	view, err := h.svc.GetProfile(r.Context(), chi.URLParam(r, "gameId"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpx.WriteData(w, http.StatusOK, toGameProfileResponse(view))
+}
+
+func (h *Handler) BindGameProfile(w http.ResponseWriter, r *http.Request) {
+	var req bindGameProfileRequest
+	if err := decodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, httpx.CodeValidation, "请求体格式错误")
+		return
+	}
+	version, err := strconv.Atoi(strings.TrimSpace(req.TemplateVersion))
+	if err != nil || version <= 0 {
+		httpx.WriteError(w, http.StatusBadRequest, httpx.CodeValidation, "templateVersion 非法")
+		return
+	}
+	view, err := h.svc.BindProfile(r.Context(), cashierapp.BindGameCashierProfileInput{
+		GameID:          chi.URLParam(r, "gameId"),
+		TemplateID:      req.TemplateID,
+		TemplateVersion: version,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpx.WriteData(w, http.StatusOK, toGameProfileResponse(view))
+}
+
+func (h *Handler) ListGamePriceOverrides(w http.ResponseWriter, r *http.Request) {
+	items, err := h.svc.ListPriceOverrides(r.Context(), chi.URLParam(r, "gameId"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	out := make([]gamePriceOverrideResponse, 0, len(items))
+	for _, item := range items {
+		out = append(out, toGamePriceOverrideResponse(item))
+	}
+	httpx.WriteData(w, http.StatusOK, map[string]any{"items": out})
+}
+
+func (h *Handler) SaveGamePriceOverrides(w http.ResponseWriter, r *http.Request) {
+	var req savePriceOverridesRequest
+	if err := decodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, httpx.CodeValidation, "请求体格式错误")
+		return
+	}
+	items := make([]domaincashier.GameCashierPriceOverride, 0, len(req.Items))
+	for _, item := range req.Items {
+		effectiveAt, err := time.Parse(time.RFC3339, item.EffectiveAt)
+		if err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, httpx.CodeValidation, "effectiveAt 非法")
+			return
+		}
+		items = append(items, domaincashier.GameCashierPriceOverride{
+			CountryCode:         item.CountryCode,
+			RegionCode:          item.RegionCode,
+			Currency:            item.Currency,
+			PriceID:             item.PriceID,
+			PreTaxAmountMinor:   item.PreTaxAmountMinor,
+			TaxRate:             item.TaxRate,
+			TaxAmountMinor:      item.TaxAmountMinor,
+			AfterTaxAmountMinor: item.AfterTaxAmountMinor,
+			Reason:              item.Reason,
+			EffectiveAt:         effectiveAt,
+		})
+	}
+	saved, err := h.svc.SavePriceOverrides(r.Context(), cashierapp.SaveGameCashierPriceOverridesInput{
+		GameID: chi.URLParam(r, "gameId"),
+		Items:  items,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	out := make([]gamePriceOverrideResponse, 0, len(saved))
+	for _, item := range saved {
+		out = append(out, toGamePriceOverrideResponse(item))
+	}
+	httpx.WriteData(w, http.StatusOK, map[string]any{"items": out})
 }
 
 func mapVersions(items []domaincashier.TemplateVersionRecord) []versionResponse {
