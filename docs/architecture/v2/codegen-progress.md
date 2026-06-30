@@ -29,7 +29,7 @@
 | 11 | `game` | `games-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 旧模块，详细审计已归档 |
 | 12 | `channel` | `channels-surface` | game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 旧模块，详细审计已归档 |
 | 13 | `account-auth` | `games-surface` | channel, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 旧模块，详细审计已归档 |
-| 14 | `channel-login` | `channels-surface` | channel, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 已合并至 main |
+| 14 | `channel-login` | `channels-surface` | channel, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 15/15 PASS；4 项 P3 移交集成阶段；已合并至 main |
 | 15 | `feature-plugin` | `channels-surface` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 与 `channel-login` 同 lane，二选一先开 |
 | 16 | `product` | `games-surface` | channel, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 已合并至 main |
 | 17 | `cashier-template` | `cashier-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 全流程完成（验收 29/29 PASS）；遗留非阻断·跨模块 |
@@ -37,7 +37,7 @@
 | 19 | `payment` | `payment-surface` | channel, product, cashier-template, game-cashier, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `product + game-cashier` |
 | 20 | `snapshot` | `runtime-surface` | channel, account-auth, channel-login, feature-plugin, product, cashier-template, game-cashier, payment, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 14/15/16/17/18/19 |
 | 21 | `sync` | `runtime-surface` | snapshot, +上游全部 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `snapshot` |
-| 22 | `audit` | `audit-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 已合并至 main |
+| 22 | `audit` | `audit-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 26 项全 PASS；P0(schema→platform) 经 🟧 修复 + 🟪 复测；已合并至 main |
 | 23 | `dashboard` | `dashboard-surface` | cashier-template, snapshot, sync | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `sync` |
 
 > 注：`artifacts_dir` 统一在 `index.json.docs[].artifacts_dir` 中定义；旧模块若尚无 `artifacts` 目录，仅在后续续作时回填。
