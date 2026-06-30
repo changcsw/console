@@ -13,11 +13,13 @@ import (
 	adminapp "github.com/csw/console/services/admin-api/internal/app/admin"
 	channelapp "github.com/csw/console/services/admin-api/internal/app/channel"
 	gameapp "github.com/csw/console/services/admin-api/internal/app/game"
+	productapp "github.com/csw/console/services/admin-api/internal/app/product"
 	domainauth "github.com/csw/console/services/admin-api/internal/domain/auth"
 	"github.com/csw/console/services/admin-api/internal/domain/common"
 	"github.com/csw/console/services/admin-api/internal/infra/config"
 	"github.com/csw/console/services/admin-api/internal/infra/crypto"
 	"github.com/csw/console/services/admin-api/internal/infra/feishu"
+	fileinfra "github.com/csw/console/services/admin-api/internal/infra/file"
 	infrajwt "github.com/csw/console/services/admin-api/internal/infra/jwt"
 	"github.com/csw/console/services/admin-api/internal/infra/persistence/postgres"
 	adminhttp "github.com/csw/console/services/admin-api/internal/transport/http/admin"
@@ -96,9 +98,11 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 	userSvc := adminapp.NewAdminUserService(store, hasher, nil)
 	roleSvc := adminapp.NewRoleService(store, nil)
 	permSvc := adminapp.NewPermissionService(store, nil)
+	// 平台级币种字典只读服务：读 platform.currency_specs（全 env 共享），供 /system/currency-specs。
+	currencySvc := adminapp.NewCurrencySpecService(postgres.NewCurrencySpecRepo(pool))
 
 	handler := adminhttp.NewHandler(adminhttp.Deps{
-		Auth: authSvc, Users: userSvc, Roles: roleSvc, Perms: permSvc, Env: env,
+		Auth: authSvc, Users: userSvc, Roles: roleSvc, Perms: permSvc, Currency: currencySvc, Env: env,
 	})
 
 	r := adminhttp.NewRouter(handler, issuer, env, logger, true)
@@ -108,7 +112,11 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 	// account-auth 模块：service 层审计调用已接好（写 game.account_auth.update）；
 	// audit sink 与 game/channel 一致暂注入 nil（audit 模块 22 落地后统一接通，非本模块新增遗留）。
 	accountAuthSvc := accountauthapp.NewService(postgres.NewAccountAuthStore(pool), cipher, nil, time.Now)
-	gameshttp.RegisterRoutes(r, gameshttp.NewHandler(gameSvc, env, accountAuthSvc), issuer, env, logger, true)
+	productStore := postgres.NewProductStore(pool)
+	productSvc := productapp.NewProductService(productStore, nil, env, time.Now)
+	iapSvc := productapp.NewIAPConfigService(productStore, cipher, fileinfra.NewLocalRefService(), nil, time.Now)
+	gamesHandler := gameshttp.NewHandler(gameSvc, env, accountAuthSvc).WithProductServices(productSvc, iapSvc)
+	gameshttp.RegisterRoutes(r, gamesHandler, issuer, env, logger, true)
 
 	// channel 模块：真实 ChannelService（绑定主连接池，env 由 search_path 钉死）。审计 sink 待 audit 模块落地后注入。
 	channelSvc := channelapp.NewChannelService(postgres.NewChannelStore(pool), time.Now, nil, env)

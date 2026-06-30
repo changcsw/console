@@ -1,0 +1,829 @@
+# 模块 product（商品与 IAP 映射 / 模块 16）接口场景矩阵 manifest
+# 维度定义见 docs/architecture/v2/03-testing.md §4；契约来源：
+# docs/architecture/v2/modules/16-product/spec.compact.md。
+# 接口挂在 games transport（前缀 /api/admin），读 product.read / 写 product.write。
+#
+# 运行说明（与 auth.yaml/game.yaml/account-auth.yaml 一致）：
+#   进程内 httptest harness（services/admin-api/internal/testkit/scenario）为降级 handler
+#   （无 POSTGRES_DSN/ADMIN_JWT_SECRET → ready=false），无法签发可通过校验的令牌，也无法落库。
+#   因此：
+#     - requiresDB: false 的 S2 用例（受保护接口先过 Authn，未携带/无效令牌即 401）在沙箱内真实执行并断言。
+#     - requiresDB: true 的用例为「manifest 已声明但运行需 PG + 全装配」，进程内 harness 跳过
+#       （SCENARIO_WITH_DB=1 时由连库 harness 执行），仅保证 YAML 解析校验通过。
+#       这些维度已由 internal/app/product 进程内单测（内存仓储 + 真实归一化/加密/审计 spy）等价覆盖
+#       （见 product_service_test.go / iap_config_service_test.go）。
+#
+# 模块维度适用性（compact + 03-testing §4）：
+#   - product_id(≤128) 与 price_id(≤64) 两维独立、长度上限不同、禁止互填（红线）。
+#   - 商品金额走 currency_specs 归一化：USD 4.999→500、0.001 拒绝、JPY 120.5→121；未命中币种 → CURRENCY_NOT_SUPPORTED。
+#   - 包级映射 PUT 全量 upsert + 删除未出现项（ReplaceByPackage 单事务 → S10）。
+#   - IAP configJson 含 secret：写加密落库 + 读/写响应恒 masked（S8）；缺必填密文/文件且 enabled=true → VALIDATION_FAILED。
+#   - 单表写接口（POST/PATCH 商品、PUT iap-config/override 单表 upsert）无多表事务 → S10 N/A。
+#   - 商品/映射唯一冲突：POST 商品 (gameId, productId) 重复 → CONFLICT(S5)；包级 PUT 无业务级 CONFLICT（dup/越界归 400）→ S5 N/A。
+#
+# auth.role → 实体（连库 harness 用以签发令牌；见 tests/fixtures/common/product.sql + sandbox/product.sql）：
+#   product_admin  → product.read + product.write（S1/S5/S6/S7/S8/S9/S10 跑通）
+#   product_reader → 仅 product.read（验缺写权限 403；可读列表/详情）
+#   no_perm        → 无任何权限（验缺读权限 403）
+module: product
+cases:
+  # ═════════════════════════ 1) GET /games/{gameId}/products（列商品，product.read，分页）
+  - name: list_products_requires_auth
+    dimension: S2
+    requiresDB: false
+    note: "未携带 access → 401（Authn 在 RequireBackend 之前）"
+    request:
+      method: GET
+      path: /api/admin/games/100001/products
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_products_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    note: "登录但缺 product.read → 403 FORBIDDEN"
+    request:
+      method: GET
+      path: /api/admin/games/100001/products
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_products_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: product_reader }
+    fixture: sandbox/product/base
+    note: "200 + items[]，每项含 baseAmountDisplay（服务端按 decimal_places 反算）/env"
+    request:
+      method: GET
+      path: /api/admin/games/100001/products
+    expect:
+      status: 200
+  - name: list_products_invalid_enabled_query
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_reader }
+    note: "enabled 非 bool → 400 VALIDATION_FAILED"
+    request:
+      method: GET
+      path: /api/admin/games/100001/products?enabled=maybe
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: list_products_pagination
+    dimension: S9
+    requiresDB: true
+    auth: { role: product_reader }
+    fixture: sandbox/product/base
+    note: "page/pageSize/total 正确，sort=-updatedAt 生效"
+    request:
+      method: GET
+      path: /api/admin/games/100001/products?page=1&pageSize=20&sort=-updatedAt
+    expect:
+      status: 200
+  - name: list_products_pagesize_clamped
+    dimension: S9
+    requiresDB: true
+    auth: { role: product_reader }
+    fixture: sandbox/product/base
+    note: "pageSize 越界按 00 §7.3 钳制为上限 100（非报错）"
+    request:
+      method: GET
+      path: /api/admin/games/100001/products?pageSize=99999
+    expect:
+      status: 200
+      jsonContains: { data.pageSize: 100 }
+  - name: list_products_scoped_to_current_env
+    dimension: S6
+    requiresDB: true
+    auth: { role: product_reader }
+    fixture: sandbox/product/base
+    note: "业务表按 search_path 隐式作用域=当前 env schema；不跨 schema 读"
+    request:
+      method: GET
+      path: /api/admin/games/100001/products
+    expect:
+      status: 200
+
+  # ═════════════════════════ 2) POST /games/{gameId}/products（创建商品，product.write，审计 product.create）
+  - name: create_product_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/games/100001/products
+      body: { productId: "com.demo.gold", productName: "Gold", baseCurrency: "USD", baseAmountMinor: 500, priceId: "price_gold" }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: create_product_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: product_reader }
+    note: "仅 product.read 缺 product.write → 403"
+    request:
+      method: POST
+      path: /api/admin/games/100001/products
+      body: { productId: "com.demo.gold", productName: "Gold", baseCurrency: "USD", baseAmountMinor: 500, priceId: "price_gold" }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: create_product_validation_missing_name
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    note: "缺 productName → 400 VALIDATION_FAILED（details 给 field/reason）"
+    request:
+      method: POST
+      path: /api/admin/games/100001/products
+      body: { productId: "com.demo.gold", baseCurrency: "USD", baseAmountMinor: 500, priceId: "price_gold" }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_product_validation_priceid_too_long
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    note: "priceId 超 64（productId 上限 128，两维上限不同不可混）→ 400"
+    request:
+      method: POST
+      path: /api/admin/games/100001/products
+      body: { productId: "com.demo.gold", productName: "Gold", baseCurrency: "USD", baseAmountMinor: 500, priceId: "p0000000000000000000000000000000000000000000000000000000000000000" }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_product_currency_not_supported
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    note: "baseCurrency 未命中 currency_specs/enabled → 400 CURRENCY_NOT_SUPPORTED"
+    request:
+      method: POST
+      path: /api/admin/games/100001/products
+      body: { productId: "com.demo.x", productName: "X", baseCurrency: "ABC", baseAmountMinor: 500, priceId: "price_x" }
+    expect:
+      status: 400
+      jsonContains: { error.code: CURRENCY_NOT_SUPPORTED }
+  - name: create_product_below_min_amount
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    note: "baseAmount 0.001 USD 归一为 0 < min_amount_minor → 400 VALIDATION_FAILED"
+    request:
+      method: POST
+      path: /api/admin/games/100001/products
+      body: { productId: "com.demo.tiny", productName: "Tiny", baseCurrency: "USD", baseAmount: "0.001", priceId: "price_tiny" }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_product_conflict
+    dimension: S5
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/base
+    note: "(gameId, productId) 已存在 → 409 CONFLICT"
+    request:
+      method: POST
+      path: /api/admin/games/100001/products
+      body: { productId: "com.demo.coin", productName: "Coin Dup", baseCurrency: "USD", baseAmountMinor: 500, priceId: "price_coin" }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: create_product_success_normalizes_usd
+    dimension: S1
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/base
+    note: "USD baseAmount 4.999 → 500 minor（half_up），201 返回完整商品；baseAmountDisplay=5.00"
+    request:
+      method: POST
+      path: /api/admin/games/100001/products
+      body: { productId: "com.demo.gold", productName: "Gold Pack", baseCurrency: "USD", baseAmount: "4.999", priceId: "price_gold" }
+    expect:
+      status: 201
+      jsonContains: { data.baseAmountMinor: 500 }
+  - name: create_product_success_jpy_no_decimal
+    dimension: S1
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/base
+    note: "JPY baseAmount 120.5 → 121（decimal=0, half_up）"
+    request:
+      method: POST
+      path: /api/admin/games/100001/products
+      body: { productId: "com.demo.jpy", productName: "JPY Pack", baseCurrency: "JPY", baseAmount: "120.5", priceId: "price_jpy" }
+    expect:
+      status: 201
+      jsonContains: { data.baseAmountMinor: 121 }
+  - name: create_product_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/base
+    note: "写 audit_logs(action=product.create, resource=product)"
+    request:
+      method: POST
+      path: /api/admin/games/100001/products
+      body: { productId: "com.demo.audited", productName: "Audited", baseCurrency: "USD", baseAmountMinor: 500, priceId: "price_aud" }
+    expect:
+      status: 201
+  - name: create_product_scoped_to_current_env
+    dimension: S6
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/base
+    note: "落当前运行环境 schema（search_path 决定），前端不可跨 schema 写"
+    request:
+      method: POST
+      path: /api/admin/games/100001/products
+      body: { productId: "com.demo.envscoped", productName: "Env", baseCurrency: "USD", baseAmountMinor: 500, priceId: "price_env" }
+    expect:
+      status: 201
+
+  # ═════════════════════════ 3) PATCH /products/{productId}（更新商品，product.write，审计 product.update）
+  - name: update_product_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: PATCH
+      path: /api/admin/products/com.demo.coin?gameId=100001
+      body: { productName: "Renamed" }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: update_product_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: product_reader }
+    request:
+      method: PATCH
+      path: /api/admin/products/com.demo.coin?gameId=100001
+      body: { productName: "Renamed" }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: update_product_validation_currency
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/base
+    note: "改 baseCurrency 到未命中 currency_specs → 400 CURRENCY_NOT_SUPPORTED（改币重走归一化全流程）"
+    request:
+      method: PATCH
+      path: /api/admin/products/com.demo.coin?gameId=100001
+      body: { baseCurrency: "ABC", baseAmountMinor: 500 }
+    expect:
+      status: 400
+      jsonContains: { error.code: CURRENCY_NOT_SUPPORTED }
+  - name: update_product_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    note: "当前 schema 内不存在 (gameId, productId) → 404 NOT_FOUND"
+    request:
+      method: PATCH
+      path: /api/admin/products/ghost?gameId=100001
+      body: { productName: "X" }
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: update_product_success_renormalizes
+    dimension: S1
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/base
+    note: "改 baseAmount → 重走归一化；priceId 单独长度校验；200 返回完整商品"
+    request:
+      method: PATCH
+      path: /api/admin/products/com.demo.coin?gameId=100001
+      body: { baseAmount: "9.999", priceId: "price_coin_v2" }
+    expect:
+      status: 200
+      jsonContains: { data.baseAmountMinor: 1000 }
+  - name: update_product_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/base
+    note: "写 audit_logs(action=product.update, detail 记变更字段)"
+    request:
+      method: PATCH
+      path: /api/admin/products/com.demo.coin?gameId=100001
+      body: { productName: "Coin v2" }
+    expect:
+      status: 200
+  - name: update_product_scoped_to_current_env
+    dimension: S6
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/base
+    note: "写落当前 schema，不跨 env"
+    request:
+      method: PATCH
+      path: /api/admin/products/com.demo.coin?gameId=100001
+      body: { enabled: false }
+    expect:
+      status: 200
+
+  # ═════════════════════════ 4) GET /channel-packages/{packageId}/products（读包级映射，product.read）
+  - name: get_package_products_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/channel-packages/7001/products
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: get_package_products_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/channel-packages/7001/products
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: get_package_products_invalid_id
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_reader }
+    note: "packageId 非 int64 → 400 VALIDATION_FAILED"
+    request:
+      method: GET
+      path: /api/admin/channel-packages/not-a-number/products
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: get_package_products_success_effective
+    dimension: S1
+    requiresDB: true
+    auth: { role: product_reader }
+    fixture: sandbox/product/mapping
+    note: "200 + items[]：含 base{productId,priceId} + effective{productId,priceId}（两维独立解析）"
+    request:
+      method: GET
+      path: /api/admin/channel-packages/7001/products
+    expect:
+      status: 200
+  - name: get_package_products_scoped_to_current_env
+    dimension: S6
+    requiresDB: true
+    auth: { role: product_reader }
+    fixture: sandbox/product/mapping
+    note: "业务表 search_path 作用域当前 env；不跨 schema 读"
+    request:
+      method: GET
+      path: /api/admin/channel-packages/7001/products
+    expect:
+      status: 200
+
+  # ═════════════════════════ 5) PUT /channel-packages/{packageId}/products（整表覆盖写，product.write，审计 product.package_products.update）
+  - name: put_package_products_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/products
+      body: { items: [{ productId: "com.demo.coin" }] }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: put_package_products_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: product_reader }
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/products
+      body: { items: [{ productId: "com.demo.coin" }] }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: put_package_products_validation_override_missing
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/mapping
+    note: "priceIdMode=override 但 priceIdOverride 空 → 400（priceIdOverride is required when priceIdMode=override）"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/products
+      body: { items: [{ productId: "com.demo.coin", priceIdMode: "override", priceIdOverride: "" }] }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_package_products_validation_duplicate
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/mapping
+    note: "items 内 productId 重复 → 400 VALIDATION_FAILED"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/products
+      body: { items: [{ productId: "com.demo.coin" }, { productId: "com.demo.coin" }] }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_package_products_validation_not_in_game
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/mapping
+    note: "productId 不属该包所属 game → 400 VALIDATION_FAILED"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/products
+      body: { items: [{ productId: "com.not.exist" }] }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_package_products_validation_override_too_long
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/mapping
+    note: "priceIdOverride 超 64（两维上限不同，禁止互填）→ 400"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/products
+      body: { items: [{ productId: "com.demo.coin", priceIdMode: "override", priceIdOverride: "p0000000000000000000000000000000000000000000000000000000000000000" }] }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_package_products_success_full_replace
+    dimension: S1
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/mapping
+    note: "全量声明 = upsert + 删除未出现项；两维 mode/override 配套校验；200 返回含 effective"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/products
+      body: { items: [{ productId: "com.demo.coin", productIdMode: "override", productIdOverride: "store.coin.id", priceIdMode: "default" }] }
+    expect:
+      status: 200
+  - name: put_package_products_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/mapping
+    note: "写 audit_logs(action=product.package_products.update)"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/products
+      body: { items: [{ productId: "com.demo.coin" }] }
+    expect:
+      status: 200
+  - name: put_package_products_scoped_to_current_env
+    dimension: S6
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/mapping
+    note: "写落当前 schema，不跨 env"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/products
+      body: { items: [{ productId: "com.demo.coin" }] }
+    expect:
+      status: 200
+  - name: put_package_products_transaction_rollback
+    dimension: S10
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/mapping
+    note: "ReplaceByPackage（DELETE 未出现项 + UPSERT）单事务；中途失败整体回滚，映射集合不变。进程内由 product_service_test.go TestPutPackageProducts_TransactionRollback 等价覆盖"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/products
+      body: { items: [{ productId: "com.demo.coin" }, { productId: "com.demo.gem" }] }
+    expect:
+      status: 200
+
+  # ═════════════════════════ 6) GET /game-channels/{gameChannelId}/iap-config（读渠道 IAP 配置，product.read，含密文）
+  - name: get_iap_config_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/game-channels/9001/iap-config
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: get_iap_config_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/game-channels/9001/iap-config
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: get_iap_config_invalid_id
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_reader }
+    note: "gameChannelId 非 int64 → 400 VALIDATION_FAILED"
+    request:
+      method: GET
+      path: /api/admin/game-channels/not-a-number/iap-config
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: get_iap_config_success_with_template
+    dimension: S1
+    requiresDB: true
+    auth: { role: product_reader }
+    fixture: sandbox/product/iap
+    note: "200 + 渠道 enabled 最新 template 四件套 + config（含 configStatus/lastCheckMessage）"
+    request:
+      method: GET
+      path: /api/admin/game-channels/9001/iap-config
+    expect:
+      status: 200
+  - name: get_iap_config_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: product_reader }
+    fixture: sandbox/product/iap
+    note: "config.configJson 内密文字段恒 masked，绝不回明文/密文"
+    request:
+      method: GET
+      path: /api/admin/game-channels/9001/iap-config
+    expect:
+      status: 200
+  - name: get_iap_config_scoped_to_current_env
+    dimension: S6
+    requiresDB: true
+    auth: { role: product_reader }
+    fixture: sandbox/product/iap
+    note: "配置实例每环境 schema 独立；不跨 schema 读"
+    request:
+      method: GET
+      path: /api/admin/game-channels/9001/iap-config
+    expect:
+      status: 200
+
+  # ═════════════════════════ 7) PUT /game-channels/{gameChannelId}/iap-config（写渠道 IAP 配置，product.write，审计 iap.config.update）
+  - name: put_iap_config_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: PUT
+      path: /api/admin/game-channels/9001/iap-config
+      body: { enabled: true, configJson: { appId: "app-123", privateKey: "secret" } }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: put_iap_config_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: product_reader }
+    request:
+      method: PUT
+      path: /api/admin/game-channels/9001/iap-config
+      body: { enabled: true, configJson: { appId: "app-123", privateKey: "secret" } }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: put_iap_config_validation_missing_config
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    note: "缺 configJson → 400 VALIDATION_FAILED"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/9001/iap-config
+      body: { enabled: true }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_iap_config_enable_without_secret_rejected
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/iap
+    note: "enabled=true 但缺必填密文/文件 → 400 VALIDATION_FAILED（缺少必填敏感字段或文件字段），不改 enabled=true"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/9001/iap-config
+      body: { enabled: true, configJson: { appId: "app-123" } }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_iap_config_success_valid_masks
+    dimension: S1
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/iap
+    note: "齐全四件套 → 200，configStatus=valid，lastCheckAt 记录；响应密文 masked"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/9001/iap-config
+      body: { enabled: true, configJson: { appId: "app-123", privateKey: "super-secret" } }
+    expect:
+      status: 200
+      jsonContains: { data.configStatus: "valid" }
+  - name: put_iap_config_masks_secret_in_response
+    dimension: S8
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/iap
+    note: "响应 configJson.privateKey 恒 masked；落库为密文（AES-GCM）"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/9001/iap-config
+      body: { enabled: true, configJson: { appId: "app-123", privateKey: "super-secret" } }
+    expect:
+      status: 200
+      jsonContains: { data.configJson.privateKey: "masked" }
+  - name: put_iap_config_secret_regression_masked_keeps_old
+    dimension: S8
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/iap_configured
+    note: "密文更新回归：提交 privateKey=masked → 还原旧密文不重新加密（进程内 iap_config_service_test.go 等价覆盖）"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/9001/iap-config
+      body: { enabled: true, configJson: { appId: "app-123", privateKey: "masked" } }
+    expect:
+      status: 200
+  - name: put_iap_config_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/iap
+    note: "写 audit_logs(action=iap.config.update, detail 脱敏)"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/9001/iap-config
+      body: { enabled: true, configJson: { appId: "app-123", privateKey: "super-secret" } }
+    expect:
+      status: 200
+  - name: put_iap_config_scoped_to_current_env
+    dimension: S6
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/iap
+    note: "配置实例落当前 env schema；不跨 schema 写"
+    request:
+      method: PUT
+      path: /api/admin/game-channels/9001/iap-config
+      body: { enabled: false, configJson: { appId: "app-123" } }
+    expect:
+      status: 200
+
+  # ═════════════════════════ 8) GET /channel-packages/{packageId}/iap-override（读包级 IAP 覆盖，product.read，含密文）
+  - name: get_iap_override_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/channel-packages/7001/iap-override
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: get_iap_override_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/channel-packages/7001/iap-override
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: get_iap_override_invalid_id
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_reader }
+    note: "packageId 非 int64 → 400 VALIDATION_FAILED"
+    request:
+      method: GET
+      path: /api/admin/channel-packages/not-a-number/iap-override
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: get_iap_override_success_with_base
+    dimension: S1
+    requiresDB: true
+    auth: { role: product_reader }
+    fixture: sandbox/product/iap
+    note: "200 + template + baseConfig（渠道实例基线）+ override（供对比）"
+    request:
+      method: GET
+      path: /api/admin/channel-packages/7001/iap-override
+    expect:
+      status: 200
+  - name: get_iap_override_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: product_reader }
+    fixture: sandbox/product/iap_configured
+    note: "baseConfig 与 override 的密文字段恒 masked"
+    request:
+      method: GET
+      path: /api/admin/channel-packages/7001/iap-override
+    expect:
+      status: 200
+  - name: get_iap_override_scoped_to_current_env
+    dimension: S6
+    requiresDB: true
+    auth: { role: product_reader }
+    fixture: sandbox/product/iap
+    note: "实例每环境 schema 独立；不跨 schema 读"
+    request:
+      method: GET
+      path: /api/admin/channel-packages/7001/iap-override
+    expect:
+      status: 200
+
+  # ═════════════════════════ 9) PUT /channel-packages/{packageId}/iap-override（写包级 IAP 覆盖，product.write，审计 iap.override.update）
+  - name: put_iap_override_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/iap-override
+      body: { enabled: true, configJson: { appId: "pkg-app", privateKey: "secret" } }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: put_iap_override_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: product_reader }
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/iap-override
+      body: { enabled: true, configJson: { appId: "pkg-app", privateKey: "secret" } }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: put_iap_override_validation_missing_config
+    dimension: S4
+    requiresDB: true
+    auth: { role: product_admin }
+    note: "缺 configJson → 400 VALIDATION_FAILED"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/iap-override
+      body: { enabled: true }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_iap_override_success_valid
+    dimension: S1
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/iap
+    note: "齐全四件套 → 200，configStatus=valid；包级字段优先于渠道基线（merge 顶层覆盖）"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/iap-override
+      body: { enabled: true, configJson: { appId: "pkg-app", privateKey: "pkg-secret" } }
+    expect:
+      status: 200
+      jsonContains: { data.configStatus: "valid" }
+  - name: put_iap_override_masks_secret_in_response
+    dimension: S8
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/iap
+    note: "响应 configJson.privateKey 恒 masked；落库密文"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/iap-override
+      body: { enabled: true, configJson: { appId: "pkg-app", privateKey: "pkg-secret" } }
+    expect:
+      status: 200
+      jsonContains: { data.configJson.privateKey: "masked" }
+  - name: put_iap_override_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/iap
+    note: "写 audit_logs(action=iap.override.update, detail 脱敏)"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/iap-override
+      body: { enabled: true, configJson: { appId: "pkg-app", privateKey: "pkg-secret" } }
+    expect:
+      status: 200
+  - name: put_iap_override_scoped_to_current_env
+    dimension: S6
+    requiresDB: true
+    auth: { role: product_admin }
+    fixture: sandbox/product/iap
+    note: "覆盖实例落当前 env schema；enabled=false 时运行时回退渠道实例配置"
+    request:
+      method: PUT
+      path: /api/admin/channel-packages/7001/iap-override
+      body: { enabled: false, configJson: { appId: "pkg-app" } }
+    expect:
+      status: 200

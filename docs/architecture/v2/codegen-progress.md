@@ -31,7 +31,7 @@
 | 13 | `account-auth` | `games-surface` | channel, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 旧模块，详细审计已归档 |
 | 14 | `channel-login` | `channels-surface` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 与 `feature-plugin` 同 lane，二选一先开 |
 | 15 | `feature-plugin` | `channels-surface` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 与 `channel-login` 同 lane，二选一先开 |
-| 16 | `product` | `games-surface` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | `account-auth` 已完成，可开工 |
+| 16 | `product` | `games-surface` | channel, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 全流水线通过（R2 集成 + 功能验收 PASS）；非阻断 #2/#3/#4/#6 转后续跟踪 |
 | 17 | `cashier-template` | `cashier-surface` | common | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 可开工 |
 | 18 | `game-cashier` | `cashier-surface` | cashier-template, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `cashier-template` |
 | 19 | `payment` | `payment-surface` | channel, product, cashier-template, game-cashier, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `product + game-cashier` |
@@ -48,7 +48,7 @@
 
 | lane | 推荐起始模块 | 当前状态 | 说明 |
 | --- | --- | --- | --- |
-| `games-surface` | `product` | ✅ 可开工 | `account-auth` 已完成，同 lane 空闲 |
+| `games-surface` | （已全部完成） | ✅ 完成 | game / account-auth / product 三模块均 ✅，本 lane 收官 |
 | `channels-surface` | `channel-login` | ✅ 可开工 | `feature-plugin` 与其同 lane，暂不并开 |
 | `cashier-surface` | `cashier-template` | ✅ 可开工 | `game-cashier` 依赖它 |
 | `audit-surface` | `audit` | ✅ 可开工 | 与其他 lane 可并行 |
@@ -64,7 +64,7 @@
 
 | 模块 | lane | 当前阶段 | worktree / branch | handoff.summary.md | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| — | — | — | — | — | 当前无在制模块 |
+| — | — | — | — | — | 当前无在制模块（product 已完成，详见 16-product/artifacts） |
 
 > 总 Agent 每次只维护当前模块这一行；模块完成或阻塞后即清空或转历史，不把长日志写回本文件。
 

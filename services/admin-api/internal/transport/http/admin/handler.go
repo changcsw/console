@@ -13,25 +13,27 @@ import (
 
 // Handler 持有应用服务，处理 auth 与 system 端点。
 type Handler struct {
-	auth  *adminapp.AdminAuthService
-	users *adminapp.AdminUserService
-	roles *adminapp.RoleService
-	perms *adminapp.PermissionService
-	env   common.Environment
+	auth     *adminapp.AdminAuthService
+	users    *adminapp.AdminUserService
+	roles    *adminapp.RoleService
+	perms    *adminapp.PermissionService
+	currency *adminapp.CurrencySpecService
+	env      common.Environment
 }
 
 // Deps Handler 依赖。
 type Deps struct {
-	Auth  *adminapp.AdminAuthService
-	Users *adminapp.AdminUserService
-	Roles *adminapp.RoleService
-	Perms *adminapp.PermissionService
-	Env   common.Environment
+	Auth     *adminapp.AdminAuthService
+	Users    *adminapp.AdminUserService
+	Roles    *adminapp.RoleService
+	Perms    *adminapp.PermissionService
+	Currency *adminapp.CurrencySpecService
+	Env      common.Environment
 }
 
 // NewHandler 构造 Handler。
 func NewHandler(d Deps) *Handler {
-	return &Handler{auth: d.Auth, users: d.Users, roles: d.Roles, perms: d.Perms, env: d.Env}
+	return &Handler{auth: d.Auth, users: d.Users, roles: d.Roles, perms: d.Perms, currency: d.Currency, env: d.Env}
 }
 
 func decodeJSON(r *http.Request, target any) error {

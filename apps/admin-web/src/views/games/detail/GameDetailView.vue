@@ -40,6 +40,12 @@
         <el-tab-pane label="自有账号认证" name="account-auth">
           <AccountAuthTab :game-id="game.gameId" />
         </el-tab-pane>
+        <el-tab-pane label="商品" name="products">
+          <ProductTab :game-id="game.gameId" />
+        </el-tab-pane>
+        <el-tab-pane label="IAP" name="iap">
+          <IapConfigTab :game-id="game.gameId" />
+        </el-tab-pane>
         <el-tab-pane v-for="ph in downstreamTabs" :key="ph.name" :label="ph.label" :name="ph.name" lazy>
           <div class="placeholder">
             <PageStatusTag tone="warning" label="下游模块" />
@@ -65,6 +71,8 @@ import BasicInfoTab from "./BasicInfoTab.vue";
 import MarketsTab from "./MarketsTab.vue";
 import LegalLinksTab from "./LegalLinksTab.vue";
 import AccountAuthTab from "./AccountAuthTab.vue";
+import ProductTab from "./ProductTab.vue";
+import IapConfigTab from "./IapConfigTab.vue";
 import { statusMeta } from "../constants";
 
 const route = useRoute();
@@ -80,9 +88,7 @@ const activeTab = ref("basic");
 const downstreamTabs = [
   { name: "channels", label: "渠道", hint: "渠道实例（GameMarketChannel）由 channel 模块实现。" },
   { name: "packages", label: "渠道包", hint: "渠道包配置由 channel 模块实现。" },
-  { name: "products", label: "商品", hint: "商品与 IAP 映射由 product 模块实现。" },
   { name: "channel-login", label: "渠道登录", hint: "渠道登录配置由 channel-login 模块实现。" },
-  { name: "iap", label: "IAP", hint: "渠道 IAP 配置由 product 模块实现。" },
   { name: "cashier", label: "收银台", hint: "游戏级收银台由 game-cashier 模块实现。" },
   { name: "payment", label: "支付路由", hint: "支付路由由 payment 模块实现。" },
   { name: "snapshot", label: "配置快照", hint: "配置快照由 snapshot 模块实现。" },

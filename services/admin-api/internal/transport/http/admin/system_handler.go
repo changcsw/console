@@ -313,6 +313,19 @@ func (h *Handler) DeletePermission(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteData(w, http.StatusOK, map[string]any{"id": id, "deleted": true})
 }
 
+// ===== currency-specs（平台级只读字典） =====
+
+// ListCurrencySpecs GET /system/currency-specs（登录态即可读公共字典）。
+// 返回统一信封 {data:{items:[CurrencySpecView]}}，供前端 dictionary store 解包。
+func (h *Handler) ListCurrencySpecs(w http.ResponseWriter, r *http.Request) {
+	items, err := h.currency.ListCurrencySpecs(r.Context())
+	if err != nil {
+		httpx.WriteAppError(w, err)
+		return
+	}
+	httpx.WriteData(w, http.StatusOK, map[string]any{"items": items})
+}
+
 // ===== helpers =====
 
 func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
