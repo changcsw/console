@@ -54,7 +54,7 @@ func newHarness(t *testing.T) *harness {
 	permSvc := adminapp.NewPermissionService(store, audit)
 
 	handler := NewHandler(Deps{Auth: authSvc, Users: userSvc, Roles: roleSvc, Perms: permSvc, Env: testEnv})
-	sub := NewRouter(handler, issuer, testEnv, slog.New(slog.NewTextHandler(io.Discard, nil)), true)
+	sub := NewRouter(handler, issuer, testEnv, slog.New(slog.NewTextHandler(io.Discard, nil)), true, nil)
 
 	root := chi.NewRouter()
 	root.Mount("/api/admin", sub)

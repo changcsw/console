@@ -98,7 +98,9 @@ func (s *RoleService) CreateRole(ctx context.Context, cmd dto.CreateRoleCmd) (dt
 	if err != nil {
 		return dto.RoleDetail{}, err
 	}
-	s.writeAudit(ctx, "role.create", newID, map[string]any{"roleCode": code})
+	if err := s.writeAudit(ctx, "role.create", newID, map[string]any{"roleCode": code}); err != nil {
+		return dto.RoleDetail{}, err
+	}
 	return s.GetRole(ctx, newID)
 }
 
@@ -119,7 +121,9 @@ func (s *RoleService) UpdateRole(ctx context.Context, cmd dto.UpdateRoleCmd) (dt
 	if err := repos.Roles.Update(ctx, role); err != nil {
 		return dto.RoleDetail{}, err
 	}
-	s.writeAudit(ctx, "role.update", role.ID, map[string]any{"roleName": role.RoleName})
+	if err := s.writeAudit(ctx, "role.update", role.ID, map[string]any{"roleName": role.RoleName}); err != nil {
+		return dto.RoleDetail{}, err
+	}
 	return s.GetRole(ctx, role.ID)
 }
 
@@ -139,8 +143,7 @@ func (s *RoleService) DeleteRole(ctx context.Context, id int64) error {
 	if err := repos.Roles.Delete(ctx, id); err != nil {
 		return err
 	}
-	s.writeAudit(ctx, "role.delete", id, nil)
-	return nil
+	return s.writeAudit(ctx, "role.delete", id, nil)
 }
 
 // AssignPermissions 全量覆盖角色权限（生效需令牌刷新）。
@@ -157,15 +160,17 @@ func (s *RoleService) AssignPermissions(ctx context.Context, cmd dto.AssignPermi
 	if err != nil {
 		return dto.RoleDetail{}, err
 	}
-	s.writeAudit(ctx, "role.assign_permissions", cmd.RoleID, map[string]any{"permissionIds": cmd.PermissionIDs})
+	if err := s.writeAudit(ctx, "role.assign_permissions", cmd.RoleID, map[string]any{"permissionIds": cmd.PermissionIDs}); err != nil {
+		return dto.RoleDetail{}, err
+	}
 	return s.GetRole(ctx, cmd.RoleID)
 }
 
-func (s *RoleService) writeAudit(ctx context.Context, action string, resourceID int64, detail map[string]any) {
+func (s *RoleService) writeAudit(ctx context.Context, action string, resourceID int64, detail map[string]any) error {
 	if s.audit == nil {
-		return
+		return nil
 	}
-	s.audit.Write(ctx, AuditEntry{ActorID: actorFromCtx(ctx), Action: action, ResourceType: "role", ResourceID: int64ToStr(resourceID), Detail: detail})
+	return s.audit.Write(ctx, AuditEntry{ActorID: actorFromCtx(ctx), Action: action, ResourceType: "role", ResourceID: int64ToStr(resourceID), Detail: detail})
 }
 
 func ensurePermsExist(ctx context.Context, repos Repositories, permIDs []int64) error {

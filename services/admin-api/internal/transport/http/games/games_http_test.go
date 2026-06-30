@@ -48,7 +48,7 @@ func newHarness(t *testing.T) *harness {
 
 	root := chi.NewRouter()
 	sub := chi.NewRouter()
-	RegisterRoutes(sub, NewHandler(svc, testEnv), issuer, testEnv, slog.New(slog.NewTextHandler(io.Discard, nil)), true)
+	RegisterRoutes(sub, NewHandler(svc, testEnv), issuer, testEnv, slog.New(slog.NewTextHandler(io.Discard, nil)), true, nil)
 	root.Mount("/api/admin", sub)
 
 	return &harness{router: root, store: store, issuer: issuer, audit: audit}

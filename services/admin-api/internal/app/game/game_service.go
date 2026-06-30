@@ -139,9 +139,11 @@ func (s *GameService) CreateGame(ctx context.Context, cmd dto.CreateGameCmd) (dt
 		return dto.GameDetail{}, mapWriteErr(err, "alias already exists")
 	}
 
-	s.writeAudit(ctx, "game.create", created.GameID, map[string]any{
+	if err := s.writeAudit(ctx, "game.create", created.GameID, map[string]any{
 		"name": name, "alias": alias, "defaultMarketCode": resolvedDMC,
-	})
+	}); err != nil {
+		return dto.GameDetail{}, err
+	}
 	return s.toDetail(created, false), nil
 }
 
@@ -207,7 +209,9 @@ func (s *GameService) UpdateGame(ctx context.Context, cmd dto.UpdateGameCmd) (dt
 		return dto.GameDetail{}, mapWriteErr(err, "alias already exists")
 	}
 
-	s.writeAudit(ctx, "game.update", cmd.GameID, map[string]any{"fields": changedFields(patch)})
+	if err := s.writeAudit(ctx, "game.update", cmd.GameID, map[string]any{"fields": changedFields(patch)}); err != nil {
+		return dto.GameDetail{}, err
+	}
 	return s.GetGame(ctx, cmd.GameID)
 }
 
@@ -272,7 +276,9 @@ func (s *GameService) ReplaceMarkets(ctx context.Context, cmd dto.ReplaceMarkets
 		return dto.GameDetail{}, mapWriteErr(err, "market conflict")
 	}
 
-	s.writeAudit(ctx, "game.markets.update", cmd.GameID, map[string]any{"defaultMarketCode": defaultCode, "count": len(markets)})
+	if err := s.writeAudit(ctx, "game.markets.update", cmd.GameID, map[string]any{"defaultMarketCode": defaultCode, "count": len(markets)}); err != nil {
+		return dto.GameDetail{}, err
+	}
 	return s.GetGame(ctx, cmd.GameID)
 }
 
@@ -324,7 +330,9 @@ func (s *GameService) ReplaceLegalLinks(ctx context.Context, cmd dto.ReplaceLega
 		return dto.GameDetail{}, mapWriteErr(err, "duplicate legal link scope")
 	}
 
-	s.writeAudit(ctx, "game.legal.update", cmd.GameID, map[string]any{"count": len(links)})
+	if err := s.writeAudit(ctx, "game.legal.update", cmd.GameID, map[string]any{"count": len(links)}); err != nil {
+		return dto.GameDetail{}, err
+	}
 	return s.GetGame(ctx, cmd.GameID)
 }
 
@@ -341,15 +349,15 @@ func (s *GameService) load(ctx context.Context, gameID string) (domaingame.Game,
 	return g, nil
 }
 
-func (s *GameService) writeAudit(ctx context.Context, action, gameID string, detail map[string]any) {
+func (s *GameService) writeAudit(ctx context.Context, action, gameID string, detail map[string]any) error {
 	if s.audit == nil {
-		return
+		return nil
 	}
 	actor := int64(0)
 	if ac, ok := adminapp.AuthContextFrom(ctx); ok {
 		actor = ac.UserID
 	}
-	s.audit.Write(ctx, AuditEntry{ActorID: actor, Action: action, ResourceType: "game", ResourceID: gameID, Detail: detail})
+	return s.audit.Write(ctx, AuditEntry{ActorID: actor, Action: action, ResourceType: "game", ResourceID: gameID, Detail: detail})
 }
 
 func (s *GameService) toDetail(g domaingame.Game, masked bool) dto.GameDetail {

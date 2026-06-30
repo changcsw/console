@@ -455,7 +455,10 @@ func (r *memPermRepo) CountRoles(_ context.Context, permID int64) (int, error) {
 // fakeAudit 记录审计调用，供 S7/S8 断言。
 type fakeAudit struct{ entries []adminapp.AuditEntry }
 
-func (a *fakeAudit) Write(_ context.Context, e adminapp.AuditEntry) { a.entries = append(a.entries, e) }
+func (a *fakeAudit) Write(_ context.Context, e adminapp.AuditEntry) error {
+	a.entries = append(a.entries, e)
+	return nil
+}
 
 func (a *fakeAudit) byAction(action string) (adminapp.AuditEntry, bool) {
 	for _, e := range a.entries {

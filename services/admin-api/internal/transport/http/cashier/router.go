@@ -10,11 +10,11 @@ import (
 	mw "github.com/csw/console/services/admin-api/internal/transport/http/middleware"
 )
 
-func RegisterRoutes(r chi.Router, h *Handler, issuer adminapp.TokenIssuer, env common.Environment, logger *slog.Logger, ready bool) {
+func RegisterRoutes(r chi.Router, h *Handler, issuer adminapp.TokenIssuer, env common.Environment, logger *slog.Logger, ready bool, auditMW mw.AuditWriter) {
 	r.Group(func(gr chi.Router) {
 		gr.Use(mw.Authn(issuer, env))
 		gr.Use(mw.RequireBackend(ready))
-		gr.Use(mw.Audit(logger))
+		gr.Use(mw.Audit(logger, env, auditMW))
 
 		gr.With(mw.RequirePerm("cashier.read")).Get("/cashier/templates", h.ListTemplates)
 		gr.With(mw.RequirePerm("cashier.write")).Post("/cashier/templates", h.CreateTemplate)

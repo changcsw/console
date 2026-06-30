@@ -50,7 +50,7 @@ func newAAHarness(t *testing.T) *aaHarness {
 	root := chi.NewRouter()
 	sub := chi.NewRouter()
 	// game svc 传 nil：本测试只打 account-auth 路由，不触达 game 编排。
-	RegisterRoutes(sub, NewHandler(nil, testEnv, svc), issuer, testEnv, slog.New(slog.NewTextHandler(io.Discard, nil)), true)
+	RegisterRoutes(sub, NewHandler(nil, testEnv, svc), issuer, testEnv, slog.New(slog.NewTextHandler(io.Discard, nil)), true, nil)
 	root.Mount("/api/admin", sub)
 
 	return &aaHarness{router: root, store: store, cipher: cipher, audit: audit, issuer: issuer}

@@ -36,7 +36,7 @@ func (s *CurrencySpecService) ListCurrencySpecs(ctx context.Context) ([]dto.Curr
 			CurrencyName:   specs[i].CurrencyName,
 			DecimalPlaces:  specs[i].DecimalPlaces,
 			MinAmountMinor: specs[i].MinAmountMinor,
-			RoundingMode:   specs[i].RoundingMode,
+			RoundingMode:   string(specs[i].RoundingMode),
 			Enabled:        specs[i].Enabled,
 		})
 	}

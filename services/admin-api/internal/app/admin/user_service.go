@@ -157,7 +157,9 @@ func (s *AdminUserService) CreateUser(ctx context.Context, cmd dto.CreateUserCmd
 		return dto.AdminUserDetail{}, err
 	}
 
-	s.writeAudit(ctx, actorFromCtx(ctx), "admin_user.create", "admin_user", newID, map[string]any{"userName": userName})
+	if err := s.writeAudit(ctx, actorFromCtx(ctx), "admin_user.create", "admin_user", newID, map[string]any{"userName": userName}); err != nil {
+		return dto.AdminUserDetail{}, err
+	}
 	return s.GetUser(ctx, newID)
 }
 
@@ -193,9 +195,11 @@ func (s *AdminUserService) UpdateUser(ctx context.Context, cmd dto.UpdateUserCmd
 		return dto.AdminUserDetail{}, err
 	}
 
-	s.writeAudit(ctx, actorFromCtx(ctx), "admin_user.update", "admin_user", user.ID, map[string]any{
+	if err := s.writeAudit(ctx, actorFromCtx(ctx), "admin_user.update", "admin_user", user.ID, map[string]any{
 		"statusBefore": string(statusBefore), "statusAfter": string(user.Status),
-	})
+	}); err != nil {
+		return dto.AdminUserDetail{}, err
+	}
 	return s.GetUser(ctx, user.ID)
 }
 
@@ -213,7 +217,9 @@ func (s *AdminUserService) AssignRoles(ctx context.Context, cmd dto.AssignRolesC
 	if err != nil {
 		return dto.AdminUserDetail{}, err
 	}
-	s.writeAudit(ctx, actorFromCtx(ctx), "admin_user.assign_roles", "admin_user", cmd.UserID, map[string]any{"roleIds": cmd.RoleIDs})
+	if err := s.writeAudit(ctx, actorFromCtx(ctx), "admin_user.assign_roles", "admin_user", cmd.UserID, map[string]any{"roleIds": cmd.RoleIDs}); err != nil {
+		return dto.AdminUserDetail{}, err
+	}
 	return s.GetUser(ctx, cmd.UserID)
 }
 
@@ -239,15 +245,14 @@ func (s *AdminUserService) ResetPassword(ctx context.Context, cmd dto.ResetPassw
 	}); err != nil {
 		return err
 	}
-	s.writeAudit(ctx, actorFromCtx(ctx), "admin_user.reset_password", "admin_user", user.ID, nil)
-	return nil
+	return s.writeAudit(ctx, actorFromCtx(ctx), "admin_user.reset_password", "admin_user", user.ID, nil)
 }
 
-func (s *AdminUserService) writeAudit(ctx context.Context, actorID int64, action, resourceType string, resourceID int64, detail map[string]any) {
+func (s *AdminUserService) writeAudit(ctx context.Context, actorID int64, action, resourceType string, resourceID int64, detail map[string]any) error {
 	if s.audit == nil {
-		return
+		return nil
 	}
-	s.audit.Write(ctx, AuditEntry{ActorID: actorID, Action: action, ResourceType: resourceType, ResourceID: int64ToStr(resourceID), Detail: detail})
+	return s.audit.Write(ctx, AuditEntry{ActorID: actorID, Action: action, ResourceType: resourceType, ResourceID: int64ToStr(resourceID), Detail: detail})
 }
 
 func ensureRolesExist(ctx context.Context, repos Repositories, roleIDs []int64) error {

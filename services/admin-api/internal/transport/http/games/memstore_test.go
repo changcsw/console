@@ -230,7 +230,10 @@ func hasEnabledMarket(markets []domaingame.GameMarket, code string) bool {
 // fakeAudit 记录审计调用，供 S7/S8 断言。
 type fakeAudit struct{ entries []gameapp.AuditEntry }
 
-func (a *fakeAudit) Write(_ context.Context, e gameapp.AuditEntry) { a.entries = append(a.entries, e) }
+func (a *fakeAudit) Write(_ context.Context, e gameapp.AuditEntry) error {
+	a.entries = append(a.entries, e)
+	return nil
+}
 
 func (a *fakeAudit) byAction(action string) (gameapp.AuditEntry, bool) {
 	for _, e := range a.entries {

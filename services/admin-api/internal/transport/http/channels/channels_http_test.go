@@ -49,7 +49,7 @@ func newHarness(t *testing.T) *harness {
 
 	root := chi.NewRouter()
 	sub := chi.NewRouter()
-	RegisterRoutes(sub, NewHandler(svc, testEnv), issuer, testEnv, slog.New(slog.NewTextHandler(io.Discard, nil)), true)
+	RegisterRoutes(sub, NewHandler(svc, testEnv), issuer, testEnv, slog.New(slog.NewTextHandler(io.Discard, nil)), true, nil)
 	root.Mount("/api/admin", sub)
 
 	return &harness{router: root, store: store, issuer: issuer, audit: audit}
@@ -182,10 +182,10 @@ func TestCreateMarketChannelValidation(t *testing.T) {
 		market string
 		body   map[string]any
 	}{
-		{"JP", map[string]any{"channelId": ""}},                                 // 空 channelId
-		{"JP", map[string]any{"channelId": "google", "mode": "copy"}},           // copy 缺 copyFromMarket
-		{"JP", map[string]any{"channelId": "google", "mode": "bogus"}},          // 非法 mode
-		{"JP", map[string]any{"channelId": "not-exist"}},                        // channelId 不存在
+		{"JP", map[string]any{"channelId": ""}},                                  // 空 channelId
+		{"JP", map[string]any{"channelId": "google", "mode": "copy"}},            // copy 缺 copyFromMarket
+		{"JP", map[string]any{"channelId": "google", "mode": "bogus"}},           // 非法 mode
+		{"JP", map[string]any{"channelId": "not-exist"}},                         // channelId 不存在
 		{"JP", map[string]any{"channelId": "google", "remark": longString(256)}}, // remark 超长
 	}
 	for i, c := range cases {

@@ -187,9 +187,11 @@ func (s *ChannelService) CreateMarketChannel(ctx context.Context, cmd dto.Create
 		return zero, mapWriteErr(err, "market channel already exists")
 	}
 
-	s.writeAudit(ctx, "channel.create", created.ID, map[string]any{
+	if err := s.writeAudit(ctx, "channel.create", created.ID, map[string]any{
 		"gameId": cmd.GameID, "market": market, "channelId": channelID, "mode": mode, "copyFromMarket": created.CopiedFromMarket,
-	})
+	}); err != nil {
+		return zero, err
+	}
 	return dto.CreateMarketChannelResult{
 		GameChannelID:    created.ID,
 		DisplayKey:       created.DisplayKey(),
@@ -218,7 +220,9 @@ func (s *ChannelService) UpdateMarketChannel(ctx context.Context, cmd dto.Update
 	}); err != nil {
 		return dto.MarketChannelDetail{}, mapWriteErr(err, "market channel conflict")
 	}
-	s.writeAudit(ctx, "channel.update", cmd.GameChannelID, map[string]any{"fields": changedBasics(patch)})
+	if err := s.writeAudit(ctx, "channel.update", cmd.GameChannelID, map[string]any{"fields": changedBasics(patch)}); err != nil {
+		return dto.MarketChannelDetail{}, err
+	}
 	return s.GetMarketChannel(ctx, cmd.GameChannelID)
 }
 
@@ -237,7 +241,9 @@ func (s *ChannelService) HideMarketChannel(ctx context.Context, cmd dto.HideMark
 	}); err != nil {
 		return dto.MarketChannelDetail{}, mapWriteErr(err, "market channel conflict")
 	}
-	s.writeAudit(ctx, "channel.hide", cmd.GameChannelID, map[string]any{"reason": cmd.Reason, "operator": operator})
+	if err := s.writeAudit(ctx, "channel.hide", cmd.GameChannelID, map[string]any{"reason": cmd.Reason, "operator": operator}); err != nil {
+		return dto.MarketChannelDetail{}, err
+	}
 	return s.GetMarketChannel(ctx, cmd.GameChannelID)
 }
 
@@ -251,7 +257,9 @@ func (s *ChannelService) UnhideMarketChannel(ctx context.Context, cmd dto.Unhide
 	}); err != nil {
 		return dto.MarketChannelDetail{}, mapWriteErr(err, "market channel conflict")
 	}
-	s.writeAudit(ctx, "channel.unhide", cmd.GameChannelID, map[string]any{"operator": s.operator(ctx)})
+	if err := s.writeAudit(ctx, "channel.unhide", cmd.GameChannelID, map[string]any{"operator": s.operator(ctx)}); err != nil {
+		return dto.MarketChannelDetail{}, err
+	}
 	return s.GetMarketChannel(ctx, cmd.GameChannelID)
 }
 
@@ -328,7 +336,9 @@ func (s *ChannelService) CreatePackage(ctx context.Context, cmd dto.CreatePackag
 	if err != nil {
 		return zero, mapWriteErr(err, "package code already exists")
 	}
-	s.writeAudit(ctx, "package.create", created.ID, map[string]any{"gameChannelId": cmd.GameChannelID, "packageCode": code})
+	if err := s.writeAudit(ctx, "package.create", created.ID, map[string]any{"gameChannelId": cmd.GameChannelID, "packageCode": code}); err != nil {
+		return zero, err
+	}
 	return toPackageView(created), nil
 }
 
@@ -361,7 +371,9 @@ func (s *ChannelService) UpdatePackage(ctx context.Context, cmd dto.UpdatePackag
 	}); err != nil {
 		return zero, mapWriteErr(err, "package conflict")
 	}
-	s.writeAudit(ctx, "package.update", cmd.PackageID, map[string]any{"fields": changedPackage(patch)})
+	if err := s.writeAudit(ctx, "package.update", cmd.PackageID, map[string]any{"fields": changedPackage(patch)}); err != nil {
+		return zero, err
+	}
 	updated, err := s.loadPackage(ctx, cmd.PackageID)
 	if err != nil {
 		return zero, err
@@ -416,9 +428,9 @@ func (s *ChannelService) operator(ctx context.Context) string {
 	return "system"
 }
 
-func (s *ChannelService) writeAudit(ctx context.Context, action string, resourceID int64, detail map[string]any) {
+func (s *ChannelService) writeAudit(ctx context.Context, action string, resourceID int64, detail map[string]any) error {
 	if s.audit == nil {
-		return
+		return nil
 	}
 	actor := int64(0)
 	if ac, ok := adminapp.AuthContextFrom(ctx); ok {
@@ -428,7 +440,7 @@ func (s *ChannelService) writeAudit(ctx context.Context, action string, resource
 	if strings.HasPrefix(action, "package.") {
 		resType = "channel_package"
 	}
-	s.audit.Write(ctx, AuditEntry{
+	return s.audit.Write(ctx, AuditEntry{
 		ActorID: actor, Action: action, ResourceType: resType, ResourceID: itoa(resourceID), Detail: detail,
 	})
 }

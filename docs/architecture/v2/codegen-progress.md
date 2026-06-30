@@ -37,7 +37,7 @@
 | 19 | `payment` | `payment-surface` | channel, product, cashier-template, game-cashier, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `product + game-cashier` |
 | 20 | `snapshot` | `runtime-surface` | channel, account-auth, channel-login, feature-plugin, product, cashier-template, game-cashier, payment, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 14/15/16/17/18/19 |
 | 21 | `sync` | `runtime-surface` | snapshot, +上游全部 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `snapshot` |
-| 22 | `audit` | `audit-surface` | common | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 可开工 |
+| 22 | `audit` | `audit-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 已合并至 main |
 | 23 | `dashboard` | `dashboard-surface` | cashier-template, snapshot, sync | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `sync` |
 
 > 注：`artifacts_dir` 统一在 `index.json.docs[].artifacts_dir` 中定义；旧模块若尚无 `artifacts` 目录，仅在后续续作时回填。
@@ -51,7 +51,7 @@
 | `games-surface` | （已全部完成） | ✅ 完成 | game / account-auth / product 三模块均 ✅，本 lane 收官 |
 | `channels-surface` | `feature-plugin` | ✅ 可开工 | `channel-login` 已完成；与其同 lane，二选一先开 |
 | `cashier-surface` | `game-cashier` | ✅ 可开工 | `cashier-template` 已完成，阻塞已解除；同 lane 现空闲 |
-| `audit-surface` | `audit` | ✅ 可开工 | 与其他 lane 可并行 |
+| `audit-surface` | （已全部完成） | ✅ 完成 | audit 已合并至 main |
 | `payment-surface` | `payment` | ⛔ 阻塞 | 等待 `product + game-cashier` |
 | `runtime-surface` | `snapshot` | ⛔ 阻塞 | 等待 14/15/16/17/18/19 |
 | `dashboard-surface` | `dashboard` | ⛔ 阻塞 | 等待 `sync` |
@@ -64,7 +64,7 @@
 
 | 模块 | lane | 当前阶段 | worktree / branch | handoff.summary.md | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| — | — | — | — | — | 当前无在制模块（#14/#16/#17 已合并至 main） |
+| — | — | — | — | — | 当前无在制模块（#14/#16/#17/#22 已合并至 main） |
 
 > 总 Agent 每次只维护当前模块这一行；模块完成或阻塞后即清空或转历史，不把长日志写回本文件。
 
