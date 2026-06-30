@@ -1,0 +1,279 @@
+# 模块 audit（审计日志）接口场景矩阵 manifest
+# 维度定义见 docs/architecture/v2/03-testing.md §4；逐接口适用维度见
+# docs/architecture/v2/modules/22-audit/README.md「接口场景矩阵」。
+#
+# 本模块特殊性（compact §1/§2.3/§6）：
+#   - 读 API 只读、无写接口：GET /audit-logs、GET /audit-logs/{id}（权限码 audit.read）。
+#   - 写侧由「中间件兜底」+「显式 AuditService.Write」双路径产生（被各业务写操作触发），
+#     故 S7（审计写入/去重）、S8（detail 脱敏回传）、S10（显式写同事务失败回滚业务）
+#     的端到端断言挂在「触发写操作的接口」上，本 manifest 以注释标注其触发入口。
+#
+# 运行说明（重要，同 auth.yaml）：
+#   进程内 httptest harness（无 DSN/JWT → ready=false）无法签发可通过校验的令牌，也不落库。
+#     - requiresDB:false 的 case（S2 鉴权 401：受保护接口先过 Authn，未携带令牌即 401）在沙箱内真实执行并断言。
+#     - requiresDB:true 的 case 为「manifest 已声明、运行需 PG + 全装配」，进程内 harness 跳过
+#       （SCENARIO_WITH_DB=1 时由连库 harness 执行），仅保证 YAML 解析校验通过。
+module: audit
+cases:
+  # ───────────────────────── GET /api/admin/audit-logs（列表，audit.read）
+  - name: list_requires_auth
+    dimension: S2
+    requiresDB: false
+    note: "未携带 access → 401 UNAUTHENTICATED（Authn 在 RequirePerm 之前）"
+    request:
+      method: GET
+      path: /api/admin/audit-logs
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_invalid_token_rejected
+    dimension: S2
+    requiresDB: false
+    note: "伪造 Bearer 因签名校验失败 → 401"
+    request:
+      method: GET
+      path: /api/admin/audit-logs
+      headers: { Authorization: "Bearer not.a.valid.jwt" }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    note: "登录但缺 audit.read → 403 FORBIDDEN（菜单隐藏 + 接口 403）"
+    request:
+      method: GET
+      path: /api/admin/audit-logs
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_success
+    dimension: S1
+    requiresDB: true
+    fixture: common/audit/base
+    auth: { role: audit_reader }
+    note: "200 + 列表包络 {data:{items,page,pageSize,total}}，时间倒序"
+    request:
+      method: GET
+      path: /api/admin/audit-logs
+    expect:
+      status: 200
+      jsonContains: { data.page: 1 }
+  - name: list_validation_from_after_to
+    dimension: S4
+    requiresDB: true
+    auth: { role: audit_reader }
+    note: "from > to → 400 VALIDATION_FAILED（compact §6.1 校验）"
+    request:
+      method: GET
+      path: /api/admin/audit-logs?from=2026-06-02T00:00:00Z&to=2026-06-01T00:00:00Z
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: list_validation_bad_operator
+    dimension: S4
+    requiresDB: true
+    auth: { role: audit_reader }
+    note: "operator 非整数 → 400 VALIDATION_FAILED"
+    request:
+      method: GET
+      path: /api/admin/audit-logs?operator=abc
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: list_filter_by_env
+    dimension: S6
+    requiresDB: true
+    fixture: common/audit/base
+    auth: { role: audit_reader }
+    note: "env 仅过滤维度（非游戏维度业务表，compact §2.2 特例）：?env=production 仅返回 production 行"
+    request:
+      method: GET
+      path: /api/admin/audit-logs?env=production
+    expect:
+      status: 200
+      jsonContains: { data.page: 1 }
+  - name: list_detail_secret_masked
+    dimension: S8
+    requiresDB: true
+    fixture: common/audit/secret
+    auth: { role: audit_reader }
+    note: "含密文的 detail 行回传时 secret/apiKey 恒为 masked，绝不回明文（compact §5.5）"
+    request:
+      method: GET
+      path: /api/admin/audit-logs?resourceType=payment_route
+    expect:
+      status: 200
+  - name: list_pagination_clamp_100
+    dimension: S9
+    requiresDB: true
+    fixture: common/audit/base
+    auth: { role: audit_reader }
+    note: "pageSize 越界钳制为上限 100；保留过滤；page/pageSize/total 正确"
+    request:
+      method: GET
+      path: /api/admin/audit-logs?pageSize=99999&env=sandbox
+    expect:
+      status: 200
+      jsonContains: { data.pageSize: 100 }
+  - name: list_sort_default_desc_stable
+    dimension: S9
+    requiresDB: true
+    fixture: common/audit/base
+    auth: { role: audit_reader }
+    note: "默认 -createdAt（created_at DESC，二级 id DESC 稳定）；sort=createdAt 正序"
+    request:
+      method: GET
+      path: /api/admin/audit-logs?sort=-createdAt
+    expect:
+      status: 200
+  - name: list_operator_system_placeholder
+    dimension: S1
+    requiresDB: true
+    fixture: common/audit/system
+    auth: { role: audit_reader }
+    note: "actor_id=0 行 operator 解析为系统占位 {id:'0',userName:system,displayName:System}"
+    request:
+      method: GET
+      path: /api/admin/audit-logs?operator=0
+    expect:
+      status: 200
+
+  # ───────────────────────── GET /api/admin/audit-logs/{id}（单条详情，audit.read）
+  - name: get_by_id_requires_auth
+    dimension: S2
+    requiresDB: false
+    note: "未携带 access → 401"
+    request:
+      method: GET
+      path: /api/admin/audit-logs/1
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: get_by_id_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/audit-logs/1
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: get_by_id_success
+    dimension: S1
+    requiresDB: true
+    fixture: common/audit/base
+    auth: { role: audit_reader }
+    request:
+      method: GET
+      path: /api/admin/audit-logs/1
+    expect:
+      status: 200
+      jsonContains: { data.id: "1" }
+  - name: get_by_id_not_found
+    dimension: S1
+    requiresDB: true
+    auth: { role: audit_reader }
+    note: "不存在 id → 404 NOT_FOUND"
+    request:
+      method: GET
+      path: /api/admin/audit-logs/999999
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: get_by_id_invalid_id
+    dimension: S4
+    requiresDB: true
+    auth: { role: audit_reader }
+    note: "id 非法（非正整数）→ 400 VALIDATION_FAILED"
+    request:
+      method: GET
+      path: /api/admin/audit-logs/abc
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: get_by_id_secret_masked
+    dimension: S8
+    requiresDB: true
+    fixture: common/audit/secret
+    auth: { role: audit_reader }
+    note: "单条详情 detail 密文同样 masked"
+    request:
+      method: GET
+      path: /api/admin/audit-logs/2
+    expect:
+      status: 200
+
+  # ───────────────────────── 写侧审计（S7/S8/S10，触发入口在其它模块写接口）
+  # 维度归属说明：audit 是「被写方」，下列 case 通过触发业务写来验证写侧审计能力，
+  # 落库断言（expect.db / expect.audit）待连库 harness 扩展，当前 requiresDB:true 仅声明。
+  - name: explicit_write_records_audit_row
+    dimension: S7
+    requiresDB: true
+    fixture: common/audit/base
+    auth: { role: super_admin }
+    note: "显式路径：业务写（如 game.update）在同事务调 AuditService.Write，落 1 条 audit_logs，action 同源权限码"
+    request:
+      method: PATCH
+      path: /api/admin/system/admin-users/1
+      body: { status: "disabled" }
+    expect:
+      status: 200
+  - name: middleware_fallback_writes_once
+    dimension: S7
+    requiresDB: true
+    auth: { role: super_admin }
+    note: "兜底路径：成功写请求未显式写审计 → 中间件补 1 条粗粒度审计（仅 action/resource/请求摘要）"
+    request:
+      method: POST
+      path: /api/admin/system/roles
+      body: { roleCode: "ops_fallback", roleName: "OpsFallback" }
+    expect:
+      status: 200
+  - name: middleware_dedup_no_double_write
+    dimension: S7
+    requiresDB: true
+    fixture: common/audit/base
+    auth: { role: super_admin }
+    note: "去重：显式 Write 已置 ctx 标志 → 中间件不再补写（同一请求仅 1 条审计，非 2 条）"
+    request:
+      method: PATCH
+      path: /api/admin/system/admin-users/1
+      body: { status: "active" }
+    expect:
+      status: 200
+  - name: write_audit_detail_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: super_admin }
+    note: "脱敏：写侧含 secret 的 before/after/extra 经 AuditService 递归脱敏后落库为 masked，绝不写明文"
+    request:
+      method: POST
+      path: /api/admin/system/admin-users
+      body: { userName: "withsecret", displayName: "WithSecret", password: "Secret@12345" }
+    expect:
+      status: 200
+  - name: explicit_write_failure_rolls_back_business
+    dimension: S10
+    requiresDB: true
+    auth: { role: super_admin }
+    note: "同事务强一致：高危操作显式审计 INSERT 失败 → 业务写整体回滚（无业务变更、无审计）。compact §5.6；落库断言待连库 harness。"
+    request:
+      method: POST
+      path: /api/admin/system/admin-users
+      body: { userName: "rollbackcase", displayName: "Rollback" }
+    expect:
+      status: 200
+
+  # ───────────────────────── 可选未实现接口（前向声明，标记跳过）
+  - name: facets_not_implemented
+    dimension: S1
+    requiresDB: true
+    note: "GET /audit-logs/facets 为可选项、本期未实现（compact §6.3 / integration.checklist）；占位声明，连库 harness 跳过。"
+    request:
+      method: GET
+      path: /api/admin/audit-logs/facets
+    expect:
+      status: 404

@@ -15,7 +15,7 @@ import (
 // 豁免鉴权：/auth/login、/auth/refresh、/auth/feishu/callback。
 // ready=false 表示后端（DB）未就绪：路由仍挂载，受保护路由先过 Authn（未携带令牌仍 401），
 // 通过认证后返回 503 INTERNAL；公开路由直接 503。这样 API 形状稳定、契约一致。
-func NewRouter(h *Handler, issuer adminapp.TokenIssuer, env common.Environment, logger *slog.Logger, ready bool) chi.Router {
+func NewRouter(h *Handler, issuer adminapp.TokenIssuer, env common.Environment, logger *slog.Logger, ready bool, auditMW mw.AuditWriter) chi.Router {
 	r := chi.NewRouter()
 	r.Use(mw.EnvContext(env))
 	readyMW := mw.RequireBackend(ready)
@@ -29,7 +29,7 @@ func NewRouter(h *Handler, issuer adminapp.TokenIssuer, env common.Environment, 
 	r.Group(func(pr chi.Router) {
 		pr.Use(mw.Authn(issuer, env))
 		pr.Use(readyMW)
-		pr.Use(mw.Audit(logger))
+		pr.Use(mw.Audit(logger, env, auditMW))
 
 		pr.Post("/auth/logout", h.Logout)
 		pr.Get("/me", h.Me)

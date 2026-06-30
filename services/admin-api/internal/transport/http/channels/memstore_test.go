@@ -434,7 +434,10 @@ func (r *memPackageRepo) UpdatePackage(_ context.Context, id int64, patch channe
 // fakeAudit 记录审计调用，供 S7 断言（与 game httptest 同口径：用 spy sink 断言 service 层审计写入）。
 type fakeAudit struct{ entries []channelapp.AuditEntry }
 
-func (a *fakeAudit) Write(_ context.Context, e channelapp.AuditEntry) { a.entries = append(a.entries, e) }
+func (a *fakeAudit) Write(_ context.Context, e channelapp.AuditEntry) error {
+	a.entries = append(a.entries, e)
+	return nil
+}
 
 func (a *fakeAudit) byAction(action string) (channelapp.AuditEntry, bool) {
 	for _, e := range a.entries {

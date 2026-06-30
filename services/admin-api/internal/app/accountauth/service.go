@@ -168,7 +168,9 @@ func (s *Service) ReplaceGameConfigs(ctx context.Context, cmd dto.ReplaceGameAcc
 	}); err != nil {
 		return nil, mapWriteErr(err)
 	}
-	s.writeAudit(ctx, cmd.GameID, allowed, existingByRef, upserts)
+	if err := s.writeAudit(ctx, cmd.GameID, allowed, existingByRef, upserts); err != nil {
+		return nil, err
+	}
 
 	_, allowedAfter, existingAfter, err := s.loadGameState(ctx, cmd.GameID)
 	if err != nil {
@@ -383,9 +385,9 @@ func mapWriteErr(err error) error {
 // 绝不写入 configJson / secret（脱敏：仅记状态位，不记任何字段值）。
 // 注：当前 wiring 注入 audit=nil（与 game/channel 一致的已知遗留，待 audit 模块统一接通），
 // 届时本调用即可真正落 audit_logs，无需改动 service 层。
-func (s *Service) writeAudit(ctx context.Context, gameID string, allowed []GameAllowedType, before map[int64]GameConfigItem, upserts []GameConfigUpsert) {
+func (s *Service) writeAudit(ctx context.Context, gameID string, allowed []GameAllowedType, before map[int64]GameConfigItem, upserts []GameConfigUpsert) error {
 	if s.audit == nil {
-		return
+		return nil
 	}
 	actor := int64(0)
 	if ac, ok := adminapp.AuthContextFrom(ctx); ok {
@@ -412,7 +414,7 @@ func (s *Service) writeAudit(ctx context.Context, gameID string, allowed []GameA
 			"configStatusAfter":  string(up.ConfigStatus),
 		})
 	}
-	s.audit.Write(ctx, AuditEntry{
+	return s.audit.Write(ctx, AuditEntry{
 		ActorID:      actor,
 		Action:       "game.account_auth.update",
 		ResourceType: "game",
@@ -420,5 +422,28 @@ func (s *Service) writeAudit(ctx context.Context, gameID string, allowed []GameA
 		Detail: map[string]any{
 			"items": items,
 		},
+		SecretKeys: collectTemplateSecretKeys(allowed),
 	})
+}
+
+func collectTemplateSecretKeys(allowed []GameAllowedType) []string {
+	if len(allowed) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, 8)
+	for _, item := range allowed {
+		for _, key := range item.Template.SecretFields {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, key)
+		}
+	}
+	return out
 }

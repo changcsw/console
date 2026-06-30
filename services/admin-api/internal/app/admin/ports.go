@@ -81,7 +81,7 @@ type TxManager interface {
 
 // AuditSink 审计写入端口（本模块只调用，不实现存储，见 audit 模块）。
 type AuditSink interface {
-	Write(ctx context.Context, entry AuditEntry)
+	Write(ctx context.Context, entry AuditEntry) error
 }
 
 // AuditEntry 审计记录（00 §8 字段；detail 已脱敏）。
@@ -91,6 +91,7 @@ type AuditEntry struct {
 	ResourceType string
 	ResourceID   string
 	Detail       map[string]any
+	SecretKeys   []string
 }
 
 // PasswordHasher bcrypt 哈希端口（infra/crypto 实现）。

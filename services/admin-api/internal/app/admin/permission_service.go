@@ -59,7 +59,9 @@ func (s *PermissionService) CreatePermission(ctx context.Context, cmd dto.Create
 	if err := repos.Permissions.Create(ctx, p); err != nil {
 		return dto.PermissionView{}, err
 	}
-	s.writeAudit(ctx, "permission.create", p.ID, map[string]any{"permissionCode": code})
+	if err := s.writeAudit(ctx, "permission.create", p.ID, map[string]any{"permissionCode": code}); err != nil {
+		return dto.PermissionView{}, err
+	}
 	return dto.PermissionView{
 		ID:             p.ID,
 		PermissionCode: p.PermissionCode,
@@ -85,13 +87,12 @@ func (s *PermissionService) DeletePermission(ctx context.Context, id int64) erro
 	if err := repos.Permissions.Delete(ctx, id); err != nil {
 		return err
 	}
-	s.writeAudit(ctx, "permission.delete", id, nil)
-	return nil
+	return s.writeAudit(ctx, "permission.delete", id, nil)
 }
 
-func (s *PermissionService) writeAudit(ctx context.Context, action string, resourceID int64, detail map[string]any) {
+func (s *PermissionService) writeAudit(ctx context.Context, action string, resourceID int64, detail map[string]any) error {
 	if s.audit == nil {
-		return
+		return nil
 	}
-	s.audit.Write(ctx, AuditEntry{ActorID: actorFromCtx(ctx), Action: action, ResourceType: "permission", ResourceID: int64ToStr(resourceID), Detail: detail})
+	return s.audit.Write(ctx, AuditEntry{ActorID: actorFromCtx(ctx), Action: action, ResourceType: "permission", ResourceID: int64ToStr(resourceID), Detail: detail})
 }

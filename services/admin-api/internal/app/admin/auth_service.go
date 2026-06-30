@@ -73,7 +73,9 @@ func (s *AdminAuthService) Login(ctx context.Context, cmd dto.LoginCmd) (dto.Log
 	if err != nil {
 		return dto.LoginResult{}, err
 	}
-	s.writeAudit(ctx, user.ID, "admin.login", "admin_user", user.ID, map[string]any{"identityType": "password"})
+	if err := s.writeAudit(ctx, user.ID, "admin.login", "admin_user", user.ID, map[string]any{"identityType": "password"}); err != nil {
+		return dto.LoginResult{}, err
+	}
 	return dto.LoginResult{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresAt: pair.ExpiresAt, User: view}, nil
 }
 
@@ -113,7 +115,9 @@ func (s *AdminAuthService) FeishuCallback(ctx context.Context, cmd dto.FeishuCal
 	if err != nil {
 		return dto.LoginResult{}, err
 	}
-	s.writeAudit(ctx, user.ID, "admin.login", "admin_user", user.ID, map[string]any{"identityType": "feishu"})
+	if err := s.writeAudit(ctx, user.ID, "admin.login", "admin_user", user.ID, map[string]any{"identityType": "feishu"}); err != nil {
+		return dto.LoginResult{}, err
+	}
 	return dto.LoginResult{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresAt: pair.ExpiresAt, User: view}, nil
 }
 
@@ -152,8 +156,7 @@ func (s *AdminAuthService) Refresh(ctx context.Context, cmd dto.RefreshCmd) (dto
 
 // Logout 登出（无状态 JWT：客户端丢弃；写审计）。
 func (s *AdminAuthService) Logout(ctx context.Context, actorID int64, cmd dto.LogoutCmd) error {
-	s.writeAudit(ctx, actorID, "admin.logout", "admin_user", actorID, nil)
-	return nil
+	return s.writeAudit(ctx, actorID, "admin.logout", "admin_user", actorID, nil)
 }
 
 // Me 当前用户信息（compact GET /me）。
@@ -232,11 +235,11 @@ func (s *AdminAuthService) issueForUser(ctx context.Context, repos Repositories,
 	return pair, view, nil
 }
 
-func (s *AdminAuthService) writeAudit(ctx context.Context, actorID int64, action, resourceType string, resourceID int64, detail map[string]any) {
+func (s *AdminAuthService) writeAudit(ctx context.Context, actorID int64, action, resourceType string, resourceID int64, detail map[string]any) error {
 	if s.audit == nil {
-		return
+		return nil
 	}
-	s.audit.Write(ctx, AuditEntry{
+	return s.audit.Write(ctx, AuditEntry{
 		ActorID:      actorID,
 		Action:       action,
 		ResourceType: resourceType,

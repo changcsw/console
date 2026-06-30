@@ -1,0 +1,184 @@
+{
+  "module_id": "audit",
+  "lane": "audit-surface",
+  "spec_path": "docs/architecture/v2/modules/22-audit/spec.compact.md",
+  "worktree": "../console-audit",
+  "branch": "codex/audit",
+  "shared_surfaces_touched": [
+    "services/admin-api/internal/transport/http/middleware",
+    "services/admin-api/internal/transport/http/audit",
+    "services/admin-api/internal/transport/httpserver/admin_wiring.go",
+    "services/admin-api/internal/app/audit",
+    "services/admin-api/internal/infra/persistence/postgres/audit_repository.go",
+    "services/admin-api/internal/domain/common/audit.go",
+    "services/admin-api/migrations/000008_audit_logs_platform_schema.up.sql",
+    "services/admin-api/migrations/000009_audit_indexes.up.sql",
+    "apps/admin-web/src/views/audit"
+  ],
+  "backend_routes": [
+    "GET /api/admin/audit-logs",
+    "GET /api/admin/audit-logs/{id}",
+    "GET /api/admin/audit-logs/facets (可选未实现 → 404 NOT_FOUND)"
+  ],
+  "frontend_routes": [
+    {
+      "path": "/audit",
+      "source": "apps/admin-web/src/router/routes.ts",
+      "menu_visibility": "meta.perm = audit.read"
+    }
+  ],
+  "frontend_views": [
+    {
+      "path": "apps/admin-web/src/views/audit/AuditView.vue",
+      "responsibility": "审计日志只读列表、提交式过滤、详情抽屉与多态状态页"
+    }
+  ],
+  "frontend_api": [
+    {
+      "path": "apps/admin-web/src/api/modules/audit.ts",
+      "endpoints": [
+        "GET /api/admin/audit-logs",
+        "GET /api/admin/audit-logs/{id}",
+        "GET /api/admin/audit-logs/facets"
+      ]
+    }
+  ],
+  "referenced_modules": ["common"],
+  "cr_status": "passed",
+  "backend_cr_status": "passed",
+  "frontend_cr_status": "passed",
+  "backend_test_status": "passed",
+  "frontend_test_status": "passed",
+  "integration_test_status": "passed",
+  "integration_test_note": "round2 复测(🟪 2026-06-30)：🟧 修复 P0-1/P1-2/P2-3 验证通过。连库事务内复刻 000008+000009 后，未限定 SELECT/INSERT audit_logs 在 search_path=sandbox,platform 下命中 platform.audit_logs(P0 不再复现)、List JOIN/WHERE/ORDER/分页正常、6+PK 索引落 platform、ROLLBACK 非破坏；后端 go build/vet/test ./... + 前端 vitest(audit 25) 全绿；facets 路由返 404。可进入功能验收。booted-server 全鉴权 HTTP e2e 未跑(无 migrate CLI + 共享库缺 env schema + harness 未注入 DSN〔P3-4〕)，建议 CI 收口。",
+  "can_enter_acceptance": true,
+  "acceptance_status": "passed",
+  "acceptance_by": "✅ 功能验收师 (2026-06-30, Cursor Auto)",
+  "acceptance_note": "功能验收通过：26 项验收点全 PASS（含 3 项机制就绪/约定层/沿用连库取证标注）。基准=功能端到端可用+满足 compact 业务规则+符合 02-operation-flow。后端 go build/vet/test ./... 全绿(go test 383 pass/0 fail)；前端 vitest 全量 108 passed、audit 25 passed；scenario/audit S2 live PASS+requiresDB SKIP。统一回归入口(WITH_DB=0) 后端 pass=383/fail=0，前端 Playwright L5 e2e 23 failed/7 passed 为无 booted 前后端+DB 的环境性失败(跨 audit/games/channels 全模块一致，非 audit 缺陷，沿用 🟪 边界)。红线全核：写侧两路径(显式同事务+中间件兜底 ctx 去重)/只增不改(编译期无 Update-Delete)/递归脱敏 masked 不解密/读 API(列表·详情·facets-404·audit.read 403·统一包络·字符串 id)/env 不取前端·sync.execute=production 机制就绪/schema 迁 platform。遗留 P3-4(连库 harness DSN/HTTP e2e 待 CI)、P4-5(历史模块同事务回滚)非阻断。",
+  "reverify_by": "🟪 测试专家 (2026-06-30, round 2)",
+  "remediation_by": "🟧 高级全栈工程师 (2026-06-30)",
+  "remediation_status": {
+    "P0-1": "fixed (migration 000008 schema move; repo SQL 保持未限定，靠 search_path 命中 platform)",
+    "P1-2": "fixed (000007→000008/000009 重排；最终全局唯一序号由集成 Agent across-branch 复核)",
+    "P2-3": "fixed (注册 /audit-logs/facets → 404 NOT_FOUND，scenario 期望 404 不变，前端 audit.ts 无需改)",
+    "P3-4": "deferred (留待 🟪/集成：harness 注入 POSTGRES_DSN)",
+    "P4-5": "deferred (本期不扩大改动，仅记录待办)"
+  },
+  "reverify_round2": {
+    "P0-1": "verified_fixed (连库事务内：search_path=sandbox,platform 下未限定 SELECT/INSERT 命中 platform.audit_logs，relation 不存在不再复现；ROLLBACK 非破坏)",
+    "P1-2": "verified_fixed (000007 已删；000008 迁表 + 000009 索引显式 platform.audit_logs，迁表后 6+PK 索引落 platform)",
+    "P2-3": "verified_fixed (router 在 /{id} 前注册 /audit-logs/facets→h.Facets 返 404 NOT_FOUND；前端回退一致)",
+    "P3-4": "open_nonblocking (连库 harness 仍未注入 DSN；建议 CI 收口)",
+    "P4-5": "open_nonblocking (历史模块显式审计同事务回滚，已知遗留)"
+  },
+  "backend_tests": [
+    "services/admin-api/internal/app/audit/service_test.go",
+    "services/admin-api/internal/infra/persistence/postgres/audit_repository_test.go",
+    "services/admin-api/internal/transport/http/middleware/middleware_test.go",
+    "services/admin-api/internal/transport/http/audit/handler_test.go",
+    "tests/backend/scenarios/audit.yaml",
+    "tests/fixtures/common/audit.sql"
+  ],
+  "open_issues": [
+    "[RESOLVED P0-1] audit_logs 已由新增迁移 000008 迁入 platform schema；运行期 search_path=<env>,platform 命中表（事务内非破坏性验证 SELECT/INSERT 通过）。仓储 SQL 保持未限定表名（与 admin_* 平台表同约定，pool.go 注释）",
+    "[RESOLVED P1-2] 迁移号 000007 重排为 000008(schema move)+000009(indexes)；最终全局唯一序号由集成 Agent across-branch 复核",
+    "[RESOLVED P2-3] 注册 GET /audit-logs/facets → 404 NOT_FOUND（可选未实现），不再落 /{id} 返 400；scenario facets_not_implemented 期望 404 保持一致，前端 audit.ts catch 回退静态字典不变；get_by_id_invalid_id(abc→400) 不受影响",
+    "P3-4[信息/待 🟪] 连库 scenario harness 未注入 POSTGRES_DSN(scenarios_test.go 仍降级 ready=false)，requiresDB 用例无法端到端执行",
+    "P4-5[信息/已知/本期不强求] 历史模块显式审计已冒泡 error，但未保证与业务写同事务回滚(spec §5.6 高危操作要求)；本期仅记录待办，不扩大改动"
+  ],
+  "verification": [
+    {
+      "command": "pnpm run build",
+      "working_directory": "apps/admin-web",
+      "result": "failed",
+      "note": "现有测试类型依赖缺失：@vue/test-utils（与本次改动无关）"
+    },
+    {
+      "command": "pnpm vite build",
+      "working_directory": "apps/admin-web",
+      "result": "passed",
+      "note": "产物包含 AuditView chunk，构建成功"
+    },
+    {
+      "command": "vue-tsc --noEmit",
+      "working_directory": "apps/admin-web",
+      "result": "passed_for_audit",
+      "note": "audit 相关文件无 TS 错误；失败项均为既有 test-utils 依赖"
+    },
+    {
+      "command": "go build ./...",
+      "working_directory": "services/admin-api",
+      "result": "passed"
+    },
+    {
+      "command": "go vet ./...",
+      "working_directory": "services/admin-api",
+      "result": "passed"
+    },
+    {
+      "command": "go build ./... (backend-cr)",
+      "working_directory": "services/admin-api",
+      "result": "passed",
+      "note": "后端 CR 2026-06-29 复核通过"
+    },
+    {
+      "command": "go test ./...",
+      "working_directory": "services/admin-api",
+      "result": "passed",
+      "note": "backend-test 2026-06-29：全绿无回归；新增 4 包 51 子用例全过"
+    },
+    {
+      "command": "go vet ./internal/app/audit/... ./internal/infra/persistence/postgres/... ./internal/transport/http/middleware/... ./internal/transport/http/audit/...",
+      "working_directory": "services/admin-api",
+      "result": "passed"
+    },
+    {
+      "command": "go test ./internal/testkit/scenario/... -run TestScenarioManifests/audit",
+      "working_directory": "services/admin-api",
+      "result": "passed",
+      "note": "audit.yaml 解析通过；3 live PASS（S2 401）/ 20 SKIP（requiresDB）"
+    },
+    {
+      "command": "go build ./... && go vet ./... && go test ./...",
+      "working_directory": "services/admin-api",
+      "result": "passed",
+      "note": "integration-test 2026-06-30：全绿；audit app/transport/middleware/repo 子用例 43 PASS / 0 FAIL"
+    },
+    {
+      "command": "pnpm vitest run",
+      "working_directory": "apps/admin-web",
+      "result": "passed",
+      "note": "integration-test 2026-06-30：全量 19 files / 108 tests passed；audit 聚焦 25 passed（沙箱内 .vite-temp EPERM，解除沙箱后通过）"
+    },
+    {
+      "command": "SET search_path=sandbox,platform; SELECT FROM audit_logs (console-test-pg:55432)",
+      "working_directory": "(real PG 取证, integration-test 2026-06-30)",
+      "result": "failed",
+      "note": "P0-1 修复前：relation \"audit_logs\" does not exist —— audit_logs 在 public 而运行期 search_path 不含 public，审计读写在真实 DB 失效"
+    },
+    {
+      "command": "go build ./... && go vet ./... && go test ./...",
+      "working_directory": "services/admin-api",
+      "result": "passed",
+      "note": "🟧 修复后 2026-06-30：全绿，无回归（audit app/transport/middleware/repo + testkit/scenario 全过）"
+    },
+    {
+      "command": "事务内执行 000008+000009 up SQL → SET search_path=sandbox,platform → SELECT/INSERT audit_logs → ROLLBACK (console-test-pg:55432)",
+      "working_directory": "(real PG 非破坏性验证, 🟧 2026-06-30)",
+      "result": "passed",
+      "note": "P0-1 修复验证：迁移 SQL 前向可执行；运行期 search_path=sandbox,platform 下 SELECT(rows=0)/INSERT audit_logs 均命中 platform.audit_logs；platform.audit_logs 索引=6；事务 ROLLBACK，DB 未改动。注：该测试库 schema_migrations.version=7 指向旧 000007，集成/🟪 连库 migrate up 前需 force 到 6 或在干净库(version=6)执行"
+    },
+    {
+      "command": "go build ./... && go vet ./... && go test ./... ; pnpm vitest run src/views/audit/__tests__/",
+      "working_directory": "services/admin-api + apps/admin-web",
+      "result": "passed",
+      "note": "round2 复测(🟪 2026-06-30)：后端全绿 0 FAIL(audit transport 12 PASS)；前端 audit 25 passed"
+    },
+    {
+      "command": "BEGIN; ALTER public.audit_logs SET SCHEMA platform; <000009 idx>; SET LOCAL search_path=sandbox,platform; SELECT/INSERT audit_logs + List JOIN; ROLLBACK (console-test-pg:55432)",
+      "working_directory": "(real PG 连库复测 round2 🟪, 非破坏性)",
+      "result": "passed",
+      "note": "round2 独立复测：基线先复现 P0(public 下 relation 不存在)→迁表 platform 后未限定 SELECT count(*) 解析到 platform(0 行无错)、仓储原样 INSERT 命中 platform RETURNING id、List(LEFT JOIN admin_users+WHERE env+ORDER created_at DESC,id DESC+LIMIT/OFFSET)正常返回、6+PK 索引落 platform；ROLLBACK 后共享库仍 public(未改版本/数据)。P0 不再复现。"
+    }
+  ]
+}
