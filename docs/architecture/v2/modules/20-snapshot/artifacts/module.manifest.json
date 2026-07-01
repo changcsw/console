@@ -1,0 +1,127 @@
+{
+  "module_id": "snapshot",
+  "lane": "runtime-surface",
+  "spec_path": "docs/architecture/v2/modules/20-snapshot/spec.compact.md",
+  "worktree": "/Users/csw/gitproject/console-snapshot",
+  "branch": "codex/snapshot",
+  "shared_surfaces_touched": [
+    "services/admin-api/internal/domain/snapshot",
+    "services/admin-api/internal/app/snapshot",
+    "services/admin-api/internal/infra/persistence/postgres/snapshot_store.go",
+    "services/admin-api/internal/infra/persistence/postgres/snapshot_repo.go",
+    "services/admin-api/internal/transport/http/snapshot",
+    "services/admin-api/internal/transport/httpserver/admin_wiring.go",
+    "apps/admin-web/src/views/games/detail/GameDetailView.vue",
+    "apps/admin-web/src/views/games/detail/SnapshotTab.vue",
+    "apps/admin-web/src/api/modules/snapshot.ts"
+  ],
+  "backend_routes": [
+    "POST /api/admin/games/{gameId}/config-snapshots/generate",
+    "GET /api/admin/games/{gameId}/config-snapshots",
+    "POST /api/admin/game-config-snapshots/{snapshotId}/publish",
+    "GET /api/admin/game-config-snapshots/{snapshotId}/download"
+  ],
+  "frontend_routes": [],
+  "frontend_views": [
+    "apps/admin-web/src/views/games/detail/GameDetailView.vue",
+    "apps/admin-web/src/views/games/detail/SnapshotTab.vue"
+  ],
+  "frontend_api_clients": [
+    "apps/admin-web/src/api/modules/snapshot.ts"
+  ],
+  "referenced_modules": [
+    "game",
+    "channel",
+    "account-auth",
+    "channel-login",
+    "feature-plugin",
+    "product",
+    "cashier-template",
+    "game-cashier",
+    "payment",
+    "common"
+  ],
+  "open_issues": [
+    "未在本地真实数据库执行 migrate up，仅完成 SQL 幂等实现和构建级验证（连库 21 例 + 跨栈 e2e 环境受限，随 PG CI 补跑）",
+    "downloadGameSnapshot 未复用 http.ts 401 续期/X-Environment（前端建议项，非阻断）",
+    "前端全量 Playwright 8 例失败(games7+product1)=基线预存/环境态失败，非 snapshot 引入（git stash 回退 GameDetailView 后同样复现）——移交 🟪测试专家/games·product 负责人排查"
+  ],
+  "verification": [
+    {
+      "name": "gofmt",
+      "result": "passed"
+    },
+    {
+      "name": "go build ./...",
+      "result": "passed"
+    },
+    {
+      "name": "go vet ./...",
+      "result": "passed"
+    },
+    {
+      "name": "go test ./internal/domain/snapshot/...",
+      "result": "passed"
+    },
+    {
+      "name": "vue-tsc --noEmit",
+      "result": "passed"
+    },
+    {
+      "name": "vite build",
+      "result": "passed"
+    },
+    {
+      "name": "frontend-cr",
+      "result": "passed",
+      "note": "2026-07-01 Composer 2.5"
+    },
+    {
+      "name": "backend-cr",
+      "result": "passed",
+      "note": "2026-07-01 Composer 2.5; fixed publish concurrent race error code"
+    },
+    {
+      "name": "backend-test",
+      "result": "passed",
+      "note": "2026-07-01 Codex 5.3; go test ./... exit0, 34 PASS / 0 FAIL / 21 SKIP(连库维度待 PG CI); 无疑似实现缺陷"
+    },
+    {
+      "name": "frontend-test",
+      "result": "passed",
+      "note": "2026-07-01 Codex 5.3; vitest 22 + Playwright 7 = 29 PASS / 0 FAIL; 2 视觉基线通过; 无疑似实现缺陷"
+    },
+    {
+      "name": "integration-test",
+      "result": "passed",
+      "note": "2026-07-01 Opus 4.8 High; 契约对账0漂移; 后端 go test ./... 全绿 + 统一回归入口(WITH_DB=0) PASS; 红线代码级+单测全过; 下游(sync/payment/feature-plugin)契约一致; 连库21例(S1/S3-S10)SKIP=环境受限(无PG/docker); 无阻断问题(无需🟧); 可进入功能验收"
+    },
+    {
+      "name": "feature-acceptance",
+      "result": "passed",
+      "note": "2026-07-01 Composer 2.5; 验收清单 31/31 PASS(四接口闭环/合并规则CN·GLOBAL·整实例覆盖I3/筛选I2/scope/确定性I4/状态单调I5/密文I6/权限403·置灰/错误码四码/下游契约/红线/操作主线); 后端 gofmt·build·vet·test PASS + snapshot 域应用76子测试; 前端 vue-tsc·vite build PASS + snapshot vitest22·e2e7=29 PASS; 统一回归 run.sh WITH_DB=0 后端 PASS; 前端全量 Playwright 8例失败(games7+product1) 经基线stash复现证明为预存/环境态非snapshot引入(移交🟪/games·product负责人); 连库21例+跨栈e2e环境受限随PG CI; 结论:通过"
+    }
+  ],
+  "test_artifacts": {
+    "unit_domain": [
+      "services/admin-api/internal/domain/snapshot/merge_matrix_test.go",
+      "services/admin-api/internal/domain/snapshot/canonical_hash_matrix_test.go"
+    ],
+    "unit_app": [
+      "services/admin-api/internal/app/snapshot/service_test.go"
+    ],
+    "scenario_manifest": "tests/backend/scenarios/snapshot.yaml",
+    "fixtures": "tests/fixtures/sandbox/snapshot.sql",
+    "db_dimensions_pending_ci": ["S1", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10"],
+    "frontend_unit": [
+      "apps/admin-web/src/views/games/detail/__tests__/SnapshotTab.spec.ts"
+    ],
+    "frontend_e2e": [
+      "tests/frontend/e2e/snapshot.spec.ts"
+    ],
+    "frontend_visual_baseline": [
+      "tests/frontend/visual-baseline/snapshot.spec.ts-snapshots/snapshot-tab-chromium-darwin.png",
+      "tests/frontend/visual-baseline/snapshot.spec.ts-snapshots/snapshot-tab-readonly-chromium-darwin.png"
+    ]
+  }
+}

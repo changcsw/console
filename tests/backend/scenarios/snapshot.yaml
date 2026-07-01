@@ -1,0 +1,251 @@
+# 模块 snapshot（配置快照与运行时配置合并）接口场景矩阵 manifest
+# 维度定义见 docs/architecture/v2/03-testing.md §4（S1-S10）。
+# 接口契约见 docs/architecture/v2/modules/20-snapshot/spec.compact.md。
+#
+# 运行约定：
+# - requiresDB=false：进程内 scenario harness 直接执行（本模块典型是 S2 鉴权 401）。
+# - requiresDB=true：声明连库场景（PG CI 执行，设 SCENARIO_WITH_DB=1）；
+#   领域合并/确定性/状态机/脱敏行为已由 domain 单测 + app service 单测（fake repo）等价覆盖。
+#
+# 4 接口 × 维度对照（N/A 见各 case note）：
+#   POST .../config-snapshots/generate : S1 S2 S3 S5 S6 S7 (S4/S8/S9/S10 N/A)
+#   GET  .../config-snapshots          : S1 S2 S3 S6 S9   (S4/S5/S7/S8/S10 N/A)
+#   POST .../{id}/publish              : S1 S2 S3 S4 S5 S6 S7 S10 (S8/S9 N/A)
+#   GET  .../{id}/download             : S1 S2 S3 S4 S6 S8 (S5/S7/S9/S10 N/A)
+module: snapshot
+cases:
+  # ═════════════════ POST /games/{gameId}/config-snapshots/generate（写 / snapshot.generate）
+  - name: generate_requires_auth
+    dimension: S2
+    requiresDB: false
+    request: { method: POST, path: /api/admin/games/100001/config-snapshots/generate }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: generate_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: game_reader }
+    note: "缺 snapshot.generate 权限码"
+    request: { method: POST, path: /api/admin/games/100001/config-snapshots/generate }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: generate_success_creates_draft
+    dimension: S1
+    requiresDB: true
+    auth: { role: snapshot_admin }
+    fixture: sandbox/snapshot/base
+    note: "拉当前 env 有效数据 → BuildRuntimeConfig → 落 draft，返回 configVersion/fileHash"
+    request: { method: POST, path: /api/admin/games/100001/config-snapshots/generate }
+    expect:
+      status: 201
+      jsonContains: { data.status: draft }
+  - name: generate_schema_isolation
+    dimension: S6
+    requiresDB: true
+    auth: { role: snapshot_admin }
+    fixture: sandbox/snapshot/base
+    note: "快照落当前 search_path 对应 schema；不接受前端指定 env、不跨 schema 写"
+    request: { method: POST, path: /api/admin/games/100001/config-snapshots/generate }
+    expect:
+      status: 201
+  - name: generate_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: snapshot_admin }
+    fixture: sandbox/snapshot/base
+    note: "写一条 audit_logs action=snapshot.generate（detail 脱敏）"
+    request: { method: POST, path: /api/admin/games/100001/config-snapshots/generate }
+    expect:
+      status: 201
+  - name: generate_duplicate_version_conflict
+    dimension: S5
+    requiresDB: true
+    auth: { role: snapshot_admin }
+    fixture: sandbox/snapshot/base
+    note: "同源同秒重复生成命中 uq(game_id_ref, config_version) → CONFLICT（确定性 hash 的副作用）"
+    request: { method: POST, path: /api/admin/games/100001/config-snapshots/generate }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  # S4 N/A：gameId 为路径参数恒非空，且无请求体字段校验（非法/不存在 game → NOT_FOUND，非 400）。
+  # S8 N/A：generate 响应仅含 id/version/hash/status，无 secret 字段。
+  # S9 N/A：非列表接口。
+  # S10 N/A：单业务表 INSERT + 最佳努力审计写入，无多表事务。
+
+  # ═════════════════ GET /games/{gameId}/config-snapshots（读 / game.read / 分页 / generated_at desc）
+  - name: list_requires_auth
+    dimension: S2
+    requiresDB: false
+    request: { method: GET, path: /api/admin/games/100001/config-snapshots }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    note: "缺 game.read 权限码"
+    request: { method: GET, path: /api/admin/games/100001/config-snapshots }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: game_reader }
+    fixture: sandbox/snapshot/base
+    request: { method: GET, path: "/api/admin/games/100001/config-snapshots?page=1&pageSize=20" }
+    expect:
+      status: 200
+  - name: list_pagination_and_sort_desc
+    dimension: S9
+    requiresDB: true
+    auth: { role: game_reader }
+    fixture: sandbox/snapshot/base
+    note: "page/pageSize/total 正确，pageSize 上限 100，generated_at 降序；非法分页按缺省纠正"
+    request: { method: GET, path: "/api/admin/games/100001/config-snapshots?page=1&pageSize=99999" }
+    expect:
+      status: 200
+  - name: list_schema_isolation
+    dimension: S6
+    requiresDB: true
+    auth: { role: game_reader }
+    fixture: sandbox/snapshot/base
+    note: "仅读当前 env schema 的快照，不跨 schema"
+    request: { method: GET, path: /api/admin/games/100001/config-snapshots }
+    expect:
+      status: 200
+  # S4 N/A：非法分页参数（page/pageSize<=0 或超限）按缺省/上限纠正，不返回 400。
+  # S5/S7/S8/S10 N/A：只读、无状态流转、无 secret 字段、无写事务。
+
+  # ═════════════════ POST /game-config-snapshots/{snapshotId}/publish（写 / snapshot.publish / 事务）
+  - name: publish_requires_auth
+    dimension: S2
+    requiresDB: false
+    request: { method: POST, path: /api/admin/game-config-snapshots/12/publish }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: publish_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: game_reader }
+    note: "缺 snapshot.publish 权限码"
+    request: { method: POST, path: /api/admin/game-config-snapshots/12/publish }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: publish_invalid_id_validation
+    dimension: S4
+    requiresDB: true
+    auth: { role: snapshot_admin }
+    note: "snapshotId 非数字/<=0 → VALIDATION_FAILED"
+    request: { method: POST, path: /api/admin/game-config-snapshots/abc/publish }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: publish_success_draft_to_published
+    dimension: S1
+    requiresDB: true
+    auth: { role: snapshot_admin }
+    fixture: sandbox/snapshot/draft
+    note: "draft → published + published_at=NOW()（I5 状态单调）"
+    request: { method: POST, path: /api/admin/game-config-snapshots/12/publish }
+    expect:
+      status: 200
+      jsonContains: { data.status: published }
+  - name: publish_non_draft_conflict
+    dimension: S5
+    requiresDB: true
+    auth: { role: snapshot_admin }
+    fixture: sandbox/snapshot/published
+    note: "发布非 draft（已 published）→ VERSION_STATE_INVALID（I5 不可回退/重复发布）"
+    request: { method: POST, path: /api/admin/game-config-snapshots/13/publish }
+    expect:
+      status: 409
+      jsonContains: { error.code: VERSION_STATE_INVALID }
+  - name: publish_schema_isolation
+    dimension: S6
+    requiresDB: true
+    auth: { role: snapshot_admin }
+    fixture: sandbox/snapshot/draft
+    note: "发布写当前 env schema，不跨 schema"
+    request: { method: POST, path: /api/admin/game-config-snapshots/12/publish }
+    expect:
+      status: 200
+  - name: publish_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: snapshot_admin }
+    fixture: sandbox/snapshot/draft
+    note: "写一条 audit_logs action=snapshot.publish"
+    request: { method: POST, path: /api/admin/game-config-snapshots/12/publish }
+    expect:
+      status: 200
+  - name: publish_transaction_rollback
+    dimension: S10
+    requiresDB: true
+    auth: { role: snapshot_admin }
+    fixture: sandbox/snapshot/draft
+    note: "InTx 内 Get+Publish；并发/中途失败整体回滚，状态不残留半更新（UPDATE 0 行→VERSION_STATE_INVALID）"
+    request: { method: POST, path: /api/admin/game-config-snapshots/12/publish }
+    expect:
+      status: 200
+  # S8/S9 N/A：响应无 secret 字段、非列表接口。
+
+  # ═════════════════ GET /game-config-snapshots/{snapshotId}/download（读 / game.read / 脱敏）
+  - name: download_requires_auth
+    dimension: S2
+    requiresDB: false
+    request: { method: GET, path: /api/admin/game-config-snapshots/12/download }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: download_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    note: "缺 game.read 权限码"
+    request: { method: GET, path: /api/admin/game-config-snapshots/12/download }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: download_invalid_id_validation
+    dimension: S4
+    requiresDB: true
+    auth: { role: game_reader }
+    note: "snapshotId 非数字/<=0 → VALIDATION_FAILED"
+    request: { method: GET, path: /api/admin/game-config-snapshots/abc/download }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: download_success_with_filename
+    dimension: S1
+    requiresDB: true
+    auth: { role: game_reader }
+    fixture: sandbox/snapshot/base
+    note: "返回 config_json（canonical），Content-Disposition attachment; filename=<file_name>"
+    request: { method: GET, path: /api/admin/game-config-snapshots/12/download }
+    expect:
+      status: 200
+  - name: download_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: game_reader }
+    fixture: sandbox/snapshot/secret
+    note: "config_json 内 secret 位恒为占位/掩码（I6），绝不回明文"
+    request: { method: GET, path: /api/admin/game-config-snapshots/12/download }
+    expect:
+      status: 200
+  - name: download_schema_isolation
+    dimension: S6
+    requiresDB: true
+    auth: { role: game_reader }
+    fixture: sandbox/snapshot/base
+    note: "仅读当前 env schema 的快照"
+    request: { method: GET, path: /api/admin/game-config-snapshots/12/download }
+    expect:
+      status: 200
+  # S5/S7/S9/S10 N/A：无状态流转、只读不审计、非列表、无写事务。

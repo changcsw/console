@@ -19,6 +19,7 @@ import (
 	paymentapp "github.com/csw/console/services/admin-api/internal/app/payment"
 	pluginapp "github.com/csw/console/services/admin-api/internal/app/plugin"
 	productapp "github.com/csw/console/services/admin-api/internal/app/product"
+	snapshotapp "github.com/csw/console/services/admin-api/internal/app/snapshot"
 	domainauth "github.com/csw/console/services/admin-api/internal/domain/auth"
 	"github.com/csw/console/services/admin-api/internal/domain/common"
 	"github.com/csw/console/services/admin-api/internal/infra/config"
@@ -33,6 +34,7 @@ import (
 	channelshttp "github.com/csw/console/services/admin-api/internal/transport/http/channels"
 	gameshttp "github.com/csw/console/services/admin-api/internal/transport/http/games"
 	paymenthttp "github.com/csw/console/services/admin-api/internal/transport/http/payment"
+	snapshothttp "github.com/csw/console/services/admin-api/internal/transport/http/snapshot"
 )
 
 // feishuAdapter 把 infra/feishu.Client 适配为 app 层 FeishuClient 端口。
@@ -64,6 +66,7 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 		channelshttp.RegisterRoutes(r, channelshttp.NewHandler(nil, env), iss, env, logger, false, nil)
 		cashierhttp.RegisterRoutes(r, cashierhttp.NewHandler(nil), iss, env, logger, false, nil)
 		paymenthttp.RegisterRoutes(r, paymenthttp.NewHandler(nil), iss, env, logger, false, nil)
+		snapshothttp.RegisterRoutes(r, snapshothttp.NewHandler(nil), iss, env, logger, false, nil)
 		audithttp.RegisterRoutes(r, audithttp.NewHandler(nil), iss, env, logger, false, nil)
 		return r
 	}
@@ -137,6 +140,8 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 
 	paymentSvc := paymentapp.NewService(postgres.NewPaymentStore(pool), cipher, auditSink, time.Now)
 	paymenthttp.RegisterRoutes(r, paymenthttp.NewHandler(paymentSvc), issuer, env, logger, true, auditSvc)
+	snapshotSvc := snapshotapp.NewService(postgres.NewSnapshotStore(pool), paymentSvc, auditSink, time.Now)
+	snapshothttp.RegisterRoutes(r, snapshothttp.NewHandler(snapshotSvc), issuer, env, logger, true, auditSvc)
 
 	audithttp.RegisterRoutes(r, audithttp.NewHandler(auditSvc), issuer, env, logger, true, auditSvc)
 

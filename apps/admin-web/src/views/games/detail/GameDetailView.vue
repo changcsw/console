@@ -52,6 +52,9 @@
         <el-tab-pane label="支付路由" name="payment-routes">
           <PaymentRoutesTab :game-id="game.gameId" />
         </el-tab-pane>
+        <el-tab-pane label="配置快照" name="snapshot">
+          <SnapshotTab :game-id="game.gameId" />
+        </el-tab-pane>
         <el-tab-pane v-for="ph in downstreamTabs" :key="ph.name" :label="ph.label" :name="ph.name" lazy>
           <div class="placeholder">
             <PageStatusTag tone="warning" label="下游模块" />
@@ -81,6 +84,7 @@ import ProductTab from "./ProductTab.vue";
 import IapConfigTab from "./IapConfigTab.vue";
 import GameCashierTab from "@/views/cashier/game/GameCashierTab.vue";
 import PaymentRoutesTab from "./PaymentRoutesTab.vue";
+import SnapshotTab from "./SnapshotTab.vue";
 import { statusMeta } from "../constants";
 
 const route = useRoute();
@@ -96,7 +100,6 @@ const downstreamTabs = [
   { name: "channels", label: "渠道", hint: "渠道实例（GameMarketChannel）由 channel 模块实现。" },
   { name: "packages", label: "渠道包", hint: "渠道包配置由 channel 模块实现。" },
   { name: "channel-login", label: "渠道登录", hint: "渠道登录配置由 channel-login 模块实现。" },
-  { name: "snapshot", label: "配置快照", hint: "配置快照由 snapshot 模块实现。" },
   { name: "sync", label: "同步记录", hint: "sandbox→production 同步由 sync 模块实现。" }
 ];
 
