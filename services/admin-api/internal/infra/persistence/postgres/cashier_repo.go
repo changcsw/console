@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -179,11 +180,11 @@ WHERE id=$1`, versionID, at)
 	return mapErr(err)
 }
 
-func (r *CashierRepo) PublishVersion(ctx context.Context, versionID int64, at time.Time) error {
+func (r *CashierRepo) PublishVersion(ctx context.Context, versionID int64, at time.Time, checksum string) error {
 	_, err := r.db.Exec(ctx, `
 UPDATE platform.cashier_price_template_versions
-SET status='published', published_at=$2, updated_at=$2
-WHERE id=$1`, versionID, at)
+SET status='published', published_at=$2, updated_at=$2, checksum=$3
+WHERE id=$1`, versionID, at, checksum)
 	return mapErr(err)
 }
 
@@ -345,4 +346,91 @@ UPDATE platform.cashier_fx_sync_runs
 SET status=$2, reviewed_by=CASE WHEN $3=0 THEN NULL ELSE $3 END, reviewed_at=$4, review_note=$5, updated_at=$4
 WHERE id=$1`, runID, string(status), reviewer, reviewedAt, note)
 	return mapErr(err)
+}
+
+func (r *CashierRepo) ResolveGameRowID(ctx context.Context, gameID string) (int64, error) {
+	var id int64
+	if err := r.db.QueryRow(ctx, `SELECT id FROM games WHERE game_id=$1`, gameID).Scan(&id); err != nil {
+		return 0, mapErr(err)
+	}
+	return id, nil
+}
+
+func (r *CashierRepo) GetGameCashierProfile(ctx context.Context, gameIDRef int64) (domaincashier.GameCashierProfile, error) {
+	var out domaincashier.GameCashierProfile
+	err := r.db.QueryRow(ctx, `
+SELECT id, game_id_ref, template_id_ref, applied_template_version_id, snapshot_checksum, applied_at, created_at, updated_at
+FROM game_cashier_profiles
+WHERE game_id_ref=$1`, gameIDRef).Scan(
+		&out.ID, &out.GameIDRef, &out.TemplateIDRef, &out.AppliedTemplateVersionID,
+		&out.SnapshotChecksum, &out.AppliedAt, &out.CreatedAt, &out.UpdatedAt,
+	)
+	return out, mapErr(err)
+}
+
+func (r *CashierRepo) UpsertGameCashierProfile(ctx context.Context, profile domaincashier.GameCashierProfile) (domaincashier.GameCashierProfile, error) {
+	var out domaincashier.GameCashierProfile
+	err := r.db.QueryRow(ctx, `
+INSERT INTO game_cashier_profiles (game_id_ref, template_id_ref, applied_template_version_id, snapshot_checksum, applied_at)
+VALUES ($1,$2,$3,$4,$5)
+ON CONFLICT (game_id_ref) DO UPDATE
+SET template_id_ref=EXCLUDED.template_id_ref,
+    applied_template_version_id=EXCLUDED.applied_template_version_id,
+    snapshot_checksum=EXCLUDED.snapshot_checksum,
+    applied_at=EXCLUDED.applied_at,
+    updated_at=NOW()
+RETURNING id, game_id_ref, template_id_ref, applied_template_version_id, snapshot_checksum, applied_at, created_at, updated_at`,
+		profile.GameIDRef, profile.TemplateIDRef, profile.AppliedTemplateVersionID, profile.SnapshotChecksum, profile.AppliedAt,
+	).Scan(
+		&out.ID, &out.GameIDRef, &out.TemplateIDRef, &out.AppliedTemplateVersionID,
+		&out.SnapshotChecksum, &out.AppliedAt, &out.CreatedAt, &out.UpdatedAt,
+	)
+	return out, mapErr(err)
+}
+
+func (r *CashierRepo) ListGameCashierPriceOverrides(ctx context.Context, gameIDRef int64) ([]domaincashier.GameCashierPriceOverride, error) {
+	rows, err := r.db.Query(ctx, `
+SELECT id, game_id_ref, country_code, region_code, currency, price_id,
+       pre_tax_amount_minor, tax_rate::text, tax_amount_minor, after_tax_amount_minor,
+       reason, effective_at, created_at, updated_at
+FROM game_cashier_price_overrides
+WHERE game_id_ref=$1
+ORDER BY country_code, region_code, currency, price_id`, gameIDRef)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+
+	out := make([]domaincashier.GameCashierPriceOverride, 0)
+	for rows.Next() {
+		var item domaincashier.GameCashierPriceOverride
+		if err := rows.Scan(
+			&item.ID, &item.GameIDRef, &item.CountryCode, &item.RegionCode, &item.Currency, &item.PriceID,
+			&item.PreTaxAmountMinor, &item.TaxRate, &item.TaxAmountMinor, &item.AfterTaxAmountMinor,
+			&item.Reason, &item.EffectiveAt, &item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
+			return nil, mapErr(err)
+		}
+		out = append(out, item)
+	}
+	return out, mapErr(rows.Err())
+}
+
+func (r *CashierRepo) ReplaceGameCashierPriceOverrides(ctx context.Context, gameIDRef int64, rows []domaincashier.GameCashierPriceOverride) error {
+	if _, err := r.db.Exec(ctx, `DELETE FROM game_cashier_price_overrides WHERE game_id_ref=$1`, gameIDRef); err != nil {
+		return mapErr(err)
+	}
+	for idx, row := range rows {
+		_, err := r.db.Exec(ctx, `
+INSERT INTO game_cashier_price_overrides
+  (game_id_ref, country_code, region_code, currency, price_id, pre_tax_amount_minor, tax_rate, tax_amount_minor, after_tax_amount_minor, reason, effective_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			gameIDRef, row.CountryCode, row.RegionCode, row.Currency, row.PriceID, row.PreTaxAmountMinor,
+			row.TaxRate, row.TaxAmountMinor, row.AfterTaxAmountMinor, row.Reason, row.EffectiveAt,
+		)
+		if err != nil {
+			return fmt.Errorf("insert override[%d]: %w", idx, mapErr(err))
+		}
+	}
+	return nil
 }

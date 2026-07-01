@@ -1,4 +1,4 @@
-import { request } from "@/api/http";
+import { ApiError, request } from "@/api/http";
 
 export type VersionStatus = "draft" | "published" | "archived";
 export type FxSyncMode = "manual_confirm" | "auto_apply";
@@ -117,6 +117,37 @@ export interface ApproveRunPayload {
   reviewNote?: string;
 }
 
+export interface GameCashierProfile {
+  templateId: string;
+  appliedTemplateVersion: string;
+  snapshotChecksum: string;
+  appliedAt: string;
+}
+
+export interface BindGameCashierProfilePayload {
+  templateId: string;
+  templateVersion: string;
+}
+
+export interface GameCashierPriceOverride {
+  countryCode: string;
+  regionCode: string;
+  currency: string;
+  priceId: string;
+  preTaxAmountMinor: number;
+  // taxRate 为 DECIMAL(8,6)，跨栈统一以字符串承载（对齐后端 GET 响应 tax_rate::text
+  // 与 cashier-template PutPriceRow 既有约定），避免 JSON number 与后端 string DTO 漂移。
+  taxRate: string;
+  taxAmountMinor: number;
+  afterTaxAmountMinor: number;
+  reason: string;
+  effectiveAt: string;
+}
+
+export interface PutGameCashierPriceOverridesPayload {
+  items: GameCashierPriceOverride[];
+}
+
 function buildQuery(params: Record<string, unknown>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -170,7 +201,7 @@ export async function getCashierTemplate(templateId: string): Promise<CashierTem
   const versionSource = raw.versions ?? (raw as CashierTemplateDetail).versions ?? [];
   const normalizedVersions = versionSource.map((item) => {
     if (typeof item === "object" && item !== null && ("version" in item || "Version" in item)) {
-      return normalizeVersion(item as Record<string, unknown>);
+      return normalizeVersion(item as unknown as Record<string, unknown>);
     }
     return item as CashierTemplateVersion;
   });
@@ -234,4 +265,58 @@ export function approveFxSyncRun(runId: number, payload: ApproveRunPayload = {})
     method: "POST",
     body: JSON.stringify(payload)
   });
+}
+
+type RawGameCashierProfile = Partial<GameCashierProfile> & {
+  templateVersion?: string;
+  appliedTemplateVersionId?: string;
+};
+
+function normalizeGameCashierProfile(raw: RawGameCashierProfile): GameCashierProfile {
+  return {
+    templateId: String(raw.templateId ?? ""),
+    appliedTemplateVersion: String(raw.appliedTemplateVersion ?? raw.templateVersion ?? raw.appliedTemplateVersionId ?? ""),
+    snapshotChecksum: String(raw.snapshotChecksum ?? ""),
+    appliedAt: String(raw.appliedAt ?? "")
+  };
+}
+
+export async function getGameCashierProfile(gameId: string): Promise<GameCashierProfile | null> {
+  try {
+    const raw = await request<RawGameCashierProfile | null>(`/api/admin/games/${enc(gameId)}/cashier/profile`);
+    if (!raw || !raw.templateId) {
+      return null;
+    }
+    return normalizeGameCashierProfile(raw);
+  } catch (err) {
+    // 未绑定模板时后端返回 NOT_FOUND；游戏详情 Tab 应展示空态而非整页错误。
+    if (err instanceof ApiError && err.code === "NOT_FOUND") {
+      return null;
+    }
+    throw err;
+  }
+}
+
+export async function putGameCashierProfile(gameId: string, payload: BindGameCashierProfilePayload): Promise<GameCashierProfile> {
+  const raw = await request<RawGameCashierProfile>(`/api/admin/games/${enc(gameId)}/cashier/profile`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+  return normalizeGameCashierProfile(raw);
+}
+
+export async function getGameCashierPriceOverrides(gameId: string): Promise<{ items: GameCashierPriceOverride[] }> {
+  const res = await request<{ items?: GameCashierPriceOverride[] }>(`/api/admin/games/${enc(gameId)}/cashier/price-overrides`);
+  return { items: res.items ?? [] };
+}
+
+export async function putGameCashierPriceOverrides(
+  gameId: string,
+  payload: PutGameCashierPriceOverridesPayload
+): Promise<{ items: GameCashierPriceOverride[] }> {
+  const res = await request<{ items?: GameCashierPriceOverride[] }>(`/api/admin/games/${enc(gameId)}/cashier/price-overrides`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+  return { items: res.items ?? [] };
 }

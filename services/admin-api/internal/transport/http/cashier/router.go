@@ -28,5 +28,10 @@ func RegisterRoutes(r chi.Router, h *Handler, issuer adminapp.TokenIssuer, env c
 
 		gr.With(mw.RequirePerm("cashier.write")).Post("/cashier/templates/{templateId}/fx-sync/runs", h.CreateFXRun)
 		gr.With(mw.RequirePerm("fx.approve")).Post("/cashier/fx-sync-runs/{runId}/approve", h.ApproveFXRun)
+
+		gr.With(mw.RequirePerm("cashier.read")).Get("/games/{gameId}/cashier/profile", h.GetGameProfile)
+		gr.With(mw.RequirePerm("cashier.write")).Put("/games/{gameId}/cashier/profile", h.BindGameProfile)
+		gr.With(mw.RequirePerm("cashier.read")).Get("/games/{gameId}/cashier/price-overrides", h.ListGamePriceOverrides)
+		gr.With(mw.RequirePerm("cashier.write")).Put("/games/{gameId}/cashier/price-overrides", h.SaveGamePriceOverrides)
 	})
 }

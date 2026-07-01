@@ -30,6 +30,12 @@ type memState struct {
 
 	specs map[string]common.CurrencySpec
 
+	games          map[string]int64
+	gameProfiles   map[int64]*domaincashier.GameCashierProfile
+	gameOverrides  map[int64][]domaincashier.GameCashierPriceOverride
+	seqGameProfile int64
+	seqGameOv      int64
+
 	// forcePublishErr 故障注入：非 nil 时 PublishVersion 返回该错误，
 	// 用于验证发布/审核同事务在第二步失败时整体回滚（S10）。
 	forcePublishErr error
@@ -37,12 +43,15 @@ type memState struct {
 
 func newMemState() *memState {
 	return &memState{
-		templates: map[string]*domaincashier.PriceTemplate{},
-		tplIDToID: map[int64]string{},
-		versions:  map[int64]*domaincashier.TemplateVersionRecord{},
-		rows:      map[int64]*domaincashier.PriceRow{},
-		runs:      map[int64]*domaincashier.FXSyncRun{},
-		specs:     map[string]common.CurrencySpec{},
+		templates:     map[string]*domaincashier.PriceTemplate{},
+		tplIDToID:     map[int64]string{},
+		versions:      map[int64]*domaincashier.TemplateVersionRecord{},
+		rows:          map[int64]*domaincashier.PriceRow{},
+		runs:          map[int64]*domaincashier.FXSyncRun{},
+		specs:         map[string]common.CurrencySpec{},
+		games:         map[string]int64{"100001": 1},
+		gameProfiles:  map[int64]*domaincashier.GameCashierProfile{},
+		gameOverrides: map[int64][]domaincashier.GameCashierPriceOverride{},
 	}
 }
 
@@ -71,7 +80,20 @@ func (s *memState) clone() *memState {
 	for k, v := range s.specs {
 		c.specs[k] = v
 	}
+	for k, v := range s.games {
+		c.games[k] = v
+	}
+	for k, v := range s.gameProfiles {
+		cp := *v
+		c.gameProfiles[k] = &cp
+	}
+	for k, rows := range s.gameOverrides {
+		cp := make([]domaincashier.GameCashierPriceOverride, len(rows))
+		copy(cp, rows)
+		c.gameOverrides[k] = cp
+	}
 	c.seqTpl, c.seqVer, c.seqRow, c.seqRun = s.seqTpl, s.seqVer, s.seqRow, s.seqRun
+	c.seqGameProfile, c.seqGameOv = s.seqGameProfile, s.seqGameOv
 	c.forcePublishErr = s.forcePublishErr
 	return c
 }
@@ -235,7 +257,7 @@ func (r *memRepo) ArchiveVersion(_ context.Context, versionID int64, at time.Tim
 	return nil
 }
 
-func (r *memRepo) PublishVersion(_ context.Context, versionID int64, at time.Time) error {
+func (r *memRepo) PublishVersion(_ context.Context, versionID int64, at time.Time, checksum string) error {
 	if r.st.forcePublishErr != nil {
 		return r.st.forcePublishErr
 	}
@@ -246,6 +268,7 @@ func (r *memRepo) PublishVersion(_ context.Context, versionID int64, at time.Tim
 	v.Status = domaincashier.StatusPublished
 	v.PublishedAt = &at
 	v.UpdatedAt = at
+	v.Checksum = checksum
 	return nil
 }
 
@@ -349,6 +372,63 @@ func (r *memRepo) UpdateFXSyncRunReview(_ context.Context, runID int64, status d
 	run.ReviewedAt = &reviewedAt
 	run.ReviewNote = note
 	run.UpdatedAt = reviewedAt
+	return nil
+}
+
+func (r *memRepo) ResolveGameRowID(_ context.Context, gameID string) (int64, error) {
+	id, ok := r.st.games[gameID]
+	if !ok {
+		return 0, adminapp.ErrNotFound
+	}
+	return id, nil
+}
+
+func (r *memRepo) GetGameCashierProfile(_ context.Context, gameIDRef int64) (domaincashier.GameCashierProfile, error) {
+	p, ok := r.st.gameProfiles[gameIDRef]
+	if !ok {
+		return domaincashier.GameCashierProfile{}, adminapp.ErrNotFound
+	}
+	return *p, nil
+}
+
+func (r *memRepo) UpsertGameCashierProfile(_ context.Context, profile domaincashier.GameCashierProfile) (domaincashier.GameCashierProfile, error) {
+	now := time.Now()
+	if old, ok := r.st.gameProfiles[profile.GameIDRef]; ok {
+		old.TemplateIDRef = profile.TemplateIDRef
+		old.AppliedTemplateVersionID = profile.AppliedTemplateVersionID
+		old.SnapshotChecksum = profile.SnapshotChecksum
+		old.AppliedAt = profile.AppliedAt
+		old.UpdatedAt = now
+		return *old, nil
+	}
+	r.st.seqGameProfile++
+	profile.ID = r.st.seqGameProfile
+	profile.CreatedAt = now
+	profile.UpdatedAt = now
+	cp := profile
+	r.st.gameProfiles[profile.GameIDRef] = &cp
+	return cp, nil
+}
+
+func (r *memRepo) ListGameCashierPriceOverrides(_ context.Context, gameIDRef int64) ([]domaincashier.GameCashierPriceOverride, error) {
+	rows := r.st.gameOverrides[gameIDRef]
+	out := make([]domaincashier.GameCashierPriceOverride, len(rows))
+	copy(out, rows)
+	return out, nil
+}
+
+func (r *memRepo) ReplaceGameCashierPriceOverrides(_ context.Context, gameIDRef int64, rows []domaincashier.GameCashierPriceOverride) error {
+	out := make([]domaincashier.GameCashierPriceOverride, 0, len(rows))
+	now := time.Now()
+	for _, row := range rows {
+		r.st.seqGameOv++
+		row.ID = r.st.seqGameOv
+		row.GameIDRef = gameIDRef
+		row.CreatedAt = now
+		row.UpdatedAt = now
+		out = append(out, row)
+	}
+	r.st.gameOverrides[gameIDRef] = out
 	return nil
 }
 

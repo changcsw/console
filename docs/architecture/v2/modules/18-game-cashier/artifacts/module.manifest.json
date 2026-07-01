@@ -1,0 +1,226 @@
+{
+  "module_id": "game-cashier",
+  "lane": "cashier-surface",
+  "spec_path": "docs/architecture/v2/modules/18-game-cashier/spec.compact.md",
+  "worktree": "/Users/csw/gitproject/console (branch codex/game-cashier)",
+  "branch": "codex/game-cashier",
+  "shared_surfaces_touched": [
+    "services/admin-api/internal/domain/cashier",
+    "services/admin-api/internal/transport/http/cashier",
+    "apps/admin-web/src/views/cashier",
+    "apps/admin-web/src/views/games/detail/GameDetailView.vue",
+    "apps/admin-web/src/api/modules/cashier.ts"
+  ],
+  "backend_routes": [
+    "GET /api/admin/games/{gameId}/cashier/profile",
+    "PUT /api/admin/games/{gameId}/cashier/profile",
+    "GET /api/admin/games/{gameId}/cashier/price-overrides",
+    "PUT /api/admin/games/{gameId}/cashier/price-overrides"
+  ],
+  "frontend_routes": [
+    "/games/:gameId (Tab: 收银台)",
+    "/cashier (模板页，本模块未改动)"
+  ],
+  "frontend_views": [
+    "apps/admin-web/src/views/cashier/game/GameCashierTab.vue",
+    "apps/admin-web/src/views/games/detail/GameDetailView.vue",
+    "apps/admin-web/src/api/modules/cashier.ts"
+  ],
+  "referenced_modules": [
+    "cashier-template",
+    "game",
+    "common"
+  ],
+  "cr_status": {
+    "frontend": "passed",
+    "backend": "passed"
+  },
+  "integration_test_status": "passed_round_2",
+  "acceptance_ready": true,
+  "acceptance_status": "passed",
+  "acceptance": {
+    "verdict": "通过 (PASS)",
+    "model": "Cursor Auto",
+    "date": "2026-06-30",
+    "checklist_pass": 25,
+    "checklist_fail": 0,
+    "scope": "功能端到端可用 + compact 业务规则 + operation-flow 步骤7 主线",
+    "backend": "unified scripts/regression/backend.sh PASS (go test pass=591/fail=0); build/vet/test ./... 全绿; L3 19/19; domain+scenario PASS",
+    "frontend": "vitest 20 passed; vue-tsc 本模块 0 错误(5 条既有非本模块); Playwright e2e 8 passed(出沙箱,含视觉基线)",
+    "redlines": "env schema 隔离 / 事务回滚(进程内真回滚) / 无 payment-IAP 耦合 / 审计 cashier.profile.bind+cashier.override.update 均 PASS",
+    "residual_risks": [
+      "【环境性·非阻断】连库 S1/S6/S10(expect.db)+真实 PG 跨栈 e2e 未执行(本机无 docker/PG)，由 L3+mock e2e 等价覆盖，待 WITH_DB=1 CI/集成 Chat 补跑。",
+      "【测试可选·非阻断】ComputeVersionChecksum 无 domain 确定性单测(L3 非空断言间接覆盖)。"
+    ]
+  },
+  "cross_module_changes": [
+    "#17 cashier-template（同 lane cashier-surface，已合并依赖）：发布流程补齐 version.checksum 计算与写入——domain ComputeVersionChecksum（sha256 hex，确定性）+ service PublishVersion/approveRunInTx 计算 + 仓储 PublishVersion 增 checksum 入参（ports/postgres/memstore）。不改 #17 对外 API 形状，仅补已存在但未计算的 checksum 字段。详见 integration.checklist.md「跨模块改动」。"
+  ],
+  "open_issues": [
+    "apps/admin-web 全局 vue-tsc 仍有既有错误：channels/ChannelLoginConfigPanel.vue（TS7006/TS2345）、games/detail/__tests__/sync-section-drawer.spec.ts（TS2322），与本模块无关，定向规避。",
+    "【残留·非阻断·环境】连库 S1/S6/S10（expect.db 落库断言）与真实「后端+PG+前端」跨栈 e2e 因本机无 docker/PG 未执行；由进程内 L3 + 契约 mock e2e 等价覆盖，待集成 Chat / 带 PG 的 CI 补跑。",
+    "【残留·非阻断·测试可选】domain ComputeVersionChecksum 无确定性单测（现由 L3 非空断言间接覆盖），建议补一条纯函数稳定性用例（test-only）。"
+  ],
+  "fixed_issues_round_1": [
+    "【阻断1+非阻断3】PUT/GET /price-overrides taxRate 跨栈统一为 string：后端本为 string，前端 cashier.ts/GameCashierTab.vue 改 string；同步 spec/e2e。",
+    "【阻断2】published checksum 恒空 → 跨模块修 #17 发布计算并写入确定性 checksum；#18 BindProfile 移除超规格空 checksum 硬闸 → 绑定主流程真实 API 可达。",
+    "【非阻断4】SavePriceOverrides 应用层预检 items 重复唯一键 → 400 VALIDATION_FAILED（替代连库 409 CONFLICT）。"
+  ],
+  "verification": [
+    {
+      "command": "pnpm --dir apps/admin-web exec vue-tsc --noEmit (module files filter)",
+      "result": "passed",
+      "notes": "本模块改动文件 0 tsc 错误；全局仍有 5 条既有错误。"
+    },
+    {
+      "command": "pnpm --dir apps/admin-web exec vitest run src/views/games/detail/__tests__/GameDetailView.spec.ts src/views/cashier/__tests__/CashierView.spec.ts",
+      "result": "passed",
+      "notes": "2 files, 9 tests passed（含 CR 后复跑）。"
+    },
+    {
+      "command": "cd services/admin-api && go build ./...",
+      "result": "passed",
+      "notes": "后端编译通过（后端阶段）。"
+    },
+    {
+      "command": "cd services/admin-api && go vet ./...",
+      "result": "passed",
+      "notes": "后端 vet 通过（后端阶段）。"
+    },
+    {
+      "command": "cd services/admin-api && go test ./... -count=1",
+      "result": "passed",
+      "notes": "后端测试阶段全量回归全绿，失败 0，无回归。"
+    },
+    {
+      "command": "go test ./internal/domain/cashier/... -count=1",
+      "result": "passed",
+      "notes": "L1 domain 纯函数单测 10/10 PASS（NormalizePriceOverride 归一化边界 + OverlayTemplateRows 整行覆盖优先级）。"
+    },
+    {
+      "command": "go test ./internal/transport/http/cashier/... -count=1",
+      "result": "passed",
+      "notes": "新增 game-cashier L3 httptest 19 用例全 PASS（S1/S2/S3/S4/S5/S7/S10 + 2 缺陷固化用例）。"
+    },
+    {
+      "command": "go test ./internal/testkit/scenario/ -run TestScenarioManifests/game-cashier -count=1",
+      "result": "passed",
+      "notes": "game-cashier.yaml(28 cases) 解析校验 ✅；S2(4 个 requiresDB:false) 真跑 PASS，其余 requiresDB:true 跳过（连库 SCENARIO_WITH_DB=1 承担）。"
+    },
+    {
+      "command": "pnpm --dir apps/admin-web exec vitest run src/views/cashier/game/__tests__/GameCashierTab.spec.ts",
+      "result": "passed",
+      "notes": "前端 L4 组件测试：11/11 PASS（绑定/升级、覆盖编辑、currency_specs 约束与舍入预览、矩阵 vs 覆盖高亮、无 write 置灰、空/错/未绑定 null 态）。"
+    },
+    {
+      "command": "pnpm --dir apps/admin-web exec vitest run src/views/cashier/__tests__/CashierView.spec.ts src/views/games/detail/__tests__/GameDetailView.spec.ts src/views/cashier/game/__tests__/GameCashierTab.spec.ts",
+      "result": "passed",
+      "notes": "3 files / 20 tests passed（合并复跑，无回归）。"
+    },
+    {
+      "command": "pnpm exec playwright test game-cashier.spec.ts --project=chromium --workers=1",
+      "result": "passed",
+      "notes": "前端 L5 Playwright：8/8 PASS（契约 mock + 截图 + 视觉基线 game-cashier-tab.png）。本机冷编译慢，单文件 ~6min。"
+    },
+    {
+      "command": "[集成] cd services/admin-api && go build ./... && go vet ./... && go test ./... -count=1",
+      "result": "passed",
+      "notes": "集成测试第 1 轮复跑后端全量：全绿，0 失败，无回归。"
+    },
+    {
+      "command": "[集成] go test ./internal/transport/http/cashier/... -run 'Game|BindProfile|SavePriceOverrides' -v -count=1",
+      "result": "passed",
+      "notes": "19 个 game-cashier L3 用例全 PASS，含 TestBindProfilePublishedMissingChecksum（固化阻断1 409）与 TestSavePriceOverridesDuplicateKeyNotPrevalidated（固化缺陷2）。"
+    },
+    {
+      "command": "[集成] standalone encoding/json decode (number→string)",
+      "result": "reproduced_defect",
+      "notes": "佐证阻断·taxRate 漂移：JSON 字符串 decode OK；JSON number(0.1/0) → 'cannot unmarshal number into ... of type string'。真实前端发 number 故 PUT /price-overrides 恒 400。"
+    },
+    {
+      "command": "[集成] 前端 vitest 复跑 / 连库全栈 e2e",
+      "result": "not_run",
+      "notes": "本会话 shell 沙箱 helper 故障（cursorsandbox ENOENT）+ 无本地 PG；前端沿用车道结论(20 + e2e 8 passed，mock)。待修复后复测轮在可用 shell + docker/PG 补连库 S1/S6/S10 与真实前后端绑定/覆盖 e2e。"
+    },
+    {
+      "command": "[修复·🟧] cd services/admin-api && go build ./... && go vet ./internal/{app,domain,transport/http,infra/persistence/postgres}/... && go test ./... -count=1",
+      "result": "passed",
+      "notes": "4 项修复后后端编译/vet/全量测试全绿（0 失败）；含 cashier domain + game-cashier L3（新增 TestBindProfilePublishedComputesChecksum / TestSavePriceOverridesDuplicateKeyPrevalidated）+ scenario yaml 解析。"
+    },
+    {
+      "command": "[修复·🟧] vitest run src/views/cashier/game/__tests__/GameCashierTab.spec.ts",
+      "result": "passed",
+      "notes": "taxRate 改 string 后 11/11 PASS。"
+    },
+    {
+      "command": "[修复·🟧] vue-tsc --noEmit",
+      "result": "passed",
+      "notes": "本模块改动文件 0 错误；全局仅余既有非本模块错误（ChannelLoginConfigPanel.vue、sync-section-drawer.spec.ts）。"
+    },
+    {
+      "command": "[复测·🟪 R2] cd services/admin-api && go build ./... && go vet ./... && go test ./... -count=1",
+      "result": "passed",
+      "notes": "第 2 轮后端全量回归全绿（0 失败，无回归）。"
+    },
+    {
+      "command": "[复测·🟪 R2] go test ./internal/transport/http/cashier/... ./internal/domain/cashier/... -run 'Game|BindProfile|SavePriceOverrides|Checksum|Duplicate' -v",
+      "result": "passed",
+      "notes": "回归用例 TestBindProfilePublishedComputesChecksum（真实发布路径→绑定 200 且 snapshotChecksum 非空）+ TestSavePriceOverridesDuplicateKeyPrevalidated（重复键→400 VALIDATION_FAILED）均 PASS。"
+    },
+    {
+      "command": "[复测·🟪 R2] go test ./internal/testkit/scenario/ -run TestScenarioManifests/game-cashier",
+      "result": "passed",
+      "notes": "yaml 已同步（duplicate→VALIDATION_FAILED、taxRate string）；S2 真跑 PASS，requiresDB:true SKIP（无 PG）。"
+    },
+    {
+      "command": "[复测·🟪 R2] pnpm exec vitest run GameCashierTab.spec + CashierView.spec + GameDetailView.spec",
+      "result": "passed",
+      "notes": "3 files / 20 tests passed，无回归。"
+    },
+    {
+      "command": "[复测·🟪 R2] pnpm exec vue-tsc --noEmit（区分模块/既有）",
+      "result": "passed",
+      "notes": "全仓 5 条错误全部既有非本模块（ChannelLoginConfigPanel.vue×4、sync-section-drawer.spec.ts×1）；本模块文件 0 错误。"
+    },
+    {
+      "command": "[复测·🟪 R2] pnpm exec playwright test game-cashier.spec.ts --project=chromium --workers=1（required_permissions:all 出沙箱）",
+      "result": "passed",
+      "notes": "8 passed (5.1m)，含视觉基线。沙箱内首跑 8 failed 系浏览器 launch 被拦（kill EPERM/SIGABRT）的环境假阴性，已出沙箱重跑确认全绿。"
+    },
+    {
+      "command": "[复测·🟪 R2] 连库 S1/S6/S10（expect.db）+ 真实 PG 跨栈 e2e",
+      "result": "not_run",
+      "notes": "本机无 docker/PG，未执行；进程内 L3 + 契约 mock e2e 等价覆盖，连库维度待集成 Chat / 带 PG 的 CI 补跑（环境性残留，不阻断验收）。"
+    },
+    {
+      "command": "[验收·✅] WITH_DB=0 sh scripts/regression/backend.sh && sh scripts/regression/summarize.sh",
+      "result": "passed",
+      "notes": "统一回归入口后端腿 PASS；summary.md 记录 go test pass=591 / fail=0。"
+    },
+    {
+      "command": "[验收·✅] go build/vet/test ./... + L3(19) + domain + scenario(game-cashier 28-case)",
+      "result": "passed",
+      "notes": "全绿；4 接口契约/权限码/错误码/包络、快照绑定、整行覆盖、归一化、事务回滚、重复键预检逐条验证。"
+    },
+    {
+      "command": "[验收·✅] pnpm exec vue-tsc --noEmit + vitest(GameCashierTab+CashierView+GameDetailView)",
+      "result": "passed",
+      "notes": "vitest 20 passed；vue-tsc 本模块 0 错误，全仓 5 条均既有非本模块。"
+    },
+    {
+      "command": "[验收·✅] pnpm exec playwright test game-cashier.spec.ts --project=chromium --workers=1 (required_permissions=all 出沙箱)",
+      "result": "passed",
+      "notes": "8 passed (5.1m)，含视觉基线；前端 6 大功能点(展示/升级/覆盖编辑舍入/边界高亮/置灰/空态)端到端验证。"
+    }
+  ],
+  "test_artifacts": {
+    "unit": "services/admin-api/internal/domain/cashier/game_cashier_test.go",
+    "http_l3": "services/admin-api/internal/transport/http/cashier/game_cashier_http_test.go",
+    "scenario_manifest": "tests/backend/scenarios/game-cashier.yaml",
+    "fixtures": "tests/fixtures/sandbox/game-cashier.sql",
+    "frontend_unit": "apps/admin-web/src/views/cashier/game/__tests__/GameCashierTab.spec.ts",
+    "frontend_e2e": "tests/frontend/e2e/game-cashier.spec.ts",
+    "frontend_visual_baseline": "tests/frontend/visual-baseline/game-cashier.spec.ts-snapshots/",
+    "frontend_screenshots": "tests/frontend/screenshots/game-cashier-{profile,matrix,overrides,empty}.png"
+  }
+}

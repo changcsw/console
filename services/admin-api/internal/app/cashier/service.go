@@ -254,7 +254,11 @@ func (s *Service) PublishVersion(ctx context.Context, templateID string, version
 				return err
 			}
 		}
-		if err := repo.PublishVersion(ctx, target.ID, now); err != nil {
+		checksum, err := s.computeVersionChecksum(ctx, repo, target.ID)
+		if err != nil {
+			return err
+		}
+		if err := repo.PublishVersion(ctx, target.ID, now, checksum); err != nil {
 			return err
 		}
 		s.writeAudit(ctx, "cashier.version.publish", "cashier_template_version", strconv.FormatInt(target.ID, 10), map[string]any{
@@ -377,6 +381,152 @@ func (s *Service) IgnoreFXSyncRun(ctx context.Context, runID int64, note string)
 	})
 }
 
+func (s *Service) GetProfile(ctx context.Context, gameID string) (GameCashierProfileView, error) {
+	gameIDRef, err := s.tx.Repository().ResolveGameRowID(ctx, strings.TrimSpace(gameID))
+	if err != nil {
+		return GameCashierProfileView{}, mapRepoErr(err, "game 不存在")
+	}
+	profile, err := s.tx.Repository().GetGameCashierProfile(ctx, gameIDRef)
+	if err != nil {
+		return GameCashierProfileView{}, mapRepoErr(err, "profile 不存在")
+	}
+	template, err := s.tx.Repository().GetTemplateByID(ctx, profile.TemplateIDRef)
+	if err != nil {
+		return GameCashierProfileView{}, mapRepoErr(err, "template 不存在")
+	}
+	version, err := s.tx.Repository().GetVersionByID(ctx, profile.AppliedTemplateVersionID)
+	if err != nil {
+		return GameCashierProfileView{}, mapRepoErr(err, "template version 不存在")
+	}
+	return GameCashierProfileView{
+		TemplateID:             template.TemplateID,
+		AppliedTemplateVersion: version.Version,
+		SnapshotChecksum:       profile.SnapshotChecksum,
+		AppliedAt:              profile.AppliedAt,
+	}, nil
+}
+
+func (s *Service) BindProfile(ctx context.Context, input BindGameCashierProfileInput) (GameCashierProfileView, error) {
+	gameID := strings.TrimSpace(input.GameID)
+	templateID := strings.TrimSpace(input.TemplateID)
+	if gameID == "" {
+		return GameCashierProfileView{}, validationErr("gameId 必填", fieldDetail("gameId", "required"))
+	}
+	if templateID == "" {
+		return GameCashierProfileView{}, validationErr("templateId 必填", fieldDetail("templateId", "required"))
+	}
+	if input.TemplateVersion <= 0 {
+		return GameCashierProfileView{}, validationErr("templateVersion 非法", fieldDetail("templateVersion", "must be positive"))
+	}
+
+	var view GameCashierProfileView
+	err := s.tx.InTx(ctx, func(repo CashierTemplateRepository) error {
+		gameIDRef, err := repo.ResolveGameRowID(ctx, gameID)
+		if err != nil {
+			return mapRepoErr(err, "game 不存在")
+		}
+		template, err := repo.GetTemplateByTemplateID(ctx, templateID)
+		if err != nil {
+			return mapRepoErr(err, "template 不存在")
+		}
+		version, err := repo.GetVersionByTemplateAndVersion(ctx, template.ID, input.TemplateVersion)
+		if err != nil {
+			return mapRepoErr(err, "templateVersion 不存在")
+		}
+		if version.Status != domaincashier.StatusPublished {
+			return conflictErr("templateVersion 必须为 published")
+		}
+		// compact #18 仅要求 templateId 存在 + templateVersion 为 published；
+		// snapshot_checksum 默认 ''（schema 允许空），绑定按「取该版本快照 checksum」语义记录即可，
+		// 不应额外硬闸空 checksum（#17 发布流程已计算并写入 checksum，此处仅原样快照）。
+		checksum := strings.TrimSpace(version.Checksum)
+
+		profile, err := repo.UpsertGameCashierProfile(ctx, domaincashier.GameCashierProfile{
+			GameIDRef:                gameIDRef,
+			TemplateIDRef:            template.ID,
+			AppliedTemplateVersionID: version.ID,
+			SnapshotChecksum:         checksum,
+			AppliedAt:                s.now(),
+		})
+		if err != nil {
+			return err
+		}
+		view = GameCashierProfileView{
+			TemplateID:             template.TemplateID,
+			AppliedTemplateVersion: version.Version,
+			SnapshotChecksum:       profile.SnapshotChecksum,
+			AppliedAt:              profile.AppliedAt,
+		}
+		s.writeAudit(ctx, "cashier.profile.bind", "game_cashier_profile", gameID, map[string]any{
+			"gameId":          gameID,
+			"templateId":      template.TemplateID,
+			"templateVersion": version.Version,
+			"checksum":        checksum,
+		})
+		return nil
+	})
+	return view, err
+}
+
+func (s *Service) ListPriceOverrides(ctx context.Context, gameID string) ([]domaincashier.GameCashierPriceOverride, error) {
+	gameIDRef, err := s.tx.Repository().ResolveGameRowID(ctx, strings.TrimSpace(gameID))
+	if err != nil {
+		return nil, mapRepoErr(err, "game 不存在")
+	}
+	return s.tx.Repository().ListGameCashierPriceOverrides(ctx, gameIDRef)
+}
+
+func (s *Service) SavePriceOverrides(ctx context.Context, input SaveGameCashierPriceOverridesInput) ([]domaincashier.GameCashierPriceOverride, error) {
+	gameID := strings.TrimSpace(input.GameID)
+	if gameID == "" {
+		return nil, validationErr("gameId 必填", fieldDetail("gameId", "required"))
+	}
+	var persisted []domaincashier.GameCashierPriceOverride
+	err := s.tx.InTx(ctx, func(repo CashierTemplateRepository) error {
+		gameIDRef, err := repo.ResolveGameRowID(ctx, gameID)
+		if err != nil {
+			return mapRepoErr(err, "game 不存在")
+		}
+		normRows := make([]domaincashier.GameCashierPriceOverride, 0, len(input.Items))
+		seen := make(map[string]struct{}, len(input.Items))
+		for idx, item := range input.Items {
+			spec, err := repo.GetCurrencySpec(ctx, strings.ToUpper(strings.TrimSpace(item.Currency)))
+			if err != nil {
+				return currencyErr("currency not supported")
+			}
+			norm, err := domaincashier.NormalizePriceOverride(item, spec)
+			if err != nil {
+				return validationErr(fmt.Sprintf("items[%d] 非法: %v", idx, err))
+			}
+			norm.GameIDRef = gameIDRef
+			// 应用层预检 items 内唯一键重复，避免连库命中 gcpo_key UNIQUE 返回 409 CONFLICT；
+			// compact 期望校验类失败统一为 VALIDATION_FAILED。
+			key := norm.CountryCode + "|" + norm.RegionCode + "|" + norm.Currency + "|" + norm.PriceID
+			if _, dup := seen[key]; dup {
+				return validationErr(
+					fmt.Sprintf("items[%d] 唯一键重复 (country,region,currency,priceId)", idx),
+					fieldDetail("items", "duplicate_key"),
+				)
+			}
+			seen[key] = struct{}{}
+			normRows = append(normRows, norm)
+		}
+		if err := repo.ReplaceGameCashierPriceOverrides(ctx, gameIDRef, normRows); err != nil {
+			return err
+		}
+		persisted, err = repo.ListGameCashierPriceOverrides(ctx, gameIDRef)
+		if err != nil {
+			return err
+		}
+		s.writeAudit(ctx, "cashier.override.update", "game_cashier_price_override", gameID, map[string]any{
+			"gameId": gameID,
+			"count":  len(normRows),
+		})
+		return nil
+	})
+	return persisted, err
+}
+
 func (s *Service) approveRunInTx(ctx context.Context, repo CashierTemplateRepository, runID int64, note string, reviewer int64) error {
 	run, err := repo.GetFXSyncRun(ctx, runID)
 	if err != nil {
@@ -410,7 +560,11 @@ func (s *Service) approveRunInTx(ctx context.Context, repo CashierTemplateReposi
 	if !domaincashier.CanTransition(candidate.Status, domaincashier.StatusPublished) {
 		return versionStateErr("候选版本状态非法")
 	}
-	if err := repo.PublishVersion(ctx, candidate.ID, now); err != nil {
+	checksum, err := s.computeVersionChecksum(ctx, repo, candidate.ID)
+	if err != nil {
+		return err
+	}
+	if err := repo.PublishVersion(ctx, candidate.ID, now, checksum); err != nil {
 		return err
 	}
 	if err := repo.UpdateFXSyncRunReview(ctx, run.ID, domaincashier.FXRunApplied, reviewer, now, note); err != nil {
@@ -422,6 +576,16 @@ func (s *Service) approveRunInTx(ctx context.Context, repo CashierTemplateReposi
 		"note":       note,
 	})
 	return nil
+}
+
+// computeVersionChecksum 读取目标版本价格行并计算确定性校验和（发布时固化版本指纹）。
+// 属 cashier-template（#17）发布流程职责；game-cashier 绑定时据此记录 snapshot_checksum。
+func (s *Service) computeVersionChecksum(ctx context.Context, repo CashierTemplateRepository, versionID int64) (string, error) {
+	rows, err := repo.ListRows(ctx, versionID)
+	if err != nil {
+		return "", err
+	}
+	return domaincashier.ComputeVersionChecksum(rows), nil
 }
 
 func (s *Service) loadVersion(ctx context.Context, templateID string, version int) (domaincashier.TemplateVersionRecord, error) {

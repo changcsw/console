@@ -78,6 +78,24 @@ type CreateVersionInput struct {
 	SourceVersion int
 }
 
+type BindGameCashierProfileInput struct {
+	GameID          string
+	TemplateID      string
+	TemplateVersion int
+}
+
+type GameCashierProfileView struct {
+	TemplateID             string
+	AppliedTemplateVersion int
+	SnapshotChecksum       string
+	AppliedAt              time.Time
+}
+
+type SaveGameCashierPriceOverridesInput struct {
+	GameID string
+	Items  []domaincashier.GameCashierPriceOverride
+}
+
 // FXSyncRunView 汇率同步运行的对外视图：在领域 run 基础上补充候选版本号（对外版本号，
 // 非 versions 表内部主键），供 transport 层组装 camelCase DTO。
 type FXSyncRunView struct {
@@ -97,7 +115,7 @@ type CashierTemplateRepository interface {
 	NextVersion(ctx context.Context, templateIDRef int64) (int, error)
 	CreateVersion(ctx context.Context, version domaincashier.TemplateVersionRecord) (domaincashier.TemplateVersionRecord, error)
 	ArchiveVersion(ctx context.Context, versionID int64, at time.Time) error
-	PublishVersion(ctx context.Context, versionID int64, at time.Time) error
+	PublishVersion(ctx context.Context, versionID int64, at time.Time, checksum string) error
 
 	ListRows(ctx context.Context, versionID int64) ([]domaincashier.PriceRow, error)
 	ReplaceRows(ctx context.Context, versionID int64, rows []domaincashier.PriceRow) error
@@ -109,6 +127,12 @@ type CashierTemplateRepository interface {
 	GetFXSyncRun(ctx context.Context, runID int64) (domaincashier.FXSyncRun, error)
 	ListFXSyncRuns(ctx context.Context, templateIDRef int64) ([]domaincashier.FXSyncRun, error)
 	UpdateFXSyncRunReview(ctx context.Context, runID int64, status domaincashier.FXRunStatus, reviewer int64, reviewedAt time.Time, note string) error
+
+	ResolveGameRowID(ctx context.Context, gameID string) (int64, error)
+	GetGameCashierProfile(ctx context.Context, gameIDRef int64) (domaincashier.GameCashierProfile, error)
+	UpsertGameCashierProfile(ctx context.Context, profile domaincashier.GameCashierProfile) (domaincashier.GameCashierProfile, error)
+	ListGameCashierPriceOverrides(ctx context.Context, gameIDRef int64) ([]domaincashier.GameCashierPriceOverride, error)
+	ReplaceGameCashierPriceOverrides(ctx context.Context, gameIDRef int64, rows []domaincashier.GameCashierPriceOverride) error
 }
 
 type TxManager interface {
