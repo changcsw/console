@@ -59,12 +59,20 @@
       </template>
 
       <template v-else-if="field.component === 'file' || isFileField(field.key)">
-        <el-input
-          :model-value="toText(draft[field.key])"
-          :disabled="disabled"
-          placeholder="文件引用（统一上传后自动回填）"
-          @update:model-value="setValue(field.key, $event)"
-        />
+        <div class="file-input">
+          <el-upload
+            :show-file-list="false"
+            :accept="fileAccept(field.key)"
+            :disabled="disabled"
+            :http-request="(options: UploadRequestOptions) => onFileUpload(field.key, options)"
+          >
+            <el-button :disabled="disabled">上传文件</el-button>
+          </el-upload>
+          <span class="file-input__meta">
+            {{ fileRuleText(field.key) }}
+            <template v-if="toText(draft[field.key])">｜当前：{{ toText(draft[field.key]) }}</template>
+          </span>
+        </div>
       </template>
 
       <template v-else>
@@ -82,6 +90,8 @@
 </template>
 
 <script setup lang="ts">
+import { ElMessage } from "element-plus";
+import type { UploadRequestOptions } from "element-plus";
 import { computed, ref, watch } from "vue";
 import type { IapTemplate } from "@/api/modules/products";
 
@@ -217,6 +227,54 @@ function commitJson(key: string) {
     emit("json-error-change", true);
   }
 }
+
+function fileRule(key: string) {
+  return (props.template.fileFields ?? []).find((item) => item.key === key);
+}
+
+function fileAccept(key: string): string {
+  return (fileRule(key)?.accept ?? []).join(",");
+}
+
+function fileRuleText(key: string): string {
+  const rule = fileRule(key);
+  if (!rule) {
+    return "文件字段";
+  }
+  const parts: string[] = [];
+  if (rule.accept?.length) {
+    parts.push(`accept: ${rule.accept.join(", ")}`);
+  }
+  if (rule.maxSizeKB) {
+    parts.push(`max: ${rule.maxSizeKB}KB`);
+  }
+  return parts.length > 0 ? parts.join("；") : "文件字段";
+}
+
+function onFileUpload(key: string, options: UploadRequestOptions) {
+  const rule = fileRule(key);
+  if (!rule) {
+    options.onError(new Error("文件字段配置缺失") as never);
+    return;
+  }
+  const file = options.file;
+  if (rule.maxSizeKB && file.size > rule.maxSizeKB * 1024) {
+    const err = new Error(`文件超过 ${rule.maxSizeKB}KB 限制`);
+    ElMessage.error(err.message);
+    options.onError(err as never);
+    return;
+  }
+  const accepts = rule.accept ?? [];
+  if (accepts.length > 0 && !accepts.some((ext) => file.name.toLowerCase().endsWith(ext.toLowerCase()))) {
+    const err = new Error(`文件类型不符合：${accepts.join(", ")}`);
+    ElMessage.error(err.message);
+    options.onError(err as never);
+    return;
+  }
+  setValue(key, file.name);
+  ElMessage.success(`已选择文件：${file.name}`);
+  options.onSuccess({ fileName: file.name });
+}
 </script>
 
 <style scoped>
@@ -239,6 +297,18 @@ function commitJson(key: string) {
 
 .secret-input__masked {
   flex-shrink: 0;
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.file-input {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.file-input__meta {
   color: var(--text-subtle);
   font-size: 12px;
 }

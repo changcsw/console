@@ -1,0 +1,322 @@
+# 模块 payment（支付路由）接口场景矩阵 manifest
+# 维度定义见 docs/architecture/v2/03-testing.md §4（S1-S10）。
+# 接口契约见 docs/architecture/v2/modules/19-payment/spec.compact.md 与 README「接口场景矩阵」。
+#
+# 运行约定：
+# - requiresDB=false：进程内 scenario harness 可直接执行（典型是 S2 鉴权）。
+# - requiresDB=true：声明连库场景（PG CI 执行），当前由 transport/http/payment 的 memstore+httptest 等价覆盖核心行为。
+module: payment
+cases:
+  # ───────────────────────── GET /pay-ways（只读 + 分页）
+  - name: list_pay_ways_requires_auth
+    dimension: S2
+    requiresDB: false
+    request: { method: GET, path: /api/admin/pay-ways }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_pay_ways_forbidden_without_read_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request: { method: GET, path: /api/admin/pay-ways }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_pay_ways_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: payment_reader }
+    fixture: common/payment/base
+    request:
+      method: GET
+      path: "/api/admin/pay-ways?page=1&pageSize=20"
+    expect:
+      status: 200
+  - name: list_pay_ways_pagination
+    dimension: S9
+    requiresDB: true
+    auth: { role: payment_reader }
+    fixture: common/payment/base
+    request:
+      method: GET
+      path: "/api/admin/pay-ways?page=1&pageSize=99999"
+    expect:
+      status: 200
+
+  # ───────────────────────── GET /cashier/providers（只读 + 分页）
+  - name: list_providers_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: payment_reader }
+    fixture: common/payment/base
+    request:
+      method: GET
+      path: "/api/admin/cashier/providers?page=1&pageSize=20"
+    expect:
+      status: 200
+  - name: list_providers_pagination
+    dimension: S9
+    requiresDB: true
+    auth: { role: payment_reader }
+    fixture: common/payment/base
+    request:
+      method: GET
+      path: "/api/admin/cashier/providers?page=1&pageSize=99999"
+    expect:
+      status: 200
+
+  # ───────────────────────── GET/POST /billing-subjects
+  - name: list_billing_subjects_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: payment_reader }
+    fixture: common/payment/base
+    request: { method: GET, path: /api/admin/billing-subjects }
+    expect:
+      status: 200
+  - name: create_billing_subject_forbidden_without_write_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: payment_reader }
+    request:
+      method: POST
+      path: /api/admin/billing-subjects
+      body: { subjectId: "sg_entity", subjectName: "SG Entity", legalEntityName: "SG Entity Pte. Ltd." }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: create_billing_subject_validation_failed
+    dimension: S4
+    requiresDB: true
+    auth: { role: payment_admin }
+    request:
+      method: POST
+      path: /api/admin/billing-subjects
+      body: { subjectId: "", subjectName: "SG Entity", legalEntityName: "SG Entity Pte. Ltd." }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_billing_subject_conflict
+    dimension: S5
+    requiresDB: true
+    auth: { role: payment_admin }
+    fixture: common/payment/base
+    request:
+      method: POST
+      path: /api/admin/billing-subjects
+      body: { subjectId: "hk_entity", subjectName: "HK Entity", legalEntityName: "HK Entity Ltd." }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: create_billing_subject_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: payment_admin }
+    request:
+      method: POST
+      path: /api/admin/billing-subjects
+      body: { subjectId: "sg_entity", subjectName: "SG Entity", legalEntityName: "SG Entity Pte. Ltd." }
+    expect:
+      status: 201
+
+  # ───────────────────────── GET/POST /cashier/merchant-accounts（脱敏）
+  - name: list_merchant_accounts_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: payment_reader }
+    fixture: common/payment/base
+    request: { method: GET, path: /api/admin/cashier/merchant-accounts }
+    expect:
+      status: 200
+  - name: list_merchant_accounts_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: payment_reader }
+    fixture: common/payment/base
+    note: "secret 字段恒 masked"
+    request: { method: GET, path: /api/admin/cashier/merchant-accounts }
+    expect:
+      status: 200
+  - name: create_merchant_account_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: payment_admin }
+    request:
+      method: POST
+      path: /api/admin/cashier/merchant-accounts
+      body:
+        merchantAccountId: merchant_pm_new
+        providerId: payermax
+        subjectId: hk_entity
+        merchantId: PM-NEW
+        merchantName: PayerMax New
+        configJson: {}
+        secrets: { apiKey: "REAL_SECRET" }
+    expect:
+      status: 201
+  - name: create_merchant_account_conflict
+    dimension: S5
+    requiresDB: true
+    auth: { role: payment_admin }
+    fixture: common/payment/base
+    request:
+      method: POST
+      path: /api/admin/cashier/merchant-accounts
+      body:
+        merchantAccountId: merchant_aw_main
+        providerId: airwallex
+        subjectId: hk_entity
+        merchantId: AW-001
+        merchantName: Airwallex Main Dup
+        configJson: {}
+        secrets: { apiKey: "DUP" }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: create_merchant_account_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: payment_admin }
+    request:
+      method: POST
+      path: /api/admin/cashier/merchant-accounts
+      body:
+        merchantAccountId: merchant_masked
+        providerId: airwallex
+        subjectId: hk_entity
+        merchantId: AW-MASK
+        merchantName: Airwallex Masked
+        configJson: {}
+        secrets: { apiKey: "NEVER_RETURN_THIS" }
+    expect:
+      status: 201
+
+  # ───────────────────────── GET /games/{gameId}/payment-routes（按 env schema）
+  - name: get_game_routes_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: payment_reader }
+    fixture: common/payment/base
+    request: { method: GET, path: /api/admin/games/100001/payment-routes }
+    expect:
+      status: 200
+  - name: get_game_routes_schema_isolation
+    dimension: S6
+    requiresDB: true
+    auth: { role: payment_reader }
+    fixture: common/payment/base
+    note: "读取当前 search_path 对应 schema，不允许跨 env 指定"
+    request: { method: GET, path: /api/admin/games/100001/payment-routes }
+    expect:
+      status: 200
+
+  # ───────────────────────── PUT /games/{gameId}/payment-routes（整组替换 + 事务）
+  - name: put_game_routes_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: payment_admin }
+    fixture: common/payment/base
+    request:
+      method: PUT
+      path: /api/admin/games/100001/payment-routes
+      body:
+        items:
+          - { payWayId: credit_card, providerId: payermax, merchantAccountId: merchant_pm_main, marketCode: JP, priority: 10, enabled: true }
+          - { payWayId: credit_card, providerId: airwallex, merchantAccountId: merchant_aw_main, marketCode: GLOBAL, priority: 100, enabled: true }
+    expect:
+      status: 200
+  - name: put_game_routes_forbidden_without_write_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: payment_reader }
+    request:
+      method: PUT
+      path: /api/admin/games/100001/payment-routes
+      body:
+        items:
+          - { payWayId: credit_card, providerId: airwallex, merchantAccountId: merchant_aw_main }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: put_game_routes_validation_failed
+    dimension: S4
+    requiresDB: true
+    auth: { role: payment_admin }
+    request:
+      method: PUT
+      path: /api/admin/games/100001/payment-routes
+      body:
+        items:
+          - { payWayId: "", providerId: airwallex, merchantAccountId: merchant_aw_main }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: put_game_routes_conflict_duplicate_priority
+    dimension: S5
+    requiresDB: true
+    auth: { role: payment_admin }
+    request:
+      method: PUT
+      path: /api/admin/games/100001/payment-routes
+      body:
+        items:
+          - { payWayId: credit_card, providerId: airwallex, merchantAccountId: merchant_aw_main, marketCode: JP, priority: 10, enabled: true }
+          - { payWayId: credit_card, providerId: payermax, merchantAccountId: merchant_pm_main, marketCode: GLOBAL, priority: 10, enabled: true }
+    expect:
+      status: 409
+      jsonContains: { error.code: ROUTE_CONFLICT, error.details.0.kind: duplicate_priority }
+  - name: put_game_routes_conflict_duplicate_selector
+    dimension: S5
+    requiresDB: true
+    auth: { role: payment_admin }
+    request:
+      method: PUT
+      path: /api/admin/games/100001/payment-routes
+      body:
+        items:
+          - { payWayId: credit_card, providerId: airwallex, merchantAccountId: merchant_aw_main, channelId: null, marketCode: "*", priority: 10, enabled: true }
+          - { payWayId: credit_card, providerId: payermax, merchantAccountId: merchant_pm_main, channelId: "*", marketCode: "", priority: 11, enabled: true }
+    expect:
+      status: 409
+      jsonContains: { error.code: ROUTE_CONFLICT, error.details.0.kind: duplicate_selector }
+  - name: put_game_routes_schema_isolation
+    dimension: S6
+    requiresDB: true
+    auth: { role: payment_admin }
+    fixture: common/payment/base
+    note: "写入当前 env schema（search_path 决定），不允许跨 env 写"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/payment-routes
+      body:
+        items:
+          - { payWayId: credit_card, providerId: airwallex, merchantAccountId: merchant_aw_main, marketCode: GLOBAL, priority: 100, enabled: true }
+    expect:
+      status: 200
+  - name: put_game_routes_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: payment_admin }
+    request:
+      method: PUT
+      path: /api/admin/games/100001/payment-routes
+      body:
+        items:
+          - { payWayId: credit_card, providerId: airwallex, merchantAccountId: merchant_aw_main, marketCode: GLOBAL, priority: 100, enabled: true }
+    expect:
+      status: 200
+  - name: put_game_routes_transaction_rollback
+    dimension: S10
+    requiresDB: true
+    auth: { role: payment_admin }
+    note: "整组替换任一项失败整体回滚，无部分写入"
+    request:
+      method: PUT
+      path: /api/admin/games/100001/payment-routes
+      body:
+        items:
+          - { payWayId: credit_card, providerId: payermax, merchantAccountId: merchant_pm_main, marketCode: JP, priority: 10, enabled: true }
+          - { payWayId: credit_card, providerId: airwallex, merchantAccountId: merchant_pm_main, marketCode: GLOBAL, priority: 100, enabled: true }
+    expect:
+      status: 400

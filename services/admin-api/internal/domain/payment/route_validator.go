@@ -1,37 +1,59 @@
 package payment
 
 import (
-	"fmt"
 	"strconv"
+	"strings"
 )
 
-func ValidateRouteSet(routes []Route) error {
-	seenPriority := map[string]struct{}{}
-	seenSelector := map[string]struct{}{}
+type conflictPos struct {
+	index int
+	id    int64
+}
 
-	for _, route := range routes {
+func ValidateRouteSet(routes []Route) error {
+	seenPriority := map[string]conflictPos{}
+	seenSelector := map[string]conflictPos{}
+
+	for i, route := range routes {
 		if !route.Enabled {
 			continue
 		}
 
-		priorityKey := strconv.FormatInt(route.PayWayIDRef, 10) + ":" + strconv.Itoa(route.Priority)
-		if _, ok := seenPriority[priorityKey]; ok {
-			return fmt.Errorf("duplicate priority for pay_way %d", route.PayWayIDRef)
+		payWay := normalizeSelector(route.PayWay)
+		priorityKey := payWay + ":" + strconv.Itoa(route.Priority)
+		if prev, ok := seenPriority[priorityKey]; ok {
+			return &RouteConflictError{
+				Kind:       ConflictDuplicatePriority,
+				PayWay:     payWay,
+				Priority:   route.Priority,
+				LeftIndex:  prev.index,
+				RightIndex: i,
+				LeftID:     prev.id,
+				RightID:    route.ID,
+			}
 		}
-		seenPriority[priorityKey] = struct{}{}
+		seenPriority[priorityKey] = conflictPos{index: i, id: route.ID}
 
-		selectorKey := fmt.Sprintf("%d|%s|%s|%s|%s|%s",
-			route.PayWayIDRef,
-			normalizeIDValue(route.PackageIDRef),
-			normalizeIDValue(route.ChannelIDRef),
-			normalizeMarketCode(route.MarketCode),
-			normalizeStringValue(route.CountryCode),
-			normalizeStringValue(route.Currency),
-		)
-		if _, ok := seenSelector[selectorKey]; ok {
-			return fmt.Errorf("duplicate selector for pay_way %d", route.PayWayIDRef)
+		selectorKey := strings.Join([]string{
+			payWay,
+			normalizeSelector(route.Package),
+			normalizeSelector(route.Channel),
+			normalizeUpperSelector(route.Market),
+			normalizeUpperSelector(route.Country),
+			normalizeUpperSelector(route.Currency),
+		}, "|")
+		if prev, ok := seenSelector[selectorKey]; ok {
+			return &RouteConflictError{
+				Kind:       ConflictDuplicateSelector,
+				PayWay:     payWay,
+				Selector:   selectorKey,
+				LeftIndex:  prev.index,
+				RightIndex: i,
+				LeftID:     prev.id,
+				RightID:    route.ID,
+			}
 		}
-		seenSelector[selectorKey] = struct{}{}
+		seenSelector[selectorKey] = conflictPos{index: i, id: route.ID}
 	}
 
 	return nil

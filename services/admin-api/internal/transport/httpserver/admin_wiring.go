@@ -16,6 +16,7 @@ import (
 	channelapp "github.com/csw/console/services/admin-api/internal/app/channel"
 	channelloginapp "github.com/csw/console/services/admin-api/internal/app/channellogin"
 	gameapp "github.com/csw/console/services/admin-api/internal/app/game"
+	paymentapp "github.com/csw/console/services/admin-api/internal/app/payment"
 	pluginapp "github.com/csw/console/services/admin-api/internal/app/plugin"
 	productapp "github.com/csw/console/services/admin-api/internal/app/product"
 	domainauth "github.com/csw/console/services/admin-api/internal/domain/auth"
@@ -31,6 +32,7 @@ import (
 	cashierhttp "github.com/csw/console/services/admin-api/internal/transport/http/cashier"
 	channelshttp "github.com/csw/console/services/admin-api/internal/transport/http/channels"
 	gameshttp "github.com/csw/console/services/admin-api/internal/transport/http/games"
+	paymenthttp "github.com/csw/console/services/admin-api/internal/transport/http/payment"
 )
 
 // feishuAdapter 把 infra/feishu.Client 适配为 app 层 FeishuClient 端口。
@@ -61,6 +63,7 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 		gameshttp.RegisterRoutes(r, gameshttp.NewHandler(nil, env), iss, env, logger, false, nil)
 		channelshttp.RegisterRoutes(r, channelshttp.NewHandler(nil, env), iss, env, logger, false, nil)
 		cashierhttp.RegisterRoutes(r, cashierhttp.NewHandler(nil), iss, env, logger, false, nil)
+		paymenthttp.RegisterRoutes(r, paymenthttp.NewHandler(nil), iss, env, logger, false, nil)
 		audithttp.RegisterRoutes(r, audithttp.NewHandler(nil), iss, env, logger, false, nil)
 		return r
 	}
@@ -131,6 +134,9 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 
 	cashierSvc := cashierapp.NewService(postgres.NewCashierStore(pool), auditSink, time.Now)
 	cashierhttp.RegisterRoutes(r, cashierhttp.NewHandler(cashierSvc), issuer, env, logger, true, auditSvc)
+
+	paymentSvc := paymentapp.NewService(postgres.NewPaymentStore(pool), cipher, auditSink, time.Now)
+	paymenthttp.RegisterRoutes(r, paymenthttp.NewHandler(paymentSvc), issuer, env, logger, true, auditSvc)
 
 	audithttp.RegisterRoutes(r, audithttp.NewHandler(auditSvc), issuer, env, logger, true, auditSvc)
 

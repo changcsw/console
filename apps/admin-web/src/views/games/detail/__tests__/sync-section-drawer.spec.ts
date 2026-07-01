@@ -21,7 +21,7 @@ test("published version can be copied into draft", () => {
     props: {
       open: true,
       templateId: "tpl_1",
-      sourceVersion: { version: 7, status: "published" }
+      sourceVersion: { version: "7", status: "published" }
     }
   });
 

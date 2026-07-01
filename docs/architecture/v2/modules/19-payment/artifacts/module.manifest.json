@@ -1,0 +1,116 @@
+{
+  "module_id": "payment",
+  "code": "19",
+  "lane": "payment-surface",
+  "spec_path": "docs/architecture/v2/modules/19-payment/spec.compact.md",
+  "worktree": "/Users/csw/gitproject/console-payment",
+  "branch": "codex/payment",
+  "base": "origin/main @ 7a090e9",
+  "depends_on": [
+    "channel",
+    "product",
+    "cashier-template",
+    "game-cashier",
+    "game",
+    "common"
+  ],
+  "shared_surfaces_touched": [
+    "services/admin-api/internal/transport/httpserver/admin_wiring.go",
+    "apps/admin-web/src/router/routes.ts",
+    "apps/admin-web/src/views/games/detail/GameDetailView.vue",
+    "apps/admin-web/src/api/modules/payment.ts",
+    "apps/admin-web/src/views/payment"
+  ],
+  "backend_routes": [
+    "GET /api/admin/pay-ways (payment.read)",
+    "GET /api/admin/cashier/providers (payment.read)",
+    "GET /api/admin/cashier/providers/{providerId}/template (payment.read)",
+    "GET /api/admin/billing-subjects (payment.read)",
+    "POST /api/admin/billing-subjects (payment.write)",
+    "GET /api/admin/cashier/merchant-accounts (payment.read)",
+    "POST /api/admin/cashier/merchant-accounts (payment.write)",
+    "GET /api/admin/games/{gameId}/payment-routes (payment.read)",
+    "PUT /api/admin/games/{gameId}/payment-routes (payment.write)"
+  ],
+  "frontend_routes": [
+    "/payment/pay-ways",
+    "/payment/providers",
+    "/payment/billing-subjects",
+    "/payment/merchant-accounts",
+    "/games/:gameId#payment-routes"
+  ],
+  "frontend_views": [
+    "apps/admin-web/src/views/payment/PaymentLayout.vue",
+    "apps/admin-web/src/views/payment/PayWaysView.vue",
+    "apps/admin-web/src/views/payment/ProvidersView.vue",
+    "apps/admin-web/src/views/payment/BillingSubjectsView.vue",
+    "apps/admin-web/src/views/payment/MerchantAccountsView.vue",
+    "apps/admin-web/src/views/games/detail/PaymentRoutesTab.vue",
+    "apps/admin-web/src/views/games/detail/components/TemplateConfigRenderer.vue"
+  ],
+  "referenced_modules": [
+    "channel",
+    "product",
+    "cashier-template",
+    "game-cashier",
+    "game",
+    "audit"
+  ],
+  "open_issues": [
+    "[I1][高][已修复✅🟧 · 🟪R2 集成复测闭环✅ 2026-07-01] provider 模板拉取 GET 端点缺失。修复：后端新增 GET /api/admin/cashier/providers/{providerId}/template(payment.read)，复用 PaymentRepo.GetLatestProviderTemplate 返回 accountauth.Template 四件套(camelCase)；无模板 provider→404 供前端降级。前端移除 PROVIDER_TEMPLATE_ENDPOINT_UNCONFIRMED 占位，getProviderTemplate 直连真实端点，MerchantAccountsView 抽屉正常渲染四件套并可录入 secrets。测试：handler_test.go:TestGetProviderTemplate + MerchantAccountsView.spec.ts。",
+    "[I2][中][已修复✅🟧 · 🟪R2 集成复测闭环✅ 2026-07-01] 列表 GET 缺 page/pageSize/total。现状对齐 cashier(返 total)→后端补齐 payment 列表包络：Repository/Service 四个 List 返回 total(repo 加 COUNT)，handler writeList 输出 {items,page,pageSize,total}。测试：handler_test.go:TestListPayWaysPaginationEnvelope。",
+    "[I3][中][已修复✅🟧 · 🟪R2 集成复测闭环✅ 2026-07-01] ROUTE_CONFLICT details 仅 {kind}。修复：domain RouteConflictError 增 LeftIndex/RightIndex(+LeftID/RightID)，ValidateRouteSet 记录首现位置；app routeConflictErr 映射 details=[{kind,leftIndex,rightIndex,(leftRouteId?),(rightRouteId?)}]，前端 PaymentRoutesTab 行级双色高亮。测试：handler_test.go:TestPutGameRoutesConflictDetailsCarryPositions + PaymentRoutesTab.spec.ts。",
+    "[I4][中][已修复✅🟧 · 🟪R2 集成复测闭环✅ 2026-07-01] GET routes 缺 hasDisabledReference/*Enabled。修复：ListGameRoutes SELECT 追加 pw/p/ma/ch/cp enabled(通配 COALESCE TRUE)，GameRouteRecord+RouteItemDTO enrich hasDisabledReference/payWayEnabled/providerEnabled/merchantAccountEnabled/channelEnabled/packageEnabled，前端据此行内标红。",
+    "[I5][低][文档已标注✅] GET routes 组内按 priority ASC 返回(管理台优先级链路)，运行时 ResolveRoute 走 domain PickBestRoute(specificity)序——两口径已在 handoff/checklist 明确区分，无需改代码。",
+    "[残留风险] 连库维度(S6 schema 隔离 / S10 事务回滚 / DB 唯一索引兜底)仅静态 + transport memstore/httptest 等价覆盖,真实 PG 断言(scenarios payment.yaml requiresDB=true)待 PG CI 执行。",
+    "后端：payment_routes DB 用 *_id_ref(BIGINT) 存 package/channel/pay_way/provider/merchant，domain 用字符串 selector，由 repo 做 ID⇔code 解析映射"
+  ],
+  "verification": [
+    "pnpm -C apps/admin-web build (pass)",
+    "go build ./... (pass)",
+    "go vet ./... (pass)",
+    "go test ./internal/domain/payment/... (pass)",
+    "migrations 000014 up/down paired + idempotent (static review; no live DB in sandbox)",
+    "frontend CR: compact 前端章节核对通过 (2026-07-01); pnpm -C apps/admin-web build pass after CR fix",
+    "backend CR: pass — compact 契约一致；CR 修复 DTO json/selector 嵌套 + groups payWay sort 序",
+    "backend test: go test ./internal/domain/payment/... ./internal/app/payment/... ./internal/transport/http/payment/... (pass)",
+    "backend test: go test ./... (services/admin-api, pass)",
+    "frontend test: pnpm -C apps/admin-web test (pass, 34 files / 238 tests)",
+    "frontend e2e: pnpm -C apps/admin-web e2e payment.spec.ts --workers=1 (pass, 3 tests)",
+    "integration R1 (2026-07-01): go build ./... + go test ./... (services/admin-api) pass",
+    "integration R1: go test ./internal/domain/payment/... ./internal/transport/http/payment/... ./internal/testkit/scenario/... -v pass (payment 连库场景 requiresDB=true 按设计 SKIP, S2 auth pass)",
+    "integration R1: pnpm -C apps/admin-web test pass (34 files / 238 tests) + e2e payment.spec.ts pass (3 tests)",
+    "integration R1 契约对账: 8 端点 方法/路径/权限/DTO(selector 嵌套 camelCase)/错误码 一致; 三态映射正确",
+    "integration R1 红线: 脱敏 masked / 权限 read·write / schema 隔离(业务表无前缀,静态) / 事务回滚(InTx) / IAP 隔离(无 product import) / production 无可执行 Sync / v2 唯一索引 均核验通过",
+    "integration R1 下游: ResolveRoute(ctx,gameID,MatchInput)->RouteTarget, 无候选 NOT_FOUND, 运行时剔除禁用 provider/merchant — 满足 #20 snapshot 契约",
+    "fullstack_fix (2026-07-01, 🟧): I1–I4 修复后自检 go build/vet/test ./... (services/admin-api) pass",
+    "fullstack_fix: 新增 handler_test — TestGetProviderTemplate / TestListPayWaysPaginationEnvelope / TestPutGameRoutesConflictDetailsCarryPositions pass",
+    "fullstack_fix: pnpm -C apps/admin-web test pass (34 files / 238 tests) + e2e payment.spec.ts pass (3 tests)",
+    "fullstack_fix: I1 新增 GET /cashier/providers/{providerId}/template；I2 四列表补 {items,page,pageSize,total}；I3 ROUTE_CONFLICT details 携 leftIndex/rightIndex；I4 GET routes enrich *Enabled/hasDisabledReference — 前后端 DTO 以 compact 为准自洽",
+    "integration R2 (2026-07-01): go build ./... + go vet ./... + go test ./... (services/admin-api) pass; pnpm -C apps/admin-web test pass (34 files/238); e2e payment.spec.ts pass (3)",
+    "integration R2 I1 闭环: GET /api/admin/cashier/providers/{providerId}/template (payment.read, accountauth.Template camelCase, 无模板 404); 前端 getProviderTemplate 直连、占位常量/providerTemplatePath 移除(grep 无残留); handler_test TestGetProviderTemplate 覆盖 200/404 无模板/404 无 provider/401",
+    "integration R2 I2 闭环: 4 个 List 返 {items,page,pageSize,total}(repo COUNT(*)); handler_test TestListPayWaysPaginationEnvelope(total==len)",
+    "integration R2 I3 闭环: domain RouteConflictError 携 Left/RightIndex(+ID); app details=[{kind,leftIndex,rightIndex,leftRouteId?,rightRouteId?}]; handler_test TestPutGameRoutesConflictDetailsCarryPositions(leftIndex=0,rightIndex=1)",
+    "integration R2 I4 闭环: GET routes enrich hasDisabledReference + 5 *Enabled(repo COALESCE 通配=true); DTO camelCase 与前端 GamePaymentRoute 一致",
+    "integration R2 无回归: 脱敏 masked / 权限 / schema 隔离 / 事务回滚 InTx / IAP 隔离 / production 无 Sync / v2 唯一索引 保持; 下游 ResolveRoute 契约不变; 判定=可进入功能验收",
+    "acceptance (2026-07-01): go build+test ./...(admin-api) pass; pnpm build pass; pnpm test 34f/238 pass; e2e payment.spec 3/3 pass; backend regression pass",
+    "acceptance checklist: 36/36 PASS — 五概念六表, marketMatches/PickBestRoute/ValidateRouteSet, 8+1 API, AES-GCM+masked+audit, 4 pages+game Tab, migration 000014 static, operation-flow B.8, #20 ResolveRoute contract",
+    "acceptance conclusion: PASS (0 FAIL); P3 residual: PG CI requiresDB, migration live up/down, full regression playwright port conflict"
+  ],
+  "downstream_contract": {
+    "service_method": "PaymentRouteService.ResolveRoute(ctx, gameID, MatchInput) -> (RouteTarget, error)",
+    "not_found_semantics": "无候选返回 NOT_FOUND，回退由收银台/客户端决定",
+    "consumer": "#20 snapshot 按 per-game per-market 调用"
+  },
+  "stages": {
+    "backend_dev": "done",
+    "backend_cr": "done",
+    "backend_test": "done",
+    "frontend_dev": "done",
+    "frontend_cr": "done",
+    "frontend_test": "done",
+    "integration_test": "done",
+    "fullstack_fix": "done",
+    "acceptance": "done"
+  }
+}

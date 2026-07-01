@@ -50,6 +50,38 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: "收银台", icon: "CreditCard", perm: "cashier.read" }
       },
       {
+        path: "payment",
+        component: () => import("@/views/payment/PaymentLayout.vue"),
+        redirect: "/payment/pay-ways",
+        meta: { title: "支付配置", icon: "Wallet", perm: "payment.read" },
+        children: [
+          {
+            path: "pay-ways",
+            name: "payment-pay-ways",
+            component: () => import("@/views/payment/PayWaysView.vue"),
+            meta: { title: "支付方式", hidden: true, perm: "payment.read" }
+          },
+          {
+            path: "providers",
+            name: "payment-providers",
+            component: () => import("@/views/payment/ProvidersView.vue"),
+            meta: { title: "支付提供商", hidden: true, perm: "payment.read" }
+          },
+          {
+            path: "billing-subjects",
+            name: "payment-billing-subjects",
+            component: () => import("@/views/payment/BillingSubjectsView.vue"),
+            meta: { title: "结算主体", hidden: true, perm: "payment.read" }
+          },
+          {
+            path: "merchant-accounts",
+            name: "payment-merchant-accounts",
+            component: () => import("@/views/payment/MerchantAccountsView.vue"),
+            meta: { title: "商户账户", hidden: true, perm: "payment.read" }
+          }
+        ]
+      },
+      {
         path: "audit",
         name: "audit",
         component: () => import("@/views/audit/AuditView.vue"),
