@@ -1,6 +1,12 @@
 <template>
   <el-form label-position="top" class="template-form">
     <el-form-item v-for="field in sortedFields" :key="field.key" :label="field.label || field.key">
+      <template #label>
+        <div class="field-label">
+          <span>{{ field.label || field.key }}</span>
+          <el-tag v-if="field.scope === 'server'" size="small" type="warning">仅服务端，不下发客户端</el-tag>
+        </div>
+      </template>
       <template v-if="isSecretField(field.key)">
         <div class="secret-input">
           <code v-if="hasStoredSecret(field.key)" class="secret-input__masked">{{ maskedText(field.key) }}</code>
@@ -216,6 +222,12 @@ function commitJson(key: string) {
 <style scoped>
 .template-form {
   width: 100%;
+}
+
+.field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .secret-input {

@@ -132,7 +132,7 @@
                   :show-file-list="false"
                   :accept="fileAccept(field.key)"
                   :disabled="!canWrite"
-                  :http-request="(options) => onFileUpload(field.key, options)"
+                  :http-request="(options: UploadRequestOptions) => onFileUpload(field.key, options)"
                 >
                   <el-button :disabled="!canWrite">上传文件</el-button>
                 </el-upload>
@@ -408,20 +408,20 @@ function onFileUpload(key: string, options: UploadRequestOptions) {
   const file = options.file;
   const fieldRule = fileFieldMap.value[key];
   if (!fieldRule) {
-    options.onError(new Error("文件字段配置缺失"));
+    options.onError(new Error("文件字段配置缺失") as never);
     return;
   }
   if (fieldRule.maxSizeKB && file.size > fieldRule.maxSizeKB * 1024) {
     const err = new Error(`文件超过 ${fieldRule.maxSizeKB}KB 限制`);
     ElMessage.error(err.message);
-    options.onError(err);
+    options.onError(err as never);
     return;
   }
   const accepts = fieldRule.accept ?? [];
   if (accepts.length > 0 && !accepts.some((item) => file.name.toLowerCase().endsWith(item.toLowerCase()))) {
     const err = new Error(`文件类型不符合：${accepts.join(", ")}`);
     ElMessage.error(err.message);
-    options.onError(err);
+    options.onError(err as never);
     return;
   }
   draftConfig[key] = file.name;

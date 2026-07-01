@@ -1,0 +1,596 @@
+# 模块 feature-plugin（功能插件 / 模块 15）接口场景矩阵 manifest
+# 维度定义见 docs/architecture/v2/03-testing.md §4；契约来源：
+#   docs/architecture/v2/modules/15-feature-plugin/spec.compact.md。
+# 接口挂在 channels transport（前缀 /api/admin），读 plugin.read / 写 plugin.write。
+#
+# 运行说明（与 channel-login.yaml/account-auth.yaml 一致）：
+#   进程内 httptest harness（services/admin-api/internal/testkit/scenario）为降级 handler
+#   （无 POSTGRES_DSN/ADMIN_JWT_SECRET → ready=false）：
+#     - requiresDB:false 的 S2 用例（受保护接口先过 Authn，未携带/无效令牌即 401）在沙箱内真实执行并断言。
+#     - requiresDB:true 的用例为「manifest 已声明但运行需 PG + 全装配」，进程内 harness 跳过
+#       （SCENARIO_WITH_DB=1 时由连库 harness 执行），仅保证 YAML 解析校验通过。
+#       这些维度由 domain/plugin L1（compatibility_test.go / plugin_config_test.go）
+#       + app/plugin 命令链 + transport/http/channels 等价覆盖。
+#
+# 模块维度适用性矩阵（compact + 03-testing §4）：
+#   GET  /game-channels/{id}/plugins（只读列表，含密文）：
+#        S1/S2/S3 必覆盖；S8 密文脱敏；S6 schema 隔离连库承担；
+#        S9 = 固定候选集（按渠道允许集合，非分页）→ N/A（note）；S4=非法路径参数/不存在；S5/S7/S10 → N/A。
+#   POST /game-channels/{id}/plugins（写，含密文，多步事务）：
+#        S1/S2/S3/S4/S5/S6/S7/S8/S10 覆盖。
+#        S5 = region 不兼容 MARKET_CHANNEL_INCOMPATIBLE + 唯一键 CONFLICT。
+#        S7 = 审计 plugin.configure。
+#   PATCH /game-channel-plugins/{id}（写，含密文，重算状态）：
+#        S1/S2/S3/S4/S6/S7/S8/S10 覆盖；S5 = 单行 upsert，无新建唯一键冲突 → N/A（note）。
+#   GET  /channel-packages/{id}/plugins（只读，含密文，inherit 运行态派生）：
+#        S1/S2/S3/S8 覆盖；S9 固定候选集 → N/A；S5/S7/S10 → N/A。
+#   POST /channel-packages/{id}/plugins（写，含密文，继承/自定义覆盖）：
+#        S1/S2/S3/S4/S5/S6/S7/S8/S10 覆盖。
+#
+# 红线对照（00 §9）：S8 脱敏（secret masked）、S10 事务回滚、S6 跨 env schema 隔离、
+#   必接缺口（required 未配 valid → missingRequiredPlugins / 必接不可取消勾选）、
+#   scope=server 过滤（includedInRuntimeConfig 派生）均有用例。
+module: feature-plugin
+cases:
+  # ═════════════════ 1) GET /game-channels/{id}/plugins（plugin.read，列候选+实例态+必接缺口）
+  - name: list_channel_plugins_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/plugins
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_channel_plugins_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    note: "缺 plugin.read → 403 FORBIDDEN"
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/plugins
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_channel_plugins_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: plugin_reader }
+    fixture: common/feature-plugin/catalog
+    note: "列出该渠道允许集合内插件（按 market 过滤不兼容/未启用）+ 必接标记 + 当前配置态"
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/plugins
+    expect:
+      status: 200
+      jsonContains: { data.items.0.configStatus: empty }
+  - name: list_channel_plugins_missing_required_gap
+    dimension: S1
+    requiresDB: true
+    auth: { role: plugin_reader }
+    fixture: common/feature-plugin/catalog
+    note: "必接插件未配 valid → missingRequiredPlugins 含该 pluginId（必接缺口）"
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/plugins
+    expect:
+      status: 200
+      jsonContains: { data.missingRequiredPlugins.0: realname }
+  - name: list_channel_plugins_runtime_flag_derived
+    dimension: S1
+    requiresDB: true
+    auth: { role: plugin_reader }
+    fixture: sandbox/feature-plugin/configured
+    note: "scope/运行态派生：已 valid 且勾选且兼容 → includedInRuntimeConfig=true；server 字段仅快照层过滤"
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/plugins
+    expect:
+      status: 200
+      jsonContains: { data.items.0.includedInRuntimeConfig: true }
+  - name: list_channel_plugins_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: plugin_reader }
+    fixture: sandbox/feature-plugin/configured
+    note: "已配置实例密文恒脱敏 masked，绝不回明文"
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/plugins
+    expect:
+      status: 200
+      jsonContains: { data.items.0.configJson.appSecret: masked }
+  - name: list_channel_plugins_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: plugin_reader }
+    note: "gameChannelId 不存在 → 404 NOT_FOUND"
+    request:
+      method: GET
+      path: /api/admin/game-channels/999999/plugins
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: list_channel_plugins_env_scope
+    dimension: S6
+    requiresDB: true
+    auth: { role: plugin_reader }
+    note: "隐式作用域=当前 env schema（search_path 决定），不跨 schema 读"
+    request:
+      method: GET
+      path: /api/admin/game-channels/1/plugins
+    expect:
+      status: 200
+
+  # ═════════════════ 2) POST /game-channels/{id}/plugins（plugin.write，配置/勾选，审计 plugin.configure）
+  - name: configure_channel_plugin_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: realname, enabled: true, config: { appId: "app-1", appSecret: "supersecret" } }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: configure_channel_plugin_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: plugin_reader }
+    note: "仅 plugin.read 写 → 403 FORBIDDEN"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: realname, enabled: true, config: { appId: "app-1", appSecret: "supersecret" } }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: configure_channel_plugin_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: plugin_admin }
+    fixture: common/feature-plugin/catalog
+    note: "完整配置 → 200 + configStatus=valid；密文加密落库、回显脱敏"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: realname, enabled: true, config: { appId: "app-123", appSecret: "supersecret" } }
+    expect:
+      status: 200
+      jsonContains: { data.configStatus: valid, data.configJson.appSecret: masked }
+  - name: configure_channel_plugin_enabled_missing_secret_invalid
+    dimension: S4
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "enabled=true 且缺必填密文 → configStatus=invalid（异常态落行内，遵 00 §3.4）"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: realname, enabled: true, config: { appId: "app-1" } }
+    expect:
+      status: 200
+      jsonContains: { data.configStatus: invalid }
+  - name: configure_channel_plugin_disabled_empty
+    dimension: S4
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "enabled=false → configStatus=empty（未配置态，不静默判 invalid）"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: realname, enabled: false, config: {} }
+    expect:
+      status: 200
+      jsonContains: { data.configStatus: empty }
+  - name: configure_channel_plugin_unknown_field
+    dimension: S4
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "未知字段（不在 form_schema）→ configStatus=invalid"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: realname, enabled: true, config: { appId: "app-1", appSecret: "supersecret", bogus: "x" } }
+    expect:
+      status: 200
+      jsonContains: { data.configStatus: invalid }
+  - name: configure_channel_plugin_not_in_allowed_set
+    dimension: S4
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "pluginId 不在该渠道允许集合 → 400 VALIDATION_FAILED"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: not_allowed_plugin, enabled: true, config: {} }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: configure_channel_plugin_required_cannot_deselect
+    dimension: S4
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "必接(required)且 selectable=false 插件取消勾选 → 400 VALIDATION_FAILED（必接缺口约束）"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: realname, enabled: false, config: {} }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: configure_channel_plugin_locked_rejected
+    dimension: S4
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "locked=true 插件游戏侧不可改 → 400 VALIDATION_FAILED"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: locked_plugin, enabled: true, config: {} }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: configure_channel_plugin_region_incompatible
+    dimension: S5
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "plugin.region 与渠道 market 不兼容 → 400 MARKET_CHANNEL_INCOMPATIBLE（国内/海外红线）"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: overseas_only_plugin, enabled: true, config: {} }
+    expect:
+      status: 400
+      jsonContains: { error.code: MARKET_CHANNEL_INCOMPATIBLE }
+  - name: configure_channel_plugin_conflict
+    dimension: S5
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "唯一键 (game_channel_id_ref, plugin_id_ref) 冲突 → 409 CONFLICT"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: realname, enabled: true, config: { appId: "app-123", appSecret: "supersecret" } }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: configure_channel_plugin_env_scope
+    dimension: S6
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "写落当前 env schema（search_path 决定），不接受前端指定/跨 schema 写"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: realname, enabled: true, config: { appId: "app-123", appSecret: "supersecret" } }
+    expect:
+      status: 200
+  - name: configure_channel_plugin_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "成功配置写 audit_logs action=plugin.configure（detail 脱敏）；失败不写"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: realname, enabled: true, config: { appId: "app-123", appSecret: "supersecret" } }
+    expect:
+      status: 200
+  - name: configure_channel_plugin_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "响应密文恒 masked；明文禁回显/禁落库（明文加密落库）"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: realname, enabled: true, config: { appId: "app-123", appSecret: "supersecret" } }
+    expect:
+      status: 200
+      jsonContains: { data.configJson.appSecret: masked }
+  - name: configure_channel_plugin_transaction_rollback
+    dimension: S10
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "兼容性校验→模板校验→落库+审计多步事务中途失败 → 整体回滚，无部分写入"
+    request:
+      method: POST
+      path: /api/admin/game-channels/1/plugins
+      body: { pluginId: realname, enabled: true, config: { appId: "app-123", appSecret: "supersecret" } }
+    expect:
+      status: 500
+
+  # ═════════════════ 3) PATCH /game-channel-plugins/{id}（plugin.write，改配置/启停，重算 config_status）
+  - name: patch_channel_plugin_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: PATCH
+      path: /api/admin/game-channel-plugins/1
+      body: { enabled: true, config: { appId: "app-1", appSecret: "supersecret" } }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: patch_channel_plugin_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: plugin_reader }
+    note: "仅 plugin.read 写 → 403 FORBIDDEN"
+    request:
+      method: PATCH
+      path: /api/admin/game-channel-plugins/1
+      body: { enabled: true, config: { appId: "app-1", appSecret: "supersecret" } }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: patch_channel_plugin_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: plugin_admin }
+    fixture: sandbox/feature-plugin/configured
+    note: "改配置 → 200 + 重算 configStatus=valid；密文加密落库、回显脱敏"
+    request:
+      method: PATCH
+      path: /api/admin/game-channel-plugins/1
+      body: { enabled: true, config: { appId: "app-456", appSecret: "newsecret" } }
+    expect:
+      status: 200
+      jsonContains: { data.configStatus: valid, data.configJson.appSecret: masked }
+  - name: patch_channel_plugin_missing_secret_invalid
+    dimension: S4
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "enabled=true 缺必填密文 → 重算 configStatus=invalid"
+    request:
+      method: PATCH
+      path: /api/admin/game-channel-plugins/1
+      body: { enabled: true, config: { appId: "app-1" } }
+    expect:
+      status: 200
+      jsonContains: { data.configStatus: invalid }
+  - name: patch_channel_plugin_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "id 不存在 → 404 NOT_FOUND"
+    request:
+      method: PATCH
+      path: /api/admin/game-channel-plugins/999999
+      body: { enabled: false }
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: patch_channel_plugin_env_scope
+    dimension: S6
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "写落当前 env schema（search_path 决定），不跨 schema 写"
+    request:
+      method: PATCH
+      path: /api/admin/game-channel-plugins/1
+      body: { enabled: true, config: { appId: "app-456", appSecret: "newsecret" } }
+    expect:
+      status: 200
+  - name: patch_channel_plugin_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "成功 PATCH 写 audit_logs action=plugin.configure（detail 脱敏）；失败不写"
+    request:
+      method: PATCH
+      path: /api/admin/game-channel-plugins/1
+      body: { enabled: true, config: { appId: "app-456", appSecret: "newsecret" } }
+    expect:
+      status: 200
+  - name: patch_channel_plugin_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "响应密文恒 masked；重填 masked 占位时沿用旧密文不覆盖"
+    request:
+      method: PATCH
+      path: /api/admin/game-channel-plugins/1
+      body: { enabled: true, config: { appId: "app-456", appSecret: "masked" } }
+    expect:
+      status: 200
+      jsonContains: { data.configJson.appSecret: masked }
+  - name: patch_channel_plugin_transaction_rollback
+    dimension: S10
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "upsert 中途失败 → 整体回滚，无部分写入，不写审计"
+    request:
+      method: PATCH
+      path: /api/admin/game-channel-plugins/1
+      body: { enabled: true, config: { appId: "app-456", appSecret: "newsecret" } }
+    expect:
+      status: 500
+
+  # ═════════════════ 4) GET /channel-packages/{id}/plugins（plugin.read，渠道包覆盖列表，inherit 运行态派生）
+  - name: list_package_plugins_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/channel-packages/1/plugins
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_package_plugins_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    note: "缺 plugin.read → 403 FORBIDDEN"
+    request:
+      method: GET
+      path: /api/admin/channel-packages/1/plugins
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_package_plugins_inherit_runtime_derived
+    dimension: S1
+    requiresDB: true
+    auth: { role: plugin_reader }
+    fixture: sandbox/feature-plugin/configured
+    note: "inherit_channel_config=true → 运行态沿用渠道实例配置派生 includedInRuntimeConfig"
+    request:
+      method: GET
+      path: /api/admin/channel-packages/1/plugins
+    expect:
+      status: 200
+      jsonContains: { data.0.inheritChannelConfig: true }
+  - name: list_package_plugins_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: plugin_reader }
+    fixture: sandbox/feature-plugin/configured
+    note: "渠道包覆盖密文恒脱敏 masked"
+    request:
+      method: GET
+      path: /api/admin/channel-packages/1/plugins
+    expect:
+      status: 200
+      jsonContains: { data.0.config.appSecret: masked }
+  - name: list_package_plugins_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: plugin_reader }
+    note: "packageId 不存在 → 404 NOT_FOUND"
+    request:
+      method: GET
+      path: /api/admin/channel-packages/999999/plugins
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+
+  # ═════════════════ 5) POST /channel-packages/{id}/plugins（plugin.write，继承/自定义覆盖，仅存差异）
+  - name: override_package_plugin_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/channel-packages/1/plugins
+      body: { pluginId: realname, inheritChannelConfig: false, enabled: true, config: { appId: "p-1", appSecret: "supersecret" } }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: override_package_plugin_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: plugin_reader }
+    note: "仅 plugin.read 写 → 403 FORBIDDEN"
+    request:
+      method: POST
+      path: /api/admin/channel-packages/1/plugins
+      body: { pluginId: realname, inheritChannelConfig: false, enabled: true, config: { appId: "p-1", appSecret: "supersecret" } }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: override_package_plugin_inherit_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: plugin_admin }
+    fixture: common/feature-plugin/catalog
+    note: "inherit=true → 仅记继承标记，config 清空、enabled=false（沿用渠道）"
+    request:
+      method: POST
+      path: /api/admin/channel-packages/1/plugins
+      body: { pluginId: realname, inheritChannelConfig: true }
+    expect:
+      status: 200
+      jsonContains: { data.inheritChannelConfig: true, data.configStatus: empty }
+  - name: override_package_plugin_custom_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: plugin_admin }
+    fixture: common/feature-plugin/catalog
+    note: "inherit=false 自定义覆盖（仅存差异）→ 200 + configStatus=valid；密文回显脱敏"
+    request:
+      method: POST
+      path: /api/admin/channel-packages/1/plugins
+      body: { pluginId: realname, inheritChannelConfig: false, enabled: true, config: { appId: "pkg-1", appSecret: "pkgsecret" } }
+    expect:
+      status: 200
+      jsonContains: { data.configStatus: valid, data.config.appSecret: masked }
+  - name: override_package_plugin_custom_missing_secret_invalid
+    dimension: S4
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "自定义覆盖 enabled=true 缺必填密文 → configStatus=invalid"
+    request:
+      method: POST
+      path: /api/admin/channel-packages/1/plugins
+      body: { pluginId: realname, inheritChannelConfig: false, enabled: true, config: { appId: "pkg-1" } }
+    expect:
+      status: 200
+      jsonContains: { data.configStatus: invalid }
+  - name: override_package_plugin_region_incompatible
+    dimension: S5
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "plugin.region 与渠道包 market 不兼容 → 400 MARKET_CHANNEL_INCOMPATIBLE"
+    request:
+      method: POST
+      path: /api/admin/channel-packages/1/plugins
+      body: { pluginId: overseas_only_plugin, inheritChannelConfig: false, enabled: true, config: {} }
+    expect:
+      status: 400
+      jsonContains: { error.code: MARKET_CHANNEL_INCOMPATIBLE }
+  - name: override_package_plugin_conflict
+    dimension: S5
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "唯一键 (package_id_ref, plugin_id_ref) 冲突 → 409 CONFLICT"
+    request:
+      method: POST
+      path: /api/admin/channel-packages/1/plugins
+      body: { pluginId: realname, inheritChannelConfig: false, enabled: true, config: { appId: "pkg-1", appSecret: "pkgsecret" } }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: override_package_plugin_env_scope
+    dimension: S6
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "写落当前 env schema（search_path 决定），不跨 schema 写"
+    request:
+      method: POST
+      path: /api/admin/channel-packages/1/plugins
+      body: { pluginId: realname, inheritChannelConfig: false, enabled: true, config: { appId: "pkg-1", appSecret: "pkgsecret" } }
+    expect:
+      status: 200
+  - name: override_package_plugin_writes_audit
+    dimension: S7
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "成功覆盖写 audit_logs action=plugin.configure（detail 脱敏）；失败不写"
+    request:
+      method: POST
+      path: /api/admin/channel-packages/1/plugins
+      body: { pluginId: realname, inheritChannelConfig: false, enabled: true, config: { appId: "pkg-1", appSecret: "pkgsecret" } }
+    expect:
+      status: 200
+  - name: override_package_plugin_masks_secret
+    dimension: S8
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "响应密文恒 masked；明文加密落库不回显"
+    request:
+      method: POST
+      path: /api/admin/channel-packages/1/plugins
+      body: { pluginId: realname, inheritChannelConfig: false, enabled: true, config: { appId: "pkg-1", appSecret: "pkgsecret" } }
+    expect:
+      status: 200
+      jsonContains: { data.config.appSecret: masked }
+  - name: override_package_plugin_transaction_rollback
+    dimension: S10
+    requiresDB: true
+    auth: { role: plugin_admin }
+    note: "覆盖落库+审计多步事务中途失败 → 整体回滚，无部分写入"
+    request:
+      method: POST
+      path: /api/admin/channel-packages/1/plugins
+      body: { pluginId: realname, inheritChannelConfig: false, enabled: true, config: { appId: "pkg-1", appSecret: "pkgsecret" } }
+    expect:
+      status: 500

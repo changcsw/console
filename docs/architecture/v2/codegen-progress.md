@@ -30,7 +30,7 @@
 | 12 | `channel` | `channels-surface` | game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 旧模块，详细审计已归档 |
 | 13 | `account-auth` | `games-surface` | channel, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 旧模块，详细审计已归档 |
 | 14 | `channel-login` | `channels-surface` | channel, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 15/15 PASS；4 项 P3 移交集成阶段；已合并至 main |
-| 15 | `feature-plugin` | `channels-surface` | channel, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 与 `channel-login` 同 lane，二选一先开 |
+| 15 | `feature-plugin` | `channels-surface` | channel, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 29/29 PASS；🟪2轮(I-1契约漂移+P3)已闭合；遗留 P2/审计拆分/迁移000012协调 非阻断移交集成 |
 | 16 | `product` | `games-surface` | channel, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 已合并至 main |
 | 17 | `cashier-template` | `cashier-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 全流程完成（验收 29/29 PASS）；遗留非阻断·跨模块 |
 | 18 | `game-cashier` | `cashier-surface` | cashier-template, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 25/25 PASS；集成2轮(taxRate漂移/checksum/重复键)修复；含跨模块 #17 发布 checksum 改动(checklist 已标注)；遗留连库维度待 PG CI |
@@ -49,10 +49,10 @@
 | lane | 推荐起始模块 | 当前状态 | 说明 |
 | --- | --- | --- | --- |
 | `games-surface` | （已全部完成） | ✅ 完成 | game / account-auth / product 三模块均 ✅，本 lane 收官 |
-| `channels-surface` | `feature-plugin` | ✅ 可开工 | `channel-login` 已完成；与其同 lane，二选一先开 |
-| `cashier-surface` | （已全部完成） | ✅ 完成 | cashier-template / game-cashier 均 ✅，本 lane 收官（含 #17 发布 checksum 跨模块修复，待集成 Chat 合并 main） |
+| `channels-surface` | （已全部完成） | ✅ 完成 | channel / channel-login / feature-plugin 三模块均 ✅，本 lane 收官 |
+| `cashier-surface` | （已全部完成） | ✅ 完成 | cashier-template / game-cashier 均 ✅，本 lane 收官（含 #17 发布 checksum 跨模块修复） |
 | `audit-surface` | （已全部完成） | ✅ 完成 | audit 已合并至 main |
-| `payment-surface` | `payment` | ✅ 可开工 | 依赖 channel/product/cashier-template/game-cashier/game 均已完成（game-cashier 待集成合并 main） |
+| `payment-surface` | `payment` | ✅ 可开工 | 依赖 channel/product/cashier-template/game-cashier/game 均已完成 |
 | `runtime-surface` | `snapshot` | ⛔ 阻塞 | 等待 14/15/16/17/18/19 |
 | `dashboard-surface` | `dashboard` | ⛔ 阻塞 | 等待 `sync` |
 
@@ -64,7 +64,7 @@
 
 | 模块 | lane | 当前阶段 | worktree / branch | handoff.summary.md | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| `game-cashier` (#18) | cashier-surface | ✅ 验收通过，待集成合并 main | console / codex/game-cashier | docs/architecture/v2/modules/18-game-cashier/artifacts/handoff.summary.md | 含跨模块 #17 发布 checksum 修复；next=新开 Chat 集成合并（或与 feature-plugin 一并） |
+| — | — | — | — | — | 当前无在制模块（#14/#15/#16/#17/#18/#22 已完成并合并 main） |
 
 > 总 Agent 每次只维护当前模块这一行；模块完成或阻塞后即清空或转历史，不把长日志写回本文件。
 

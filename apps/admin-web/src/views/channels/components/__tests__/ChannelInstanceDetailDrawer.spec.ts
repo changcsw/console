@@ -6,6 +6,7 @@ import permDirective from "@/directives/perm";
 import { usePermissionStore } from "@/stores/permission";
 import ChannelInstanceDetailDrawer from "@/views/channels/components/ChannelInstanceDetailDrawer.vue";
 import ChannelLoginConfigPanel from "@/views/channels/components/ChannelLoginConfigPanel.vue";
+import FeaturePluginConfigPanel from "@/views/channels/components/FeaturePluginConfigPanel.vue";
 
 const getMarketChannelApi = vi.fn();
 const listChannelPackagesApi = vi.fn();
@@ -16,6 +17,11 @@ const createChannelPackageApi = vi.fn();
 const updateChannelPackageApi = vi.fn();
 const getLoginConfigApi = vi.fn();
 const putLoginConfigApi = vi.fn();
+const listGameChannelPluginsApi = vi.fn();
+const upsertGameChannelPluginApi = vi.fn();
+const patchGameChannelPluginApi = vi.fn();
+const listChannelPackagePluginsApi = vi.fn();
+const upsertChannelPackagePluginApi = vi.fn();
 
 vi.mock("@/api/modules/channels", () => ({
   getMarketChannel: (...args: unknown[]) => getMarketChannelApi(...args),
@@ -26,7 +32,12 @@ vi.mock("@/api/modules/channels", () => ({
   createChannelPackage: (...args: unknown[]) => createChannelPackageApi(...args),
   updateChannelPackage: (...args: unknown[]) => updateChannelPackageApi(...args),
   getLoginConfig: (...args: unknown[]) => getLoginConfigApi(...args),
-  putLoginConfig: (...args: unknown[]) => putLoginConfigApi(...args)
+  putLoginConfig: (...args: unknown[]) => putLoginConfigApi(...args),
+  listGameChannelPlugins: (...args: unknown[]) => listGameChannelPluginsApi(...args),
+  upsertGameChannelPlugin: (...args: unknown[]) => upsertGameChannelPluginApi(...args),
+  patchGameChannelPlugin: (...args: unknown[]) => patchGameChannelPluginApi(...args),
+  listChannelPackagePlugins: (...args: unknown[]) => listChannelPackagePluginsApi(...args),
+  upsertChannelPackagePlugin: (...args: unknown[]) => upsertChannelPackagePluginApi(...args)
 }));
 
 import { loginConfigResponse } from "./fixtures/channelLogin";
@@ -60,6 +71,8 @@ describe("ChannelInstanceDetailDrawer", () => {
       createdAt: "2026-01-01T00:00:00Z"
     });
     listChannelPackagesApi.mockResolvedValue([]);
+    listGameChannelPluginsApi.mockResolvedValue([]);
+    listChannelPackagePluginsApi.mockResolvedValue([]);
   });
 
   test("canWrite 基于 computed，权限变更后输入禁用态可响应更新", async () => {
@@ -139,5 +152,61 @@ describe("ChannelInstanceDetailDrawer", () => {
     // account_system → 不渲染「渠道登录」页签，亦不拉取 login-config
     expect(wrapper.findComponent(ChannelLoginConfigPanel).exists()).toBe(false);
     expect(getLoginConfigApi).not.toHaveBeenCalled();
+  });
+
+  test("详情抽屉始终展示「功能插件」并拉取插件列表", async () => {
+    setActivePinia(createPinia());
+    usePermissionStore().setFromUser({ roles: [], permissions: ["channel.read", "plugin.read"] });
+    getMarketChannelApi.mockResolvedValue({
+      gameChannelId: 202,
+      displayKey: "100001:GLOBAL:google",
+      gameId: "100001",
+      market: "GLOBAL",
+      channelId: "google",
+      region: "overseas",
+      compatible: true,
+      hidden: false,
+      configStatus: "valid",
+      includedInSnapshot: true,
+      includedInSync: true,
+      includedInRuntimeConfig: true,
+      copiedFromMarket: "",
+      updatedAt: "2026-01-01T00:00:00Z",
+      enabled: true,
+      remark: "",
+      hiddenBy: "",
+      hiddenAt: null,
+      lastCheckAt: null,
+      lastCheckMessage: "",
+      createdAt: "2026-01-01T00:00:00Z"
+    });
+    listGameChannelPluginsApi.mockResolvedValue([]);
+
+    const wrapper = mount(ChannelInstanceDetailDrawer, {
+      props: { open: false, gameChannelId: 202 },
+      global: { directives: { perm: permDirective } }
+    });
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+
+    expect(wrapper.html()).toContain("功能插件");
+    expect(listGameChannelPluginsApi).toHaveBeenCalledWith(202);
+  });
+
+  test("无 plugin.write 时功能插件面板按 canPluginWrite=false 置灰", async () => {
+    setActivePinia(createPinia());
+    usePermissionStore().setFromUser({ roles: [], permissions: ["channel.read", "plugin.read"] });
+    listGameChannelPluginsApi.mockResolvedValue([]);
+
+    const wrapper = mount(ChannelInstanceDetailDrawer, {
+      props: { open: false, gameChannelId: 1 },
+      global: { directives: { perm: permDirective } }
+    });
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+
+    const panel = wrapper.findComponent(FeaturePluginConfigPanel);
+    expect(panel.exists()).toBe(true);
+    expect(panel.props("canWrite")).toBe(false);
   });
 });

@@ -31,10 +31,15 @@ func RegisterRoutes(r chi.Router, h *Handler, issuer adminapp.TokenIssuer, env c
 		gr.With(mw.RequirePerm("channel.write")).Post("/game-channels/{gameChannelId}/unhide", h.UnhideMarketChannel)
 		gr.With(mw.RequirePerm("channel.read")).Get("/game-channels/{gameChannelId}/login-config", h.GetLoginConfig)
 		gr.With(mw.RequirePerm("channel.write")).Put("/game-channels/{gameChannelId}/login-config", h.PutLoginConfig)
+		gr.With(mw.RequirePerm("plugin.read")).Get("/game-channels/{gameChannelId}/plugins", h.ListChannelPlugins)
+		gr.With(mw.RequirePerm("plugin.write")).Post("/game-channels/{gameChannelId}/plugins", h.ConfigureChannelPlugin)
+		gr.With(mw.RequirePerm("plugin.write")).Patch("/game-channel-plugins/{id}", h.PatchChannelPlugin)
 
 		// 渠道包。
 		gr.With(mw.RequirePerm("channel.read")).Get("/game-channels/{gameChannelId}/packages", h.ListPackages)
 		gr.With(mw.RequirePerm("channel.write")).Post("/game-channels/{gameChannelId}/packages", h.CreatePackage)
 		gr.With(mw.RequirePerm("channel.write")).Patch("/channel-packages/{packageId}", h.UpdatePackage)
+		gr.With(mw.RequirePerm("plugin.read")).Get("/channel-packages/{packageId}/plugins", h.ListPackagePlugins)
+		gr.With(mw.RequirePerm("plugin.write")).Post("/channel-packages/{packageId}/plugins", h.OverridePackagePlugin)
 	})
 }

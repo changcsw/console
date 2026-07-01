@@ -166,6 +166,15 @@
               @changed="onLoginConfigChanged"
             />
           </el-tab-pane>
+
+          <el-tab-pane label="功能插件" name="feature-plugin">
+            <FeaturePluginConfigPanel
+              :game-channel-id="detail.gameChannelId"
+              :detail="detail"
+              :can-write="canPluginWrite"
+              @changed="onLoginConfigChanged"
+            />
+          </el-tab-pane>
         </el-tabs>
       </template>
     </div>
@@ -192,6 +201,7 @@ import {
 import ChannelInstanceStatusTag from "./ChannelInstanceStatusTag.vue";
 import ChannelInstanceRuntimeFlags from "./ChannelInstanceRuntimeFlags.vue";
 import ChannelLoginConfigPanel from "./ChannelLoginConfigPanel.vue";
+import FeaturePluginConfigPanel from "./FeaturePluginConfigPanel.vue";
 import ChannelPackageDetailDrawer from "./ChannelPackageDetailDrawer.vue";
 import { regionLabel } from "../constants";
 
@@ -207,6 +217,7 @@ const emit = defineEmits<{
 
 const permission = usePermissionStore();
 const canWrite = computed(() => permission.hasPerm("channel.write"));
+const canPluginWrite = computed(() => permission.hasPerm("plugin.write"));
 
 const loading = ref(false);
 const detail = ref<MarketChannelDetail | null>(null);
@@ -215,7 +226,7 @@ const packages = ref<ChannelPackage[]>([]);
 const editEnabled = ref(true);
 const editRemark = ref("");
 const savingBasic = ref(false);
-const activeTab = ref<"basic" | "packages" | "channel-login">("basic");
+const activeTab = ref<"basic" | "packages" | "channel-login" | "feature-plugin">("basic");
 
 const creatingPkg = ref(false);
 const savingPkg = ref(false);
