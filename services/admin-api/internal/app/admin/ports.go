@@ -9,6 +9,7 @@ import (
 
 	domainadmin "github.com/csw/console/services/admin-api/internal/domain/admin"
 	domainauth "github.com/csw/console/services/admin-api/internal/domain/auth"
+	"github.com/csw/console/services/admin-api/internal/domain/common"
 )
 
 // 应用层错误哨兵，handler 据此映射全局错误码（00 §7.4）。
@@ -90,6 +91,7 @@ type AuditEntry struct {
 	Action       string
 	ResourceType string
 	ResourceID   string
+	Env          common.Environment
 	Detail       map[string]any
 	SecretKeys   []string
 }

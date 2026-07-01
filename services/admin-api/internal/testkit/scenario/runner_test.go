@@ -34,18 +34,21 @@ func TestRunCaseDetectsStatusMismatch(t *testing.T) {
 	}
 }
 
-func TestRunCaseSyncPreviewRejectsUnknownSection(t *testing.T) {
+// sync/preview 是受保护的真实路由（sync.preview 权限）；进程内无令牌时应被 Authn 拦为 401。
+// 未知 section 的 400 断言需到达 handler（连库 harness / handler 单测覆盖，见
+// transport/http/sync 的 TestPreviewSyncRejectsUnknownSection 与 tests/backend/scenarios/sync.yaml）。
+func TestRunCaseSyncPreviewRequiresAuth(t *testing.T) {
 	res := RunCase(testHandler(), Case{
-		Name: "sync_preview_unknown_section",
+		Name: "sync_preview_requires_auth",
 		Request: Request{
 			Method: "POST",
 			Path:   "/api/admin/games/100001/sync/preview",
-			Body:   map[string]any{"selected_sections": []any{"marketing"}},
+			Body:   map[string]any{"sections": []any{"channels"}},
 		},
-		Expect: Expect{Status: 400},
+		Expect: Expect{Status: 401, JSONContains: map[string]any{"error.code": "UNAUTHENTICATED"}},
 	})
 	if !res.Passed {
-		t.Fatalf("expected 400 for unknown section, got: %s", res.Message)
+		t.Fatalf("expected 401 for unauthenticated sync preview, got: %s", res.Message)
 	}
 }
 

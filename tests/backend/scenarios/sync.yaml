@@ -1,0 +1,257 @@
+# 模块 sync（#21 · Sandbox→Production 同步）接口场景矩阵 manifest
+# 维度定义见 docs/architecture/v2/03-testing.md §4（S1-S10）。
+# 接口契约见 docs/architecture/v2/modules/21-sync/spec.compact.md。
+#
+# 运行约定：
+# - requiresDB=false：进程内 scenario harness 直接执行（本模块典型是 S2 鉴权 401；
+#   degraded 装配已挂载 sync 路由形状，未带令牌 → Authn 返回 401）。
+# - requiresDB=true：声明连库场景（PG CI 执行，设 SCENARIO_WITH_DB=1）；核心领域/双闸门/
+#   事务回滚/脱敏/审计行为已由 domain 单测 + app service 单测（fake repo）等价覆盖。
+#   连库需先灌 fixtures：sandbox/sync.sql + production/sync.sql（含 RBAC + 100001 差异样本）。
+#
+# 3 接口 × 维度对照（N/A 见各 case note）：
+#   POST .../sync/preview  : S1 S2 S3 S4 S6 S8            (S5/S7/S9/S10 N/A)
+#   POST .../sync/execute  : S1 S2 S3 S4 S5 S6 S7 S8 S10  (S9 N/A) + 私有：双闸门/拓扑/删除 opt-in
+#   GET  .../sync-jobs     : S1 S2 S3 S6 S9               (S4/S5/S7/S8/S10 N/A)
+module: sync
+cases:
+  # ═════════════════ POST /games/{gameId}/sync/preview（写 previewed / sync.preview）
+  - name: preview_requires_auth
+    dimension: S2
+    requiresDB: false
+    request: { method: POST, path: /api/admin/games/100001/sync/preview }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: preview_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: sync_reader_noperm }
+    note: "缺 sync.preview 权限码 → 403"
+    request: { method: POST, path: /api/admin/games/100001/sync/preview }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: preview_success_returns_baseline_token
+    dimension: S1
+    requiresDB: true
+    auth: { role: sync_operator }
+    fixture: sandbox/sync/base
+    note: "采集 sandbox/production 有效数据 → 按 section 产出 add/update/delete + sourceHash/targetHashBefore + baselineToken，落 sync_jobs(previewed)+items(applied=false)"
+    request: { method: POST, path: /api/admin/games/100001/sync/preview, body: { sections: ["channels", "products"], includeDeletes: false } }
+    expect:
+      status: 200
+      jsonContains: { data.sourceEnv: sandbox, data.targetEnv: production }
+  - name: preview_unknown_section
+    dimension: S4
+    requiresDB: true
+    auth: { role: sync_operator }
+    note: "sections 含非 9 枚举 → UNKNOWN_SECTION(400)（handler 级另有 domain/sync + transport 单测覆盖）"
+    request: { method: POST, path: /api/admin/games/100001/sync/preview, body: { sections: ["channels", "iap"] } }
+    expect:
+      status: 400
+      jsonContains: { error.code: UNKNOWN_SECTION }
+  - name: preview_game_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: sync_operator }
+    note: "sandbox 不存在该 game → NOT_FOUND(404)"
+    request: { method: POST, path: /api/admin/games/999999/sync/preview }
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: preview_schema_isolation_sandbox_to_production
+    dimension: S6
+    requiresDB: true
+    auth: { role: sync_operator }
+    fixture: sandbox/sync/base
+    note: "sync 域是唯一显式跨 schema 域；方向恒 sandbox→production，前端不可指定 env"
+    request: { method: POST, path: /api/admin/games/100001/sync/preview }
+    expect:
+      status: 200
+      jsonContains: { data.sourceEnv: sandbox, data.targetEnv: production }
+  - name: preview_masks_ciphertext
+    dimension: S8
+    requiresDB: true
+    auth: { role: sync_operator }
+    fixture: sandbox/sync/secret
+    note: "含 secret/ciphertext 的字段差异 masked=true、值恒 'masked'，绝不回明文（domain DiffEntities 单测已守护该逻辑）"
+    request: { method: POST, path: /api/admin/games/100001/sync/preview, body: { sections: ["channels"] } }
+    expect:
+      status: 200
+  # S5 N/A：preview 幂等重算，无唯一键/状态冲突。
+  # S7 N/A：preview 不写审计（仅 execute 写）。
+  # S9 N/A：非列表接口。
+  # S10 N/A：preview 写 sync_jobs+items（单聚合），失败整体不落，非跨业务表红线事务（execute 才是 S10 重点）。
+
+  # ═════════════════ POST /games/{gameId}/sync/execute（危险写 / sync.execute / 必审计 / 单事务）
+  - name: execute_requires_auth
+    dimension: S2
+    requiresDB: false
+    request: { method: POST, path: /api/admin/games/100001/sync/execute }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: execute_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: sync_operator_preview_only }
+    note: "有 sync.preview 无 sync.execute → 403（危险操作权限隔离）"
+    request: { method: POST, path: /api/admin/games/100001/sync/execute, body: { selectedSections: ["channels"], baselineToken: "t" } }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: execute_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: sync_executor }
+    fixture: production/sync/base
+    note: "先 preview 取 token → execute：审定 nonce→baseline→依赖→拓扑 upsert（单事务），succeeded + target_hash_after + applied=true"
+    request: { method: POST, path: /api/admin/games/100001/sync/execute, body: { selectedSections: ["game"], baselineToken: "<from-preview>", includeDeletes: false } }
+    expect:
+      status: 200
+      jsonContains: { data.status: succeeded, data.targetEnv: production }
+  - name: execute_unknown_section
+    dimension: S4
+    requiresDB: true
+    auth: { role: sync_executor }
+    note: "selectedSections 含非枚举 → UNKNOWN_SECTION(400)（transport 单测 TestExecuteSyncRejectsUnknownSection 亦覆盖）"
+    request: { method: POST, path: /api/admin/games/100001/sync/execute, body: { selectedSections: ["channels", "bogus"], baselineToken: "t" } }
+    expect:
+      status: 400
+      jsonContains: { error.code: UNKNOWN_SECTION }
+  - name: execute_invalid_token_validation
+    dimension: S4
+    requiresDB: true
+    auth: { role: sync_executor }
+    note: "token 无法验签/过期/game·env 不匹配 → VALIDATION_FAILED(400)（app 单测 TestExecuteInvalidToken/Expired/GameMismatch 覆盖）"
+    request: { method: POST, path: /api/admin/games/100001/sync/execute, body: { selectedSections: ["game"], baselineToken: "garbage.token" } }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: execute_baseline_mismatch
+    dimension: S5
+    requiresDB: true
+    auth: { role: sync_executor }
+    fixture: production/sync/drifted
+    note: "闸门①基线复核：production 预览后被改动，实时 hash≠targetHashBefore → SYNC_BASELINE_MISMATCH(409)，details 含 expected/actual"
+    request: { method: POST, path: /api/admin/games/100001/sync/execute, body: { selectedSections: ["game"], baselineToken: "<stale-token>" } }
+    expect:
+      status: 409
+      jsonContains: { error.code: SYNC_BASELINE_MISMATCH }
+  - name: execute_token_consumed
+    dimension: S5
+    requiresDB: true
+    auth: { role: sync_executor }
+    fixture: production/sync/base
+    note: "闸门②nonce 去重：同一 token 二次 execute（重试/双击）→ SYNC_TOKEN_CONSUMED(409)，details 含 consumedSyncJobId（app 单测覆盖预检 + 事务内并发冲突两条路径）"
+    request: { method: POST, path: /api/admin/games/100001/sync/execute, body: { selectedSections: ["game"], baselineToken: "<already-consumed>" } }
+    expect:
+      status: 409
+      jsonContains: { error.code: SYNC_TOKEN_CONSUMED }
+  - name: execute_dependency_missing_validation
+    dimension: S4
+    requiresDB: true
+    auth: { role: sync_executor }
+    fixture: production/sync/empty
+    note: "所选 section 前置在 production 缺失且未同批选中 → VALIDATION_FAILED(400)，details 含 {section,missingDependency,entityKey}（app 单测 TestExecuteDependencyMissing 覆盖）"
+    request: { method: POST, path: /api/admin/games/100001/sync/execute, body: { selectedSections: ["channels"], baselineToken: "<token>" } }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: execute_schema_isolation_writes_production
+    dimension: S6
+    requiresDB: true
+    auth: { role: sync_executor }
+    fixture: production/sync/base
+    note: "upsert 以 schema 限定名写 production；source_env 恒 sandbox 兜底，前端不可越权写 production"
+    request: { method: POST, path: /api/admin/games/100001/sync/execute, body: { selectedSections: ["game"], baselineToken: "<token>" } }
+    expect:
+      status: 200
+      jsonContains: { data.sourceEnv: sandbox, data.targetEnv: production }
+  - name: execute_writes_audit_env_production
+    dimension: S7
+    requiresDB: true
+    auth: { role: sync_executor }
+    fixture: production/sync/base
+    note: "成功写一条 audit_logs(action=sync.execute, env=production, detail 脱敏含计数/hash)（app 单测 TestExecuteSuccessWritesAuditWithProductionEnv 断言 Action/Env/ActorID/detail）"
+    request: { method: POST, path: /api/admin/games/100001/sync/execute, body: { selectedSections: ["game"], baselineToken: "<token>" } }
+    expect:
+      status: 200
+  - name: execute_masks_secret_no_plaintext
+    dimension: S8
+    requiresDB: true
+    auth: { role: sync_executor }
+    fixture: production/sync/secret
+    note: "响应/审计 detail 密文恒 masked；upsert 取密文重加密不经明文中转（app 单测 TestPreviewCreatesJobAndVerifiableToken 断言 masked item 不落明文）"
+    request: { method: POST, path: /api/admin/games/100001/sync/execute, body: { selectedSections: ["channels"], baselineToken: "<token>" } }
+    expect:
+      status: 200
+  - name: execute_transaction_rollback_no_partial_write
+    dimension: S10
+    requiresDB: true
+    auth: { role: sync_executor }
+    fixture: production/sync/base
+    note: "有序 upsert 中途失败 → 整体回滚、sync_jobs(failed)、nonce 记录随事务回滚、不部分写入（app 单测 TestExecuteTransactionRollbackOnApplyFailure 断言 nonce 未消费/无审计/failed）"
+    request: { method: POST, path: /api/admin/games/100001/sync/execute, body: { selectedSections: ["game", "markets", "channels"], baselineToken: "<token>" } }
+    expect:
+      status: 500
+      jsonContains: { error.code: INTERNAL }
+  # S9 N/A：非列表接口。
+
+  # ═════════════════ GET /games/{gameId}/sync-jobs（读列表 / sync.preview / 分页 / created_at desc）
+  - name: list_jobs_requires_auth
+    dimension: S2
+    requiresDB: false
+    request: { method: GET, path: /api/admin/games/100001/sync-jobs }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_jobs_forbidden_without_perm
+    dimension: S3
+    requiresDB: true
+    auth: { role: sync_reader_noperm }
+    note: "缺 sync.preview 权限码 → 403"
+    request: { method: GET, path: /api/admin/games/100001/sync-jobs }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_jobs_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: sync_operator }
+    fixture: production/sync/jobs
+    note: "返回 data.{items,page,pageSize,total}，含 previewed/succeeded/failed 历史行"
+    request: { method: GET, path: "/api/admin/games/100001/sync-jobs?page=1&pageSize=20" }
+    expect:
+      status: 200
+  - name: list_jobs_pagination_clamp
+    dimension: S9
+    requiresDB: true
+    auth: { role: sync_operator }
+    fixture: production/sync/jobs
+    note: "pageSize 上限 100、page<=0 归 1；created_at DESC 默认序（app 单测 TestListJobsPaginationClamp 覆盖钳制）"
+    request: { method: GET, path: "/api/admin/games/100001/sync-jobs?page=0&pageSize=99999" }
+    expect:
+      status: 200
+  - name: list_jobs_status_filter
+    dimension: S9
+    requiresDB: true
+    auth: { role: sync_operator }
+    fixture: production/sync/jobs
+    note: "status 过滤（succeeded/failed/previewed）生效"
+    request: { method: GET, path: "/api/admin/games/100001/sync-jobs?status=succeeded" }
+    expect:
+      status: 200
+  - name: list_jobs_schema_isolation
+    dimension: S6
+    requiresDB: true
+    auth: { role: sync_operator }
+    fixture: production/sync/jobs
+    note: "sync_jobs 位于 platform schema（无 env 列），env 维度由 source_env/target_env 字段表达"
+    request: { method: GET, path: /api/admin/games/100001/sync-jobs }
+    expect:
+      status: 200
+  # S4 N/A：非法分页按缺省/上限纠正，不返回 400。
+  # S5/S7/S10 N/A：只读、无状态流转、无写事务。
+  # S8 N/A：列表 item 为任务元数据（hash/状态/操作者），不含 secret 字段。

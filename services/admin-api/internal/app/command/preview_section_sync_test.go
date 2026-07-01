@@ -1,25 +1,13 @@
 package command
 
-import (
-	"testing"
+import "testing"
 
-	"github.com/csw/console/services/admin-api/internal/domain/channel"
-	"github.com/csw/console/services/admin-api/internal/domain/common"
-)
-
-func TestHiddenChannelExcludedFromSyncPreview(t *testing.T) {
-	diff := BuildSectionPreview(SectionPreviewInput{
-		Sections: []string{"channels"},
-		Channels: []channel.GameMarketChannel{
-			{
-				ChannelID:    "google",
-				Hidden:       true,
-				ConfigStatus: common.ConfigStatusValid,
-			},
-		},
-	})
-
-	if len(diff["channels"]) != 0 {
-		t.Fatal("hidden channel should not appear in preview")
+func TestNormalizePreviewSectionSyncDefaultsAllSections(t *testing.T) {
+	cmd, err := NormalizePreviewSectionSync(PreviewSectionSyncCommand{GameID: "game-1"})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(cmd.SelectedSections) != 9 {
+		t.Fatalf("want 9 sections, got %d", len(cmd.SelectedSections))
 	}
 }

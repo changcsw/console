@@ -9,7 +9,18 @@
             <PageStatusTag :tone="statusMeta(game.status).tone" :label="statusMeta(game.status).label" />
           </template>
         </div>
-        <EnvironmentBadge :environment="app.environment" />
+        <div class="detail-head__actions">
+          <el-button
+            v-if="app.environment === 'sandbox'"
+            v-perm="'sync.execute'"
+            type="primary"
+            :disabled="!canSyncExecute || !game"
+            @click="openSyncDrawer"
+          >
+            Sync to Production
+          </el-button>
+          <EnvironmentBadge :environment="app.environment" />
+        </div>
       </div>
 
       <div v-if="game" class="detail-head__meta">
@@ -55,6 +66,9 @@
         <el-tab-pane label="配置快照" name="snapshot">
           <SnapshotTab :game-id="game.gameId" />
         </el-tab-pane>
+        <el-tab-pane label="同步记录" name="sync">
+          <SyncJobsTab v-if="game" ref="syncJobsTabRef" :game-id="game.gameId" />
+        </el-tab-pane>
         <el-tab-pane v-for="ph in downstreamTabs" :key="ph.name" :label="ph.label" :name="ph.name" lazy>
           <div class="placeholder">
             <PageStatusTag tone="warning" label="下游模块" />
@@ -63,18 +77,28 @@
         </el-tab-pane>
       </el-tabs>
     </PageCard>
+
+    <SyncSectionDrawer
+      v-if="game"
+      :open="syncDrawerOpen"
+      :game-id="game.gameId"
+      @close="syncDrawerOpen = false"
+      @executed="onSyncExecuted"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import PageCard from "@/components/page/PageCard.vue";
 import PageStatusTag from "@/components/page/PageStatusTag.vue";
 import EnvironmentBadge from "@/components/page/EnvironmentBadge.vue";
 import { useAppStore } from "@/stores/app";
+import { usePermissionStore } from "@/stores/permission";
 import { ApiError } from "@/api/http";
+import type { SyncExecuteResponse } from "@/api/syncSections";
 import { getGame, type GameDetail } from "@/api/modules/games";
 import BasicInfoTab from "./BasicInfoTab.vue";
 import MarketsTab from "./MarketsTab.vue";
@@ -85,22 +109,27 @@ import IapConfigTab from "./IapConfigTab.vue";
 import GameCashierTab from "@/views/cashier/game/GameCashierTab.vue";
 import PaymentRoutesTab from "./PaymentRoutesTab.vue";
 import SnapshotTab from "./SnapshotTab.vue";
+import SyncJobsTab from "./SyncJobsTab.vue";
+import SyncSectionDrawer from "./components/SyncSectionDrawer.vue";
 import { statusMeta } from "../constants";
 
 const route = useRoute();
 const router = useRouter();
 const app = useAppStore();
+const permission = usePermissionStore();
 
 const game = ref<GameDetail | null>(null);
 const loading = ref(false);
 const notFound = ref(false);
 const activeTab = ref("basic");
+const syncDrawerOpen = ref(false);
+const syncJobsTabRef = ref<{ reload: (page?: number) => Promise<void> } | null>(null);
+const canSyncExecute = computed(() => permission.hasPerm("sync.execute"));
 
 const downstreamTabs = [
   { name: "channels", label: "渠道", hint: "渠道实例（GameMarketChannel）由 channel 模块实现。" },
   { name: "packages", label: "渠道包", hint: "渠道包配置由 channel 模块实现。" },
-  { name: "channel-login", label: "渠道登录", hint: "渠道登录配置由 channel-login 模块实现。" },
-  { name: "sync", label: "同步记录", hint: "sandbox→production 同步由 sync 模块实现。" }
+  { name: "channel-login", label: "渠道登录", hint: "渠道登录配置由 channel-login 模块实现。" }
 ];
 
 function goBack() {
@@ -109,6 +138,19 @@ function goBack() {
 
 function onUpdated(next: GameDetail) {
   game.value = next;
+}
+
+function openSyncDrawer() {
+  if (!game.value) {
+    return;
+  }
+  syncDrawerOpen.value = true;
+}
+
+async function onSyncExecuted(_: SyncExecuteResponse) {
+  syncDrawerOpen.value = false;
+  activeTab.value = "sync";
+  await syncJobsTabRef.value?.reload(1);
 }
 
 async function load(gameId: string) {
@@ -164,6 +206,12 @@ onMounted(() => {
 .detail-head__title {
   margin: 0;
   font-size: 20px;
+}
+
+.detail-head__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .detail-head__meta {

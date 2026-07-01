@@ -28,6 +28,7 @@ func (s *SinkAdapter) Write(ctx context.Context, entry adminapp.AuditEntry) erro
 			Action:       entry.Action,
 			ResourceType: entry.ResourceType,
 			ResourceID:   entry.ResourceID,
+			Env:          entry.Env,
 			Detail: common.AuditDetail{
 				Extra: entry.Detail,
 			},

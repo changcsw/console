@@ -3,19 +3,22 @@ package syncapi
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/csw/console/services/admin-api/internal/app/command"
-	"github.com/csw/console/services/admin-api/internal/app/dto"
 	domainsync "github.com/csw/console/services/admin-api/internal/domain/sync"
+	"github.com/csw/console/services/admin-api/internal/transport/http/httpx"
+	"github.com/go-chi/chi/v5"
 )
 
 type SectionSyncService interface {
-	Preview(context.Context, command.PreviewSectionSyncCommand) (domainsync.Preview, error)
-	Execute(context.Context, command.ExecuteSectionSyncCommand) error
+	Preview(ctx context.Context, cmd command.PreviewSectionSyncCommand) (domainsync.Preview, error)
+	Execute(ctx context.Context, cmd command.ExecuteSectionSyncCommand) (domainsync.ExecuteResult, error)
+	ListJobs(ctx context.Context, query command.ListSectionSyncJobsQuery) (domainsync.JobList, error)
 }
 
 type SectionSyncHandler struct {
@@ -27,110 +30,108 @@ func NewSectionSyncHandler(service SectionSyncService) *SectionSyncHandler {
 }
 
 func (h *SectionSyncHandler) Preview(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
+	var req struct {
+		Sections       []string `json:"sections"`
+		IncludeDeletes bool     `json:"includeDeletes"`
 	}
-
-	gameID, err := parseSectionSyncPath(r.URL.Path, "preview")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	var req dto.SyncPreviewRequest
 	if err := decodeJSONBody(r, &req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, command.CodeValidation, "请求体格式错误")
 		return
 	}
 
 	cmd, err := command.NormalizePreviewSectionSync(command.PreviewSectionSyncCommand{
-		GameID:           gameID,
-		SelectedSections: req.SelectedSections,
+		GameID:           strings.TrimSpace(chi.URLParam(r, "gameId")),
+		SelectedSections: req.Sections,
 		IncludeDeletes:   req.IncludeDeletes,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err)
 		return
 	}
 
 	result, err := h.service.Preview(r.Context(), cmd)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	httpx.WriteData(w, http.StatusOK, result)
 }
 
 func (h *SectionSyncHandler) Execute(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
+	var req struct {
+		SelectedSections []string `json:"selectedSections"`
+		BaselineToken    string   `json:"baselineToken"`
+		IncludeDeletes   bool     `json:"includeDeletes"`
+		OperatorNote     string   `json:"operatorNote"`
 	}
-
-	gameID, err := parseSectionSyncPath(r.URL.Path, "execute")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	var req dto.SyncExecuteRequest
 	if err := decodeJSONBody(r, &req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, command.CodeValidation, "请求体格式错误")
 		return
 	}
 
 	cmd, err := command.NormalizeExecuteSectionSync(command.ExecuteSectionSyncCommand{
-		GameID:           gameID,
+		GameID:           strings.TrimSpace(chi.URLParam(r, "gameId")),
 		SelectedSections: req.SelectedSections,
+		BaselineToken:    req.BaselineToken,
 		IncludeDeletes:   req.IncludeDeletes,
 		OperatorNote:     req.OperatorNote,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, err)
 		return
 	}
 
-	if err := h.service.Execute(r.Context(), cmd); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	result, err := h.service.Execute(r.Context(), cmd)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"gameId":            cmd.GameID,
-		"selected_sections": cmd.SelectedSections,
-		"status":            "accepted",
-	})
+	httpx.WriteData(w, http.StatusOK, result)
 }
 
-func parseSectionSyncPath(path, action string) (string, error) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 6 {
-		return "", fmt.Errorf("unexpected path: %s", path)
+func (h *SectionSyncHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
+	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
+	pageSize := parsePositiveInt(r.URL.Query().Get("pageSize"), 20)
+	out, err := h.service.ListJobs(r.Context(), command.ListSectionSyncJobsQuery{
+		GameID:   strings.TrimSpace(chi.URLParam(r, "gameId")),
+		Page:     page,
+		PageSize: pageSize,
+		Status:   strings.TrimSpace(r.URL.Query().Get("status")),
+	})
+	if err != nil {
+		writeError(w, err)
+		return
 	}
+	httpx.WriteData(w, http.StatusOK, out)
+}
 
-	if parts[0] != "api" || parts[1] != "admin" || parts[2] != "games" || parts[4] != "sync" || parts[5] != action {
-		return "", fmt.Errorf("unexpected path: %s", path)
+func parsePositiveInt(raw string, def int) int {
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || v <= 0 {
+		return def
 	}
+	if v > 100 {
+		return 100
+	}
+	return v
+}
 
-	return parts[3], nil
+func writeError(w http.ResponseWriter, err error) {
+	var appErr *command.SectionSyncError
+	if errors.As(err, &appErr) {
+		httpx.WriteError(w, appErr.Status, appErr.Code, appErr.Message, appErr.Details...)
+		return
+	}
+	httpx.WriteAppError(w, err)
 }
 
 func decodeJSONBody(r *http.Request, target any) error {
 	if r.Body == nil {
 		return nil
 	}
-
-	if err := json.NewDecoder(r.Body).Decode(target); err != nil && err != io.EOF {
+	if err := json.NewDecoder(r.Body).Decode(target); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
-
 	return nil
-}
-
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
 }

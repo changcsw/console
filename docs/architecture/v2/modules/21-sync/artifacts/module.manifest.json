@@ -1,0 +1,91 @@
+{
+  "module_id": "sync",
+  "code": "21",
+  "lane": "runtime-surface",
+  "spec_path": "docs/architecture/v2/modules/21-sync/spec.compact.md",
+  "worktree": "/Users/csw/gitproject/console-sync",
+  "branch": "codex/sync",
+  "shared_surfaces_touched": [
+    "services/admin-api/internal/domain/sync",
+    "services/admin-api/internal/app/command",
+    "services/admin-api/internal/infra/persistence/postgres (sync_repo)",
+    "services/admin-api/internal/transport/http/sync",
+    "services/admin-api/internal/transport/httpserver/router.go",
+    "services/admin-api/internal/transport/httpserver/admin_wiring.go",
+    "services/admin-api/internal/app/admin/ports.go (AuditEntry.Env)",
+    "services/admin-api/internal/app/audit/sink.go",
+    "apps/admin-web/src/api/syncSections.ts",
+    "apps/admin-web/src/views/games/detail (GameDetailView, SyncSectionDrawer, SyncJobsTab)"
+  ],
+  "backend_routes": [
+    "POST /api/admin/games/{gameId}/sync/preview (sync.preview)",
+    "POST /api/admin/games/{gameId}/sync/execute (sync.execute)",
+    "GET /api/admin/games/{gameId}/sync-jobs (sync.preview)"
+  ],
+  "frontend_routes": [],
+  "frontend_views": [
+    "apps/admin-web/src/views/games/detail/GameDetailView.vue",
+    "apps/admin-web/src/views/games/detail/components/SyncSectionDrawer.vue",
+    "apps/admin-web/src/views/games/detail/SyncJobsTab.vue"
+  ],
+  "referenced_modules": [
+    "snapshot (#20): config section 仅同步 status=published 快照; entity_key=config_version; file_hash(I4) 作 diff 基线/去重",
+    "audit (#22): execute 成功写 audit_logs(action=sync.execute, env=production), detail 脱敏",
+    "dashboard (#23): 依赖 GET /games/{id}/sync-jobs 列表接口"
+  ],
+  "open_issues": [
+    "SYNC-INT-01[已修·🟧·🟪复测✅]: applyPayments 改真实 upsert，冲突键=归一化选择器对齐 uq_payment_routes_selector，DO UPDATE 使 update 生效（sync_repo.go:1348）；真实 upsert 待 PG CI",
+    "SYNC-INT-02[已修·🟧·🟪复测✅]: 补齐 9 section 子表 loader/diff/apply（channels login/iap/plugin、packages iap/plugin overrides+override_json、products channel_products、cashier price_overrides），对齐键/有效过滤/脱敏与 compact 一致；子表 SQL 表/列/约束名真实执行待 PG CI",
+    "SYNC-INT-03[已修·🟧·🟪复测✅]: 整行 add/delete 字段级脱敏 maskRowFields；🟪新增 sync_maskrow_integration_test.go(3 test PASS) 守护",
+    "SYNC-INT-06[已修·🟧·🟪复测✅]: loadGame 增 game_secret 入 hash + masked；🟪守护测试断言 add/delete 亦脱敏",
+    "SYNC-INT-07[已修·🟧·🟪复测✅]: ExecuteResult/JobItem SyncJobID json:\",string\"，与前端 api/syncSections.ts string 一致，漂移消除；contract 集成 test 断言 string",
+    "SYNC-INT-04[低·本期保留]: 删除引用 skipped 检测/逆拓扑删除序未实现，include_deletes opt-in 默认关+单事务回滚保证不部分写入（后续增强）",
+    "SYNC-INT-05[低·本期保留]: 依赖校验 section 级、entityKey 恒 '*'（后续增强）",
+    "SYNC-INT-08[低·本期保留]: compact 列表项不含 selectedSections/appliedSummary/errorSummary/operatorName，后端 JobItem 与 compact 一致，前端可选链降级，后端无需改",
+    "SYNC-INT-09[低·本期保留]: compact 默认 sort=-createdAt，后端固定 created_at DESC=默认；任意 sort 属增强",
+    "config_json/override_json 子键级 diff[低·本期保留]: 现整字段 masked(安全优先,hash 用原值检测变更,不泄漏明文)，逐子键拆分展示属后续增强",
+    "连库维度[待 PG CI·关键遗留]: 子表 loader/apply SQL 正确性 + payments 冲突键 + 真实 upsert/删除/审计落库 + 迁移 000016 前向执行，单测 fake repo 不执行 SQL，须 SCENARIO_WITH_DB=1 验证"
+  ],
+  "verification": [
+    "2026-07-01: apps/admin-web 执行 `pnpm exec vue-tsc --noEmit && pnpm vite build` 成功（含 rollup chunk size warning，无编译阻断）",
+    "2026-07-01: 🟩前端CR 修复后复验 vue-tsc + vite build 通过",
+    "2026-07-01: services/admin-api 执行 `go build ./...` 通过（required_permissions=[\"all\"]）",
+    "2026-07-01: services/admin-api 执行 `go vet ./...` 通过（required_permissions=[\"all\"]）",
+    "2026-07-01: services/admin-api 执行 `go test ./internal/app/command ./internal/transport/http/sync` 通过（required_permissions=[\"all\"]）",
+    "2026-07-01: 🟦后端CR 复验 go build/vet + go test command/sync transport/audit 通过",
+    "2026-07-01: 迁移 000016 已落库脚本，真实 DB 前向执行待 PG CI/集成环境",
+    "2026-07-01: 🟦后端测试新增 L1 domain 单测(sync_test.go 24)+L2 app fake-repo(execute_section_sync_test.go 17)+L3 handler(preview/execute unknown-section)+场景 tests/backend/scenarios/sync.yaml(25 case)+fixtures sandbox/production/sync.sql",
+    "2026-07-01: 🟦后端测试运行 go vet ✅；go test ./...(33包) EXIT=0 0 FAIL；sync 相关 45 PASS；scenario sync 3 PASS(S2)/22 SKIP(requiresDB) (cwd=services/admin-api, required_permissions=[all])",
+    "2026-07-01: 🟦后端测试修复 degraded 装配漏挂 sync 路由(admin_wiring.go) + 理顺 scaffold 移除遗留的陈旧 smoke 用例(runner_test.go/smoke.yaml，改前即失败)",
+    "2026-07-01: 🟩前端测试新增 L4 组件 vitest: sync-section-drawer.spec.ts(重写,18)+SyncJobsTab.spec.ts(10)+game-detail-sync-entry.spec.ts(4, 入口红线) + L5 Playwright tests/frontend/e2e/sync.spec.ts(9, 含视觉基线 sync-drawer-preview)",
+    "2026-07-01: 🟩前端测试运行 `pnpm vitest run` 全量 37 files/290 tests 全 PASS(0 FAIL, 含本模块 32)；原 1 例失败(过时的 execute payload 测试)经重写消除 (cwd=apps/admin-web, required_permissions=[all])",
+    "2026-07-01: 🟩前端测试运行 `pnpm exec playwright test sync.spec.ts` 9 PASS(单 worker)，生成并对照视觉基线 visual-baseline/sync.spec.ts-snapshots/sync-drawer-preview-chromium-darwin.png",
+    "2026-07-01: 🟩前端测试定位环境态(非本模块): Chrome149+Playwright 多字节 body Content-Length 不一致致详情页 fetch 挂起(改用 json: fulfill 规避) + vite 详情页冷编译>15s(导航等待放宽 45s); games/product 同环境同现象",
+    "2026-07-01: 🟪测试专家 集成 契约对账: 前端 api/syncSections.ts+组件 vs 后端 transport/http/sync+app/command 逐项核对，方法/路径/DTO(camelCase)/错误码/包络一致；发现 3 项非阻断契约漂移 SYNC-INT-07/08/09",
+    "2026-07-01: 🟪测试专家 新增跨栈契约集成测试 internal/transport/http/sync/section_sync_contract_integration_test.go(3 test 全 PASS): preview 包络+camelCase+密文 masked+明文不泄漏 / execute 全字段+syncJobId 类型取证 / list 分页包络+item compact 字段+selectedSections 缺失取证",
+    "2026-07-01: 🟪测试专家 后端全量回归 go vet ✅ + go test ./...(41 包) EXIT=0 全 ok(含契约集成 test) + scenario TestRunCaseSyncPreviewRequiresAuth PASS/sync 22 requiresDB SKIP (cwd=services/admin-api, required_permissions=[all])",
+    "2026-07-01: 🟪测试专家 前端全量回归 pnpm vitest run 37 files/290 tests 全 PASS(含 sync 32) (cwd=apps/admin-web, required_permissions=[all]); Playwright 9 PASS 沿用 🟩前端测试基线",
+    "2026-07-01: 🟪测试专家 红线端到端核验(仅sandbox→production/production不渲染/双闸门/单事务/preview masked/跨schema/审计env=production)全部满足; 下游 #23 sync-jobs 列表可用 + #22 audit 真正被调用(execute 事务内 writeAudit env=production)",
+    "2026-07-01: 🟪测试专家 集成判定=通过(红线口径,可进入功能验收); 后端标注 4 项疑似缺陷全部确认为非红线阻断偏差(SYNC-INT-01~06), 建议 🟧 优先修复 01/02",
+    "2026-07-01: 🟧全栈修复(第1轮) 闭环 SYNC-INT-01(payments 真实 upsert)/02(9 section 子表 loader/diff/apply)/03(整行脱敏)/06(game_secret 入 hash)/07(syncJobId string); 改 sync.go+sync_repo.go+contract 集成 test; go build ./... ✅ + go vet(sync 4包) ✅ + go test(sync 4包)全 PASS + go test ./... EXIT=0 0 FAIL (cwd=services/admin-api, required_permissions=[all]); 04/05/08/09+config子键+连库 保留非阻断 open_issue",
+    "2026-07-01: 🟪测试专家(第2轮复测) 代码核验 01/02/03/06/07 全部按 compact 闭环(payments DO UPDATE 归一化冲突键 sync_repo.go:1348; 子表 loader/apply 覆盖 login/iap/plugin/overrides/channel_products/price_overrides; maskRowFields 整行脱敏; loadGame game_secret 入 hash+masked; SyncJobID json:\",string\")",
+    "2026-07-01: 🟪测试专家(第2轮) 新增 domain/sync/sync_maskrow_integration_test.go(3 test PASS) 守护 SYNC-INT-03/06 整行 add/delete + game_secret 脱敏(明文/密文绝不出现); 补齐既有仅 update 分支的 masked 空白",
+    "2026-07-01: 🟪测试专家(第2轮) 契约对账再核: syncJobId 前后端统一 string 漂移消除; API DTO 形状不变, 无新增漂移",
+    "2026-07-01: 🟪测试专家(第2轮) 回归 go build ./... ✅ + go vet(sync 5包) ✅ + go test -count=1 ./... EXIT=0 全 ok 无 FAIL(含新增守护+契约集成 test) + scenario sync PASS/22 requiresDB SKIP (cwd=services/admin-api, required_permissions=[all]); 前端 pnpm vitest run 37 files/290 全 PASS (cwd=apps/admin-web)",
+    "2026-07-01: 🟪测试专家(第2轮) 红线复核全绿(仅sandbox→production/production不渲染/双闸门/单事务/preview masked/跨schema/审计env=production, 脱敏经 03/06 更强); 下游 #23 列表可用 + #22 audit 被调用",
+    "2026-07-01: 🟪测试专家(第2轮) 复测判定=通过, 可进入 ✅功能验收(本期红线口径); 连库真实 upsert/删除/审计落库+子表 SQL 正确性待 PG CI(SCENARIO_WITH_DB=1); 本轮无新增阻断, 无需再交 🟧",
+    "2026-07-01: ✅功能验收 独立复验 go build/vet/test -count=1 ./...(33包0FAIL) + vue-tsc/vite build/vitest(37/290) 全绿; 验收清单 36 PASS/0 FAIL; 操作主线 preview→execute 状态机+双闸门+9section+红线+前端+下游契约全成立; A36连库待PG CI非阻断",
+    "2026-07-01: ✅功能验收 判定=通过(红线口径), stages.acceptance=done; 遗留 SYNC-INT-04/05/08/09+config子键+PG CI连库"
+  ],
+  "stages": {
+    "backend_dev": "done",
+    "backend_cr": "done",
+    "backend_test": "done",
+    "frontend_dev": "done",
+    "frontend_cr": "done",
+    "frontend_test": "done",
+    "integration_test": "done (第2轮复测通过·可进入功能验收·连库待 PG CI)",
+    "fullstack_fix": "done",
+    "acceptance": "done"
+  }
+}

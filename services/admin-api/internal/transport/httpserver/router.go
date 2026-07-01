@@ -12,13 +12,10 @@ import (
 
 	"github.com/csw/console/services/admin-api/internal/app/command"
 	domaincashier "github.com/csw/console/services/admin-api/internal/domain/cashier"
-	"github.com/csw/console/services/admin-api/internal/domain/sync"
 	"github.com/csw/console/services/admin-api/internal/infra/config"
 	cashierhttp "github.com/csw/console/services/admin-api/internal/transport/http/cashier"
-	syncapi "github.com/csw/console/services/admin-api/internal/transport/http/sync"
 )
 
-type sectionSyncScaffoldService struct{}
 type templateVersionScaffoldService struct{}
 
 // New 装配顶层 chi 路由：healthz + auth 模块真实路由（DB/JWT 就绪时）+ 其余未迁移的 scaffold 路由（回退）。
@@ -55,7 +52,6 @@ func New(cfg config.Config) *http.Server {
 // 注意：这些路由暂未接入鉴权中间件，待各自模块迁移；auth 模块 /me 已由真实实现接管。
 func buildLegacyMux(cfg config.Config) *http.ServeMux {
 	mux := http.NewServeMux()
-	sectionSyncHandler := syncapi.NewSectionSyncHandler(sectionSyncScaffoldService{})
 	templateVersionHandler := cashierhttp.NewTemplateVersionHandler(templateVersionScaffoldService{})
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -67,15 +63,10 @@ func buildLegacyMux(cfg config.Config) *http.ServeMux {
 	})
 
 	// 注意：/api/admin/games（含 /markets|/legal-links）已由 game 模块、/channels|/market-channels 与
-	// /game-channels/*、/channel-packages/* 已由 channel 模块真实路由接管（见 admin_wiring.go）；
-	// 此处仅保留尚未迁移的同步等子路径 scaffold。
+	// /game-channels/*、/channel-packages/*、/sync/* 已由真实路由接管（见 admin_wiring.go）；
+	// 此处仅保留未迁移子路径 scaffold。
 	mux.HandleFunc("/api/admin/games/", func(w http.ResponseWriter, r *http.Request) {
-		path := strings.TrimPrefix(r.URL.Path, "/api/admin/games/")
 		switch {
-		case strings.HasSuffix(path, "/sync/preview"):
-			sectionSyncHandler.Preview(w, r)
-		case strings.HasSuffix(path, "/sync/execute"):
-			sectionSyncHandler.Execute(w, r)
 		default:
 			writeJSON(w, http.StatusNotImplemented, map[string]string{
 				"message": "route scaffolded but not implemented",
@@ -104,36 +95,6 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func (sectionSyncScaffoldService) Preview(_ context.Context, cmd command.PreviewSectionSyncCommand) (sync.Preview, error) {
-	sections, err := sync.ParseSections(cmd.SelectedSections, false)
-	if err != nil {
-		return sync.Preview{}, err
-	}
-
-	resultSections := make([]sync.DiffSection, 0, len(sections))
-	for _, section := range sections {
-		resultSections = append(resultSections, sync.DiffSection{
-			Section: string(section),
-			Changes: []sync.DiffChange{},
-		})
-	}
-
-	return sync.Preview{
-		GameID:           cmd.GameID,
-		SourceEnv:        "sandbox",
-		TargetEnv:        "production",
-		SourceHash:       "pending",
-		TargetHashBefore: "pending",
-		HasDiff:          false,
-		Sections:         resultSections,
-	}, nil
-}
-
-func (sectionSyncScaffoldService) Execute(_ context.Context, cmd command.ExecuteSectionSyncCommand) error {
-	_, err := sync.ParseSections(cmd.SelectedSections, true)
-	return err
 }
 
 func (templateVersionScaffoldService) CopyToDraft(_ context.Context, cmd command.CopyTemplateVersionCommand) (domaincashier.TemplateVersion, error) {

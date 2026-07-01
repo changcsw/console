@@ -15,6 +15,7 @@ import (
 	cashierapp "github.com/csw/console/services/admin-api/internal/app/cashier"
 	channelapp "github.com/csw/console/services/admin-api/internal/app/channel"
 	channelloginapp "github.com/csw/console/services/admin-api/internal/app/channellogin"
+	"github.com/csw/console/services/admin-api/internal/app/command"
 	gameapp "github.com/csw/console/services/admin-api/internal/app/game"
 	paymentapp "github.com/csw/console/services/admin-api/internal/app/payment"
 	pluginapp "github.com/csw/console/services/admin-api/internal/app/plugin"
@@ -35,6 +36,7 @@ import (
 	gameshttp "github.com/csw/console/services/admin-api/internal/transport/http/games"
 	paymenthttp "github.com/csw/console/services/admin-api/internal/transport/http/payment"
 	snapshothttp "github.com/csw/console/services/admin-api/internal/transport/http/snapshot"
+	syncapi "github.com/csw/console/services/admin-api/internal/transport/http/sync"
 )
 
 // feishuAdapter 把 infra/feishu.Client 适配为 app 层 FeishuClient 端口。
@@ -67,6 +69,7 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 		cashierhttp.RegisterRoutes(r, cashierhttp.NewHandler(nil), iss, env, logger, false, nil)
 		paymenthttp.RegisterRoutes(r, paymenthttp.NewHandler(nil), iss, env, logger, false, nil)
 		snapshothttp.RegisterRoutes(r, snapshothttp.NewHandler(nil), iss, env, logger, false, nil)
+		syncapi.RegisterRoutes(r, syncapi.NewSectionSyncHandler(nil), iss, env, logger, false, nil)
 		audithttp.RegisterRoutes(r, audithttp.NewHandler(nil), iss, env, logger, false, nil)
 		return r
 	}
@@ -142,6 +145,8 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 	paymenthttp.RegisterRoutes(r, paymenthttp.NewHandler(paymentSvc), issuer, env, logger, true, auditSvc)
 	snapshotSvc := snapshotapp.NewService(postgres.NewSnapshotStore(pool), paymentSvc, auditSink, time.Now)
 	snapshothttp.RegisterRoutes(r, snapshothttp.NewHandler(snapshotSvc), issuer, env, logger, true, auditSvc)
+	syncSvc := command.NewSectionSyncService(postgres.NewSyncStore(pool), auditSink, time.Now, cfg.JWTSecret)
+	syncapi.RegisterRoutes(r, syncapi.NewSectionSyncHandler(syncSvc), issuer, env, logger, true, auditSvc)
 
 	audithttp.RegisterRoutes(r, audithttp.NewHandler(auditSvc), issuer, env, logger, true, auditSvc)
 

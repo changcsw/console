@@ -30,24 +30,16 @@ cases:
       jsonContains:
         error.code: UNAUTHENTICATED
 
-  - name: sync_preview_valid_section_ok
-    dimension: S1
+  # sync/preview 已迁移为受保护真实路由（sync.preview 权限）；smoke 仅验鉴权闸门。
+  # 完整 S1–S10 场景见 tests/backend/scenarios/sync.yaml。
+  - name: sync_preview_requires_auth
+    dimension: S2
     request:
       method: POST
       path: /api/admin/games/100001/sync/preview
       body:
-        selected_sections: ["channels"]
+        sections: ["channels"]
     expect:
-      status: 200
+      status: 401
       jsonContains:
-        targetEnv: production
-
-  - name: sync_preview_unknown_section_rejected
-    dimension: S4
-    request:
-      method: POST
-      path: /api/admin/games/100001/sync/preview
-      body:
-        selected_sections: ["marketing"]
-    expect:
-      status: 400
+        error.code: UNAUTHENTICATED

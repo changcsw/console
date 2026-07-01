@@ -36,7 +36,7 @@
 | 18 | `game-cashier` | `cashier-surface` | cashier-template, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 25/25 PASS；集成2轮(taxRate漂移/checksum/重复键)修复；含跨模块 #17 发布 checksum 改动(checklist 已标注)；遗留连库维度待 PG CI |
 | 19 | `payment` | `payment-surface` | channel, product, cashier-template, game-cashier, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 36/36 PASS；🟪2轮(R1发现I1-I4契约漂移→🟧修复→R2闭环)；含新增 `GET /cashier/providers/{id}/template`；遗留 P3 连库维度待 PG CI；已合并至 main |
 | 20 | `snapshot` | `runtime-surface` | channel, account-auth, channel-login, feature-plugin, product, cashier-template, game-cashier, payment, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⬜ | ✅ | ✅ 验收 31/31 PASS；契约0漂移·无需🟧修复；连库21例待PG CI(非阻断)；已合并至 main |
-| 21 | `sync` | `runtime-surface` | snapshot, +上游全部 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 上游已全部合并，可开工 |
+| 21 | `sync` | `runtime-surface` | snapshot, +上游全部 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 36/36 PASS；🟪2轮(移交 SYNC-INT-01~09→🟧修复 payments真实upsert/9section子表/整行脱敏/game_secret入hash/syncJobId string→R2闭环)；遗留非阻断 04/05/08/09+config子键+连库待 PG CI；worktree console-sync/codex/sync 待集成合并 main |
 | 22 | `audit` | `audit-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 26 项全 PASS；P0(schema→platform) 经 🟧 修复 + 🟪 复测；已合并至 main |
 | 23 | `dashboard` | `dashboard-surface` | cashier-template, snapshot, sync | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `sync` |
 
@@ -53,8 +53,8 @@
 | `cashier-surface` | （已全部完成） | ✅ 完成 | cashier-template / game-cashier 均 ✅，本 lane 收官（含 #17 发布 checksum 跨模块修复） |
 | `audit-surface` | （已全部完成） | ✅ 完成 | audit 已合并至 main |
 | `payment-surface` | （已全部完成） | ✅ 完成 | payment 已合并至 main |
-| `runtime-surface` | `sync` | 🔄 可开工 | #20 snapshot 已合并 main；可开工 sync #21（同 lane 串行） |
-| `dashboard-surface` | `dashboard` | ⛔ 阻塞 | 等待 `sync` |
+| `runtime-surface` | （已全部完成，待 sync 合并） | ✅ 验收通过 | snapshot 已合并 main；sync #21 验收 36/36 PASS，待集成合并 main |
+| `dashboard-surface` | `dashboard` | 🔄 待 sync 合并后开工 | sync #21 已验收通过；待其合并 main 后 dashboard 可开工 |
 
 > 如果你选择 `feature-plugin` 而不是 `channel-login` 先开，也可以；但 **`channels-surface` 同时只能跑一个模块**。
 
@@ -64,7 +64,7 @@
 
 | 模块 | lane | 当前阶段 | worktree / branch | handoff.summary.md | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| `sync`(#21) | runtime-surface | ⬜ 待开工 | （待分配 worktree） / `codex/sync` | — | #20 snapshot 已合并 main；runtime-surface 下一模块 |
+| `sync`(#21) | runtime-surface | ✅ 验收通过·待集成合并 main | /Users/csw/gitproject/console-sync / `codex/sync` | docs/architecture/v2/modules/21-sync/artifacts/handoff.summary.md | 全流程闭合(验收 36/36 PASS)；待新开 Chat 跑集成合并 sync → main；合并后 dashboard(#23) 可开工 |
 
 > 总 Agent 每次只维护当前模块这一行；模块完成或阻塞后即清空或转历史，不把长日志写回本文件。
 
