@@ -34,9 +34,9 @@
 | 16 | `product` | `games-surface` | channel, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 已合并至 main |
 | 17 | `cashier-template` | `cashier-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 全流程完成（验收 29/29 PASS）；遗留非阻断·跨模块 |
 | 18 | `game-cashier` | `cashier-surface` | cashier-template, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 25/25 PASS；集成2轮(taxRate漂移/checksum/重复键)修复；含跨模块 #17 发布 checksum 改动(checklist 已标注)；遗留连库维度待 PG CI |
-| 19 | `payment` | `payment-surface` | channel, product, cashier-template, game-cashier, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 36/36 PASS；🟪2轮(R1发现I1-I4契约漂移→🟧修复→R2闭环)；含新增 `GET /cashier/providers/{id}/template`；遗留 P3 连库维度待 PG CI；**分支 codex/payment 待合并 main** |
-| 20 | `snapshot` | `runtime-surface` | channel, account-auth, channel-login, feature-plugin, product, cashier-template, game-cashier, payment, game | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 14/15/16/17/18/19 |
-| 21 | `sync` | `runtime-surface` | snapshot, +上游全部 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `snapshot` |
+| 19 | `payment` | `payment-surface` | channel, product, cashier-template, game-cashier, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 36/36 PASS；🟪2轮(R1发现I1-I4契约漂移→🟧修复→R2闭环)；含新增 `GET /cashier/providers/{id}/template`；遗留 P3 连库维度待 PG CI；已合并至 main |
+| 20 | `snapshot` | `runtime-surface` | channel, account-auth, channel-login, feature-plugin, product, cashier-template, game-cashier, payment, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⬜ | ✅ | ✅ 验收 31/31 PASS；契约0漂移·无需🟧修复；连库21例待PG CI(非阻断)；已合并至 main |
+| 21 | `sync` | `runtime-surface` | snapshot, +上游全部 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 上游已全部合并，可开工 |
 | 22 | `audit` | `audit-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 26 项全 PASS；P0(schema→platform) 经 🟧 修复 + 🟪 复测；已合并至 main |
 | 23 | `dashboard` | `dashboard-surface` | cashier-template, snapshot, sync | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 等待 `sync` |
 
@@ -52,8 +52,8 @@
 | `channels-surface` | （已全部完成） | ✅ 完成 | channel / channel-login / feature-plugin 三模块均 ✅，本 lane 收官 |
 | `cashier-surface` | （已全部完成） | ✅ 完成 | cashier-template / game-cashier 均 ✅，本 lane 收官（含 #17 发布 checksum 跨模块修复） |
 | `audit-surface` | （已全部完成） | ✅ 完成 | audit 已合并至 main |
-| `payment-surface` | （已完成开发/验收，待合并） | ✅ 完成 | payment 全流水线通过（36/36），分支 codex/payment 待合并 main |
-| `runtime-surface` | `snapshot` | ⚠️ 待 #19 合并 | #19 payment 已验收通过、待合并 main；合并后 14/15/16/17/18/19 全齐即可开工 snapshot |
+| `payment-surface` | （已全部完成） | ✅ 完成 | payment 已合并至 main |
+| `runtime-surface` | `sync` | 🔄 可开工 | #20 snapshot 已合并 main；可开工 sync #21（同 lane 串行） |
 | `dashboard-surface` | `dashboard` | ⛔ 阻塞 | 等待 `sync` |
 
 > 如果你选择 `feature-plugin` 而不是 `channel-login` 先开，也可以；但 **`channels-surface` 同时只能跑一个模块**。
@@ -64,7 +64,7 @@
 
 | 模块 | lane | 当前阶段 | worktree / branch | handoff.summary.md | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| `payment`(#19) | payment-surface | ✅ 验收通过·待合并 main | `/Users/csw/gitproject/console-payment` / `codex/payment` | `docs/architecture/v2/modules/19-payment/artifacts/handoff.summary.md` | 全流水线 36/36 PASS；请新开 Chat 跑集成合并 payment → main |
+| `sync`(#21) | runtime-surface | ⬜ 待开工 | （待分配 worktree） / `codex/sync` | — | #20 snapshot 已合并 main；runtime-surface 下一模块 |
 
 > 总 Agent 每次只维护当前模块这一行；模块完成或阻塞后即清空或转历史，不把长日志写回本文件。
 
