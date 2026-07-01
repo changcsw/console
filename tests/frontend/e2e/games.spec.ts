@@ -286,6 +286,11 @@ async function gotoGames(page: Page) {
   await expect(page.getByText("发行后台根聚合")).toBeVisible();
 }
 
+async function openGameDetail(page: Page, gameName = "星际远征") {
+  await page.getByText(gameName).first().click();
+  await expect(page.locator(".detail-head__title")).toContainText(gameName, { timeout: 15_000 });
+}
+
 test("游戏列表渲染行/状态/市场标签，且不展示 gameSecret", async ({ page }) => {
   await setup(page);
   await gotoGames(page);
@@ -331,8 +336,8 @@ test("详情页脱敏展示 Secret + 多 Tab + 下游占位", async ({ page }) =
   await setup(page);
   await gotoGames(page);
 
-  await page.getByText("星际远征").click();
-  await expect(page.getByText("masked").first()).toBeVisible();
+  await openGameDetail(page);
+  await expect(page.locator(".detail-head__meta").getByText("masked").first()).toBeVisible();
   await expect(page.locator("body")).not.toContainText("PLAINTEXT");
   // 主 Tab
   await expect(page.getByRole("tab", { name: "基础信息" })).toBeVisible();
@@ -347,9 +352,11 @@ test("详情页脱敏展示 Secret + 多 Tab + 下游占位", async ({ page }) =
 test("市场 Tab 编辑抽屉打开并展示单默认 radio", async ({ page }) => {
   await setup(page);
   await gotoGames(page);
-  await page.getByText("星际远征").click();
+  await openGameDetail(page);
   await page.getByRole("tab", { name: "市场" }).click();
-  await page.getByRole("button", { name: "编辑市场" }).click();
+  const editBtn = page.getByRole("button", { name: "编辑市场" });
+  await expect(editBtn).toBeEnabled();
+  await editBtn.click();
   await expect(page.getByText("编辑市场（全量覆盖）")).toBeVisible();
   await expect(page.getByText(/移除已有渠道实例/)).toBeVisible();
 });
@@ -357,9 +364,11 @@ test("市场 Tab 编辑抽屉打开并展示单默认 radio", async ({ page }) =
 test("法务链接 Tab scopeType 联动 scopeValue", async ({ page }) => {
   await setup(page);
   await gotoGames(page);
-  await page.getByText("星际远征").click();
+  await openGameDetail(page);
   await page.getByRole("tab", { name: "法务链接" }).click();
-  await page.getByRole("button", { name: "编辑法务链接" }).click();
+  const editBtn = page.getByRole("button", { name: "编辑法务链接" });
+  await expect(editBtn).toBeEnabled();
+  await editBtn.click();
   await expect(page.getByText("编辑法务链接（全量覆盖）")).toBeVisible();
   await page.getByRole("button", { name: "+ 新增一行" }).click();
   // 新增行默认 default → scopeValue 锁 '*'（disabled 输入框）
@@ -391,8 +400,9 @@ test("游戏列表视觉基线", async ({ page }) => {
 
 // 进入星际远征详情并切到「自有账号认证」Tab
 async function openAccountAuthTab(page: Page) {
-  await page.getByText("星际远征").click();
+  await openGameDetail(page);
   await page.getByRole("tab", { name: "自有账号认证" }).click();
+  await expect(page.locator(".account-auth-tab")).toBeVisible();
 }
 
 test("自有账号认证 Tab 渲染模板四件套 + 状态标签 + 密文脱敏", async ({ page }) => {
@@ -435,8 +445,9 @@ test("无 game.write 权限时保存配置按钮置灰且展示只读提示", as
   await gotoGames(page);
   await openAccountAuthTab(page);
 
-  await expect(page.getByText("当前账号仅有查看权限，配置项已置灰。")).toBeVisible();
-  await expect(page.getByRole("button", { name: "保存配置" })).toBeDisabled();
+  const tab = page.locator(".account-auth-tab");
+  await expect(tab.getByText("当前账号仅有查看权限，配置项已置灰。")).toBeVisible();
+  await expect(tab.getByRole("button", { name: "保存配置" })).toBeDisabled();
 });
 
 test("保存配置触发整体替换 PUT，且密文留空不下发明文", async ({ page }) => {
@@ -455,5 +466,5 @@ test("保存配置触发整体替换 PUT，且密文留空不下发明文", asyn
   expect(body).toContain("google");
   // 密文留空 → 不下发脱敏占位/明文
   expect(body).not.toContain("masked");
-  await expect(page.getByText("自有账号认证配置已保存")).toBeVisible();
+  await expect(page.locator(".el-message").getByText("自有账号认证配置已保存")).toBeVisible();
 });

@@ -1,4 +1,4 @@
--- 000012 · game-cashier：游戏级收银台绑定与价格覆盖（业务表，按环境 schema）
+-- 000013 · game-cashier：游戏级收银台绑定与价格覆盖（业务表，按环境 schema）
 -- 业务表 SQL 不写 schema 前缀，依赖 search_path=<env>,platform；
 -- 平台表引用使用显式 platform. 前缀（00 §2 / §5）。
 

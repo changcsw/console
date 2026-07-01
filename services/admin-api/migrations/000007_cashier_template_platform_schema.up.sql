@@ -9,6 +9,7 @@ ALTER TABLE IF EXISTS public.cashier_price_templates         SET SCHEMA platform
 ALTER TABLE IF EXISTS public.cashier_price_template_versions SET SCHEMA platform;
 ALTER TABLE IF EXISTS public.cashier_price_rows              SET SCHEMA platform;
 ALTER TABLE IF EXISTS public.cashier_fx_sync_runs            SET SCHEMA platform;
+ALTER TABLE IF EXISTS public.currency_specs                  SET SCHEMA platform;
 
 -- 2) 目标表兜底
 CREATE TABLE IF NOT EXISTS platform.cashier_price_templates (

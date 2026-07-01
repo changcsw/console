@@ -20,9 +20,10 @@ test("published version can be copied into draft", () => {
   render(CopyPublishedToDraftDialog, {
     props: {
       open: true,
+      templateId: "tpl_1",
       sourceVersion: { version: 7, status: "published" }
     }
   });
 
-  screen.getByText("Create draft from published v7");
+  screen.getByRole("dialog", { name: "复制 published 为 draft", hidden: true });
 });

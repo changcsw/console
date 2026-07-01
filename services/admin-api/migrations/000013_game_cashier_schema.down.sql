@@ -1,4 +1,4 @@
--- 000012 down · game-cashier 回滚（best effort）
+-- 000013 down · game-cashier 回滚（best effort）
 
 DROP INDEX IF EXISTS idx_game_cashier_price_overrides_game_id_ref;
 ALTER TABLE IF EXISTS game_cashier_price_overrides DROP CONSTRAINT IF EXISTS gcpo_currency_fk;

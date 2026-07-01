@@ -11,4 +11,5 @@ pnpm test
 
 log "frontend: playwright e2e"
 # 更新基线请单独跑 pnpm e2e:update
-pnpm e2e
+E2E_WORKERS="${E2E_WORKERS:-1}"
+pnpm exec playwright test --workers="$E2E_WORKERS"
