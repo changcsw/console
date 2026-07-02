@@ -17,7 +17,7 @@ func TestRunCaseHealthzPasses(t *testing.T) {
 		Name:    "healthz_ok",
 		Request: Request{Method: "GET", Path: "/healthz"},
 		Expect:  Expect{Status: 200, JSONContains: map[string]any{"status": "ok"}},
-	})
+	}, nil)
 	if !res.Passed {
 		t.Fatalf("expected pass, got: %s", res.Message)
 	}
@@ -28,7 +28,7 @@ func TestRunCaseDetectsStatusMismatch(t *testing.T) {
 		Name:    "healthz_wrong",
 		Request: Request{Method: "GET", Path: "/healthz"},
 		Expect:  Expect{Status: 500},
-	})
+	}, nil)
 	if res.Passed {
 		t.Fatal("expected failure on status mismatch")
 	}
@@ -46,7 +46,7 @@ func TestRunCaseSyncPreviewRequiresAuth(t *testing.T) {
 			Body:   map[string]any{"sections": []any{"channels"}},
 		},
 		Expect: Expect{Status: 401, JSONContains: map[string]any{"error.code": "UNAUTHENTICATED"}},
-	})
+	}, nil)
 	if !res.Passed {
 		t.Fatalf("expected 401 for unauthenticated sync preview, got: %s", res.Message)
 	}
@@ -57,7 +57,7 @@ func TestRunCaseJSONPathNotFound(t *testing.T) {
 		Name:    "missing_path",
 		Request: Request{Method: "GET", Path: "/healthz"},
 		Expect:  Expect{Status: 200, JSONContains: map[string]any{"nope": "x"}},
-	})
+	}, nil)
 	if res.Passed {
 		t.Fatal("expected failure when json path missing")
 	}
@@ -68,7 +68,7 @@ func TestRunCaseJSONValueMismatch(t *testing.T) {
 		Name:    "value_mismatch",
 		Request: Request{Method: "GET", Path: "/healthz"},
 		Expect:  Expect{Status: 200, JSONContains: map[string]any{"status": "nope"}},
-	})
+	}, nil)
 	if res.Passed {
 		t.Fatal("expected failure on value mismatch")
 	}
@@ -83,7 +83,7 @@ func TestRunCaseNonJSONBodyWithJSONContains(t *testing.T) {
 		Name:    "non_json",
 		Request: Request{Method: "GET", Path: "/x"},
 		Expect:  Expect{Status: 200, JSONContains: map[string]any{"a": "b"}},
-	})
+	}, nil)
 	if res.Passed {
 		t.Fatal("expected failure when body is not JSON but JSONContains set")
 	}

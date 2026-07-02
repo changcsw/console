@@ -304,7 +304,7 @@ FROM (
   UNION ALL
   SELECT 'package_iap_override', gc.game_id_ref, CONCAT(c.channel_id, '/', cp.package_code), i.last_check_message, i.last_check_at
   FROM channel_package_iap_overrides i
-  JOIN channel_packages cp ON cp.id=i.channel_package_id_ref
+  JOIN channel_packages cp ON cp.id=i.package_id_ref
   JOIN game_channels gc ON gc.id=cp.game_channel_id_ref
   JOIN platform.channels c ON c.id=gc.channel_id_ref
   WHERE i.config_status='invalid'
@@ -317,7 +317,7 @@ FROM (
   UNION ALL
   SELECT 'package_plugin_override', gc.game_id_ref, CONCAT(c.channel_id, '/', cp.package_code), p.last_check_message, p.last_check_at
   FROM channel_package_plugin_overrides p
-  JOIN channel_packages cp ON cp.id=p.channel_package_id_ref
+  JOIN channel_packages cp ON cp.id=p.package_id_ref
   JOIN game_channels gc ON gc.id=cp.game_channel_id_ref
   JOIN platform.channels c ON c.id=gc.channel_id_ref
   WHERE p.config_status='invalid'

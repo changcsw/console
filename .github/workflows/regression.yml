@@ -1,0 +1,112 @@
+name: Regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-with-pg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/admin-api/go.mod
+          cache-dependency-path: services/admin-api/go.sum
+
+      - name: Start Postgres
+        run: docker compose up -d postgres
+
+      - name: Bootstrap database
+        run: |
+          . scripts/regression/lib.sh
+          wait_for_pg
+          sh scripts/regression/db.sh
+
+      - name: Backend regression (PG)
+        run: sh scripts/regression/backend.sh
+        env:
+          WITH_DB: "1"
+
+      - name: Dashboard scenario harness (PG)
+        run: |
+          cd services/admin-api
+          SCENARIO_WITH_DB=1 go test ./internal/testkit/scenario/ -run 'TestScenarioManifests/dashboard|TestHarnessDashboardSummarySmoke' -count=1 -v
+        env:
+          WITH_DB: "1"
+          POSTGRES_DSN: postgres://admin:admin@127.0.0.1:55432/admin_console?sslmode=disable
+          ADMIN_JWT_SECRET: regression-scenario-jwt-secret
+          APP_ENV: sandbox
+
+      - name: Upload backend test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-go-test
+          path: tests/reports/backend-go-test.*
+
+  frontend-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: apps/admin-web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: apps/admin-web
+        run: pnpm install --frozen-lockfile
+
+      - name: Vitest
+        working-directory: apps/admin-web
+        run: pnpm test
+
+  frontend-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: apps/admin-web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: apps/admin-web
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        working-directory: apps/admin-web
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Playwright e2e
+        run: sh scripts/regression/frontend.sh
+        env:
+          E2E_WORKERS: "1"
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            tests/reports/playwright-html/
+            tests/reports/playwright-results.json

@@ -19,7 +19,8 @@ type CaseResult struct {
 }
 
 // RunCase 在进程内对 http.Handler 执行一个 case 并校验断言。
-func RunCase(handler http.Handler, c Case) CaseResult {
+// auth 非 nil 且 case 声明 auth.role 时，自动注入 Bearer 令牌。
+func RunCase(handler http.Handler, c Case, auth *roleTokenIssuer) CaseResult {
 	start := time.Now()
 	res := CaseResult{Name: c.Name, Dimension: c.Dimension}
 
@@ -42,6 +43,17 @@ func RunCase(handler http.Handler, c Case) CaseResult {
 	}
 	for k, v := range c.Request.Headers {
 		req.Header.Set(k, v)
+	}
+	if auth != nil {
+		if role := c.Auth["role"]; role != "" {
+			token, err := auth.accessToken(role)
+			if err != nil {
+				res.Message = fmt.Sprintf("auth token for role %q: %v", role, err)
+				res.Duration = time.Since(start)
+				return res
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 	}
 
 	rec := httptest.NewRecorder()

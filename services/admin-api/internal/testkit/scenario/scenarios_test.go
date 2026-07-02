@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,7 +37,13 @@ func TestScenarioManifests(t *testing.T) {
 		t.Skip("no scenario manifests")
 	}
 
-	handler := httpserver.New(config.Config{AppName: "admin-api", Environment: "test", HTTPAddress: ":0"}).Handler
+	var handler http.Handler
+	var auth *roleTokenIssuer
+	if scenarioDBReady() {
+		handler, auth = buildDBHandler(t)
+	} else {
+		handler = httpserver.New(config.Config{AppName: "admin-api", Environment: "test", HTTPAddress: ":0"}).Handler
+	}
 
 	for _, f := range files {
 		f := f
@@ -53,7 +60,7 @@ func TestScenarioManifests(t *testing.T) {
 							c.Dimension, noteSuffix(c.Note))
 						return
 					}
-					res := RunCase(handler, c)
+					res := RunCase(handler, c, auth)
 					if !res.Passed {
 						t.Errorf("[%s] %s", res.Dimension, res.Message)
 					}

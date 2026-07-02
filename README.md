@@ -21,12 +21,14 @@ Monorepo scaffold for the game publishing management console.
 
 ## Current Status
 
-- Architecture documents are prepared.
-- Backend scaffold is created but not compiled in this environment because `go` is not installed locally.
-- Frontend scaffold is created but dependencies are not installed in this environment because `pnpm` is not installed locally.
+- v2 全部 14 个业务模块（#10–#23）已合并至 `main`。
+- 全量回归：`sh scripts/regression/run.sh`（需 Docker；启动 Postgres → 迁移 → env schema bootstrap → seed → 后端 + 前端）。
+- 快路径（无 Docker）：`WITH_DB=0 sh scripts/regression/run.sh`。
+- 连库 scenario harness：`SCENARIO_WITH_DB=1` + `POSTGRES_DSN`/`ADMIN_JWT_SECRET`/`APP_ENV=sandbox`；当前 CI 已覆盖 dashboard 模块 scenario；全量 requiresDB 用例随 fixture 补齐逐步启用。
+- CI：`.github/workflows/regression.yml`（backend+PG、vitest、Playwright e2e）。
 
 ## Next Steps
 
-1. Install Go locally and run backend formatting and compile checks.
-2. Install `pnpm` or switch to `npm`, then install frontend dependencies.
-3. Hand the docs in `docs/architecture` and `docs/agents` to frontend and backend agents for parallel delivery.
+1. 补齐 `develop/sandbox/production` 正式 bootstrap 迁移（替代回归脚本中的 schema 克隆）。
+2. 按模块启用 `SCENARIO_WITH_DB=1` 全量 scenario 矩阵（需 fixtures 与跨模块样本对齐）。
+3. 处理跨模块遗留：games 详情 e2e（P-1）、audit sink 统一注入、feature-plugin P2 等。
