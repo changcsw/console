@@ -1,0 +1,41 @@
+{
+  "module": "23-dashboard",
+  "lane": "dashboard-surface",
+  "scope": "frontend",
+  "contract_source": "docs/architecture/v2/modules/23-dashboard/spec.compact.md",
+  "implemented_paths": [
+    "apps/admin-web/src/api/modules/dashboard.ts",
+    "apps/admin-web/src/views/dashboard/index.vue",
+    "apps/admin-web/src/views/dashboard/components/DashboardMetricCard.vue",
+    "apps/admin-web/src/views/dashboard/DashboardView.vue",
+    "apps/admin-web/src/router/routes.ts"
+  ],
+  "api_calls": [
+    {
+      "method": "GET",
+      "path": "/api/admin/dashboard/summary",
+      "params": ["range", "withTopItems", "topN"],
+      "contract": "compact"
+    }
+  ],
+  "shared_surface_changes": [
+    {
+      "path": "apps/admin-web/src/router/routes.ts",
+      "reason": "added dashboard.read route permission"
+    }
+  ],
+  "verification": {
+    "commands": [
+      "npm test -- src/views/dashboard/components/__tests__/DashboardMetricCard.spec.ts src/views/dashboard/__tests__/DashboardView.spec.ts",
+      "npm run e2e -- dashboard.spec.ts"
+    ],
+    "result": "partial",
+    "notes": [
+      "vitest passed (12 tests)",
+      "playwright blocked by 403 permission bootstrap issue on initial /dashboard navigation"
+    ]
+  },
+  "known_issues": [
+    "dictionary store has no dedicated dashboard enum dictionary; status/source labels are formatted in view layer"
+  ]
+}

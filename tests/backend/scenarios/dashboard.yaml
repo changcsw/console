@@ -1,0 +1,138 @@
+# 模块 dashboard（只读聚合）接口场景矩阵 manifest
+# 维度定义见 docs/architecture/v2/03-testing.md §4（S1-S10）。
+# 契约来源：docs/architecture/v2/modules/23-dashboard/spec.compact.md。
+#
+# 说明：
+# - 当前模块 MVP 仅实现 GET /api/admin/dashboard/summary。
+# - requiresDB=false 的 case 在进程内 harness 直接执行（主要覆盖 S2）。
+# - requiresDB=true 的 case 声明连库断言，需 PG CI（SCENARIO_WITH_DB=1）执行。
+module: dashboard
+cases:
+  - name: summary_success
+    dimension: S1
+    requiresDB: true
+    fixture: sandbox/dashboard/base
+    auth: { role: dashboard_reader }
+    note: "200 + {data} 包络；environment=当前 APP_ENV；五个指标结构齐全。"
+    request:
+      method: GET
+      path: /api/admin/dashboard/summary?range=7d&withTopItems=true&topN=5
+    expect:
+      status: 200
+      jsonContains: { data.environment: sandbox }
+
+  - name: summary_requires_auth
+    dimension: S2
+    requiresDB: false
+    note: "缺失 Bearer token -> 401 UNAUTHENTICATED。"
+    request:
+      method: GET
+      path: /api/admin/dashboard/summary
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+
+  - name: summary_forbidden_without_dashboard_read
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    note: "登录但缺 dashboard.read -> 403 FORBIDDEN。"
+    request:
+      method: GET
+      path: /api/admin/dashboard/summary
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+
+  - name: summary_validation_range_invalid
+    dimension: S4
+    requiresDB: true
+    auth: { role: dashboard_reader }
+    note: "range 不在 24h/7d/30d/90d -> 400 VALIDATION_FAILED。"
+    request:
+      method: GET
+      path: /api/admin/dashboard/summary?range=2d
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+
+  - name: summary_validation_topn_invalid
+    dimension: S4
+    requiresDB: true
+    auth: { role: dashboard_reader }
+    note: "topN 越界(0 或 >20) -> 400 VALIDATION_FAILED。"
+    request:
+      method: GET
+      path: /api/admin/dashboard/summary?topN=0
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+
+  - name: summary_s5_not_applicable_read_only
+    dimension: S5
+    requiresDB: true
+    auth: { role: dashboard_reader }
+    note: "N/A：只读聚合接口，无唯一约束写入或状态机流转冲突。"
+    request:
+      method: GET
+      path: /api/admin/dashboard/summary
+    expect:
+      status: 200
+
+  - name: summary_schema_isolation
+    dimension: S6
+    requiresDB: true
+    fixture: sandbox/dashboard/env-isolation
+    auth: { role: dashboard_reader }
+    note: "按 APP_ENV schema 聚合；汇率待审为平台级共享，不随 env 切换。"
+    request:
+      method: GET
+      path: /api/admin/dashboard/summary?withTopItems=true&topN=3
+    expect:
+      status: 200
+
+  - name: summary_no_audit_log_writes
+    dimension: S7
+    requiresDB: true
+    fixture: sandbox/dashboard/base
+    auth: { role: dashboard_reader }
+    note: "只读接口必须零写入：调用前后 audit_logs 计数不变（包括 0 -> 0）。"
+    request:
+      method: GET
+      path: /api/admin/dashboard/summary
+    expect:
+      status: 200
+
+  - name: summary_masked_message_and_permission_clipping
+    dimension: S8
+    requiresDB: true
+    fixture: sandbox/dashboard/masked-and-permission
+    auth: { role: dashboard_partial_reader }
+    note: "lastCheckMessage 使用来源已脱敏值；缺来源读权限时 permitted=false 且计数0、明细[]，整体仍 200。"
+    request:
+      method: GET
+      path: /api/admin/dashboard/summary?withTopItems=true&topN=5
+    expect:
+      status: 200
+
+  - name: summary_s9_not_applicable_no_pagination
+    dimension: S9
+    requiresDB: true
+    auth: { role: dashboard_reader }
+    note: "N/A：/summary 非列表接口，无 page/pageSize；子查询分页接口本期未实现。"
+    request:
+      method: GET
+      path: /api/admin/dashboard/summary
+    expect:
+      status: 200
+
+  - name: summary_repeatable_read_snapshot
+    dimension: S10
+    requiresDB: true
+    auth: { role: dashboard_reader }
+    note: "N/A(写回滚)：只读事务无业务写；仍需验证单次查询使用只读事务与一致性快照。"
+    request:
+      method: GET
+      path: /api/admin/dashboard/summary?range=24h
+    expect:
+      status: 200

@@ -19,7 +19,7 @@ const SESSION = {
     userName: "admin",
     displayName: "管理员",
     roles: [],
-    permissions: ["channel.read", "plugin.read", "plugin.write"]
+    permissions: ["dashboard.read", "channel.read", "plugin.read", "plugin.write"]
   }
 };
 

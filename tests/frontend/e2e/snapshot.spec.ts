@@ -11,7 +11,7 @@ const SESSION = {
     userName: "admin",
     displayName: "管理员",
     roles: [],
-    permissions: ["game.read", "snapshot.generate", "snapshot.publish"]
+    permissions: ["dashboard.read", "game.read", "snapshot.generate", "snapshot.publish"]
   }
 };
 

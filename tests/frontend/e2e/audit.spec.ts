@@ -16,7 +16,7 @@ const SESSION = {
     userName: "admin",
     displayName: "管理员",
     roles: [],
-    permissions: ["audit.read"]
+    permissions: ["dashboard.read", "audit.read"]
   }
 };
 

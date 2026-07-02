@@ -1,0 +1,9 @@
+- stage=frontend-fix / result=PASS（dashboard e2e 5/5 恢复）。
+- 根因归属：**产品缺陷为主 + 用例 setup 缺口**。产品缺陷：router 全局守卫同步读 `permission.hasPerm`，但权限仅由异步 `loadMe()` 回填、`auth` 从持久会话未同步回填 permission → 直连/刷新受保护路由（不止 /dashboard）先于权限就绪被误判 403。
+- 产品修复（共享面·router 守卫/权限引导）：`apps/admin-web/src/main.ts` 挂载前用持久会话 `auth.user` 同步 `permission.setFromUser(...)`；保留异步 `loadMe()`。仅提前权限就绪，不改各路由 perm 语义（不破坏 22 模块）。
+- 用例修复：① 11 个经 `/dashboard` 跳板的 e2e 会话补 `dashboard.read`（compact「默认拥有」）；② `dashboard.spec` `.env-badge`→`.dashboard-toolbar .env-badge`（顶栏+工具栏各一）；③ 生成缺失视觉基线 `dashboard-main-chromium-darwin.png`。
+- 防御渲染：`views/dashboard/index.vue` 5 卡 v-if 深可选链，避免跳板模块空 stub 报错。
+- 改动文件（前端）：`src/main.ts`、`src/views/dashboard/index.vue`、`tests/frontend/e2e/dashboard.spec.ts` + 11 个跳板 spec（audit/cashier/channel-login/channels/feature-plugin/game-cashier/games/payment/product/snapshot/sync）、`tests/frontend/visual-baseline/dashboard.spec.ts-snapshots/`。
+- 共享面改动：`main.ts`（全局 auth/permission 引导）已记 integration.checklist.frontend.md。
+- 自检最终结果：vitest **302/302**；Playwright `dashboard.spec.ts` **5/5**；跳板代表 `audit.spec.ts` **9/9**；`npm run build` **pass**。
+- 未决：全 22 模块 e2e 未逐一重跑（每用例约 40s，耗时）；已以 audit 跳板代表 + main.ts 通用修复佐证非破坏，建议集成阶段全量回归确认。

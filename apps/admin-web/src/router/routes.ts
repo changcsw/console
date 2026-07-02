@@ -23,7 +23,7 @@ export const routes: RouteRecordRaw[] = [
         path: "dashboard",
         name: "dashboard",
         component: () => import("@/views/dashboard/DashboardView.vue"),
-        meta: { title: "工作台", icon: "House" }
+        meta: { title: "工作台", icon: "House", perm: "dashboard.read" }
       },
       {
         path: "games",

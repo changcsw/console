@@ -1,0 +1,37 @@
+{
+  "module_id": "23-dashboard",
+  "lane": "dashboard-surface",
+  "spec_path": "docs/architecture/v2/modules/23-dashboard/spec.compact.md",
+  "worktree": "/Users/csw/gitproject/console-dashboard",
+  "branch": "codex/dashboard",
+  "backend_routes": [
+    {
+      "method": "GET",
+      "path": "/api/admin/dashboard/summary",
+      "permission": "dashboard.read"
+    }
+  ],
+  "shared_surfaces_touched": [
+    "services/admin-api/internal/transport/httpserver/admin_wiring.go"
+  ],
+  "referenced_modules": [
+    "17-cashier-template",
+    "20-snapshot",
+    "21-sync",
+    "12-channel",
+    "13-account-auth",
+    "14-channel-login",
+    "15-feature-plugin",
+    "11-game"
+  ],
+  "open_issues": [
+    "Optional drill-down APIs are not implemented in this phase."
+  ],
+  "verification": {
+    "commands": [
+      "cd /Users/csw/gitproject/console-dashboard/services/admin-api && go test ./internal/app/query/dashboard/... ./internal/transport/http/dashboard/... ./...",
+      "cd /Users/csw/gitproject/console-dashboard/services/admin-api && go test ./..."
+    ],
+    "result": "pass"
+  }
+}

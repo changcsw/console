@@ -20,6 +20,7 @@ import (
 	paymentapp "github.com/csw/console/services/admin-api/internal/app/payment"
 	pluginapp "github.com/csw/console/services/admin-api/internal/app/plugin"
 	productapp "github.com/csw/console/services/admin-api/internal/app/product"
+	dashboardquery "github.com/csw/console/services/admin-api/internal/app/query/dashboard"
 	snapshotapp "github.com/csw/console/services/admin-api/internal/app/snapshot"
 	domainauth "github.com/csw/console/services/admin-api/internal/domain/auth"
 	"github.com/csw/console/services/admin-api/internal/domain/common"
@@ -33,6 +34,7 @@ import (
 	audithttp "github.com/csw/console/services/admin-api/internal/transport/http/audit"
 	cashierhttp "github.com/csw/console/services/admin-api/internal/transport/http/cashier"
 	channelshttp "github.com/csw/console/services/admin-api/internal/transport/http/channels"
+	dashboardhttp "github.com/csw/console/services/admin-api/internal/transport/http/dashboard"
 	gameshttp "github.com/csw/console/services/admin-api/internal/transport/http/games"
 	paymenthttp "github.com/csw/console/services/admin-api/internal/transport/http/payment"
 	snapshothttp "github.com/csw/console/services/admin-api/internal/transport/http/snapshot"
@@ -71,6 +73,7 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 		snapshothttp.RegisterRoutes(r, snapshothttp.NewHandler(nil), iss, env, logger, false, nil)
 		syncapi.RegisterRoutes(r, syncapi.NewSectionSyncHandler(nil), iss, env, logger, false, nil)
 		audithttp.RegisterRoutes(r, audithttp.NewHandler(nil), iss, env, logger, false, nil)
+		dashboardhttp.RegisterRoutes(r, dashboardhttp.NewHandler(nil), iss, env, logger, false, nil)
 		return r
 	}
 
@@ -149,6 +152,8 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 	syncapi.RegisterRoutes(r, syncapi.NewSectionSyncHandler(syncSvc), issuer, env, logger, true, auditSvc)
 
 	audithttp.RegisterRoutes(r, audithttp.NewHandler(auditSvc), issuer, env, logger, true, auditSvc)
+	dashboardSvc := dashboardquery.NewQueryService(pool)
+	dashboardhttp.RegisterRoutes(r, dashboardhttp.NewHandler(dashboardSvc), issuer, env, logger, true, auditSvc)
 
 	return r
 }

@@ -38,7 +38,7 @@
 | 20 | `snapshot` | `runtime-surface` | channel, account-auth, channel-login, feature-plugin, product, cashier-template, game-cashier, payment, game | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⬜ | ✅ | ✅ 验收 31/31 PASS；契约0漂移·无需🟧修复；连库21例待PG CI(非阻断)；已合并至 main |
 | 21 | `sync` | `runtime-surface` | snapshot, +上游全部 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 36/36 PASS；🟪2轮(移交 SYNC-INT-01~09→🟧修复 payments真实upsert/9section子表/整行脱敏/game_secret入hash/syncJobId string→R2闭环)；遗留非阻断 04/05/08/09+config子键+连库待 PG CI；已合并至 main |
 | 22 | `audit` | `audit-surface` | common | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 26 项全 PASS；P0(schema→platform) 经 🟧 修复 + 🟪 复测；已合并至 main |
-| 23 | `dashboard` | `dashboard-surface` | cashier-template, snapshot, sync | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | 上游已全部合并，可开工 |
+| 23 | `dashboard` | `dashboard-surface` | cashier-template, snapshot, sync | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 验收 33/33 PASS(0 FAIL)；🟪R1通过+🟧修复D-1(templateId string)闭环；含共享面 main.ts 全局权限引导修复(合并需注意)；连库维度待 PG CI；P-1 属 games；**待集成合并 → main** |
 
 > 注：`artifacts_dir` 统一在 `index.json.docs[].artifacts_dir` 中定义；旧模块若尚无 `artifacts` 目录，仅在后续续作时回填。
 
@@ -54,7 +54,7 @@
 | `audit-surface` | （已全部完成） | ✅ 完成 | audit 已合并至 main |
 | `payment-surface` | （已全部完成） | ✅ 完成 | payment 已合并至 main |
 | `runtime-surface` | （已全部完成） | ✅ 完成 | snapshot / sync 均 ✅ 并已合并至 main，本 lane 收官 |
-| `dashboard-surface` | `dashboard` | 🔄 可开工 | sync #21 已合并 main；dashboard #23 可开工 |
+| `dashboard-surface` | （已全部完成） | ✅ 完成 | dashboard #23 全流程完成（验收 33/33 PASS），待集成合并 → main |
 
 > 如果你选择 `feature-plugin` 而不是 `channel-login` 先开，也可以；但 **`channels-surface` 同时只能跑一个模块**。
 
@@ -64,7 +64,7 @@
 
 | 模块 | lane | 当前阶段 | worktree / branch | handoff.summary.md | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| `dashboard`(#23) | dashboard-surface | ⬜ 待开工 | （待分配 worktree） / `codex/dashboard` | — | sync #21 已合并 main；dashboard-surface 下一模块 |
+| `dashboard`(#23) | dashboard-surface | ✅ 全流程完成，待集成合并 → main | `/Users/csw/gitproject/console-dashboard` / `codex/dashboard` | artifacts/handoff.summary.md | ✅验收 33/33 PASS；含共享面 `main.ts` 全局权限引导修复(集成合并需注意，影响全部受保护路由) + `admin_wiring.go` 路由接入 + `routes.ts` 守卫；连库维度待 PG CI；P-1 属 games 既有问题 |
 
 > 总 Agent 每次只维护当前模块这一行；模块完成或阻塞后即清空或转历史，不把长日志写回本文件。
 

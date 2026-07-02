@@ -19,7 +19,7 @@ const SESSION = {
     userName: "admin",
     displayName: "管理员",
     roles: [],
-    permissions: ["cashier.read", "cashier.write", "cashier.publish", "fx.approve"]
+    permissions: ["dashboard.read", "cashier.read", "cashier.write", "cashier.publish", "fx.approve"]
   }
 };
 

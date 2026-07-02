@@ -17,7 +17,7 @@ const SESSION = {
     userName: "admin",
     displayName: "管理员",
     roles: [],
-    permissions: ["game.read", "sync.preview", "sync.execute"]
+    permissions: ["dashboard.read", "game.read", "sync.preview", "sync.execute"]
   }
 };
 
