@@ -18,12 +18,13 @@
 SET search_path TO sandbox, platform;
 
 -- ───────────────────────── 前置：渠道实例 / 渠道包（channel 模块未提供 fixture 时就近补齐）
--- game_channel 9001 = 游戏 100001 × 渠道 google（启用）
-INSERT INTO sandbox.game_channels (id, game_id_ref, channel_id_ref, enabled, remark)
-SELECT 9001, g.id, ch.id, TRUE, 'product fixtures'
+-- game_channel 9001 = 游戏 100001 × 渠道 google（GLOBAL market，启用）
+-- 唯一键为 (game_id_ref, market_code, channel_id_ref)（migration 000005 D2），ON CONFLICT 须显式含 market_code。
+INSERT INTO sandbox.game_channels (id, game_id_ref, channel_id_ref, market_code, enabled, remark)
+SELECT 9001, g.id, ch.id, 'GLOBAL', TRUE, 'product fixtures'
 FROM sandbox.games g JOIN platform.channels ch ON ch.channel_id = 'google'
 WHERE g.game_id = '100001'
-ON CONFLICT (game_id_ref, channel_id_ref) DO NOTHING;
+ON CONFLICT (game_id_ref, market_code, channel_id_ref) DO NOTHING;
 
 -- channel_package 7001 = game_channel 9001 下的包 pkg-a（GLOBAL market）
 INSERT INTO sandbox.channel_packages (id, game_channel_id_ref, package_code, package_name, market_code, bundle_id, enabled)

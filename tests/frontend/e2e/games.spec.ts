@@ -286,6 +286,9 @@ async function gotoGames(page: Page) {
   await expect(page.getByText("发行后台根聚合")).toBeVisible();
 }
 
+// 进入游戏详情：GameDetailView 的非激活 Tab 已改为 lazy 挂载（仅首屏挂载默认「基础信息」
+// Tab），其余 Tab 在被点击激活时才挂载并发起 API 请求。首帧渲染已回落到 <5s，这里用常规
+// 15s 超时即可（仍远低于 90s 用例超时）。
 async function openGameDetail(page: Page, gameName = "星际远征") {
   await page.getByText(gameName).first().click();
   await expect(page.locator(".detail-head__title")).toContainText(gameName, { timeout: 15_000 });

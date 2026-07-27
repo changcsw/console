@@ -22,13 +22,13 @@ Monorepo scaffold for the game publishing management console.
 ## Current Status
 
 - v2 全部 14 个业务模块（#10–#23）已合并至 `main`。
-- 全量回归：`sh scripts/regression/run.sh`（需 Docker；启动 Postgres → 迁移 → env schema bootstrap → seed → 后端 + 前端）。
+- 全量回归：`sh scripts/regression/run.sh`（需 Docker；启动 Postgres → 迁移（含正式 env schema bootstrap 000017）→ seed → 后端 + 前端）。
 - 快路径（无 Docker）：`WITH_DB=0 sh scripts/regression/run.sh`。
 - 连库 scenario harness：`SCENARIO_WITH_DB=1` + `POSTGRES_DSN`/`ADMIN_JWT_SECRET`/`APP_ENV=sandbox`；当前 CI 已覆盖 dashboard 模块 scenario；全量 requiresDB 用例随 fixture 补齐逐步启用。
 - CI：`.github/workflows/regression.yml`（backend+PG、vitest、Playwright e2e）。
 
 ## Next Steps
 
-1. 补齐 `develop/sandbox/production` 正式 bootstrap 迁移（替代回归脚本中的 schema 克隆）。
-2. 按模块启用 `SCENARIO_WITH_DB=1` 全量 scenario 矩阵（需 fixtures 与跨模块样本对齐）。
-3. 处理跨模块遗留：games 详情 e2e（P-1）、audit sink 统一注入、feature-plugin P2 等。
+1. 按模块启用 `SCENARIO_WITH_DB=1` 全量 scenario 矩阵（需 fixtures 与跨模块样本对齐）。
+2. 处理跨模块遗留：games 详情 e2e（P-1）、audit sink 统一注入、feature-plugin P2 等。
+3. （后续）按 `01-structure.md §6` 理想形态推进：bootstrap 建最小权限角色/授权、per-env 迁移运行器（各 env schema 独立 `schema_migrations`、补齐跨 schema 外键），替换当前基于 public 模板的 LIKE 克隆。

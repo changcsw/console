@@ -51,13 +51,13 @@ SELECT
   g.id,
   '1.0',
   '20260615100000-a1b2c3d4',
-  '{"schemaVersion":"1.0","gameId":"100001","generatedAt":"2026-06-15T10:00:00Z",'
+  ('{"schemaVersion":"1.0","gameId":"100001","generatedAt":"2026-06-15T10:00:00Z",'
   || '"markets":{"GLOBAL":{"game":{"legalLinks":[],"accountAuth":[],"products":[]},'
   || '"channels":[{"channelId":"google","region":"overseas","sourceMarket":"GLOBAL",'
   || '"login":{"clientId":"pub-client","apiKey":"***"}}],"paymentRoutes":[]},'
   || '"CN":{"game":{"legalLinks":[],"accountAuth":[],"products":[]},'
   || '"channels":[{"channelId":"huawei_cn","region":"domestic","sourceMarket":"CN"}],'
-  || '"paymentRoutes":[]}}}',
+  || '"paymentRoutes":[]}}}')::jsonb,
   'game_100001_20260615100000-a1b2c3d4.json',
   'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2',
   '',
@@ -77,7 +77,7 @@ SELECT
   g.id,
   '1.0',
   '20260614090000-9f8e7d6c',
-  '{"schemaVersion":"1.0","gameId":"100001","generatedAt":"2026-06-14T09:00:00Z","markets":{}}',
+  '{"schemaVersion":"1.0","gameId":"100001","generatedAt":"2026-06-14T09:00:00Z","markets":{}}'::jsonb,
   'game_100001_20260614090000-9f8e7d6c.json',
   '9f8e7d6c5b4a39281706f5e4d3c2b1a0f9e8d7c6b5a493827160f5e4d3c2b1a0',
   '',

@@ -42,31 +42,31 @@
         <el-tab-pane label="基础信息" name="basic">
           <BasicInfoTab :game="game" @updated="onUpdated" />
         </el-tab-pane>
-        <el-tab-pane label="市场" name="markets">
+        <el-tab-pane label="市场" name="markets" lazy>
           <MarketsTab :game="game" @updated="onUpdated" />
         </el-tab-pane>
-        <el-tab-pane label="法务链接" name="legal">
+        <el-tab-pane label="法务链接" name="legal" lazy>
           <LegalLinksTab :game="game" @updated="onUpdated" />
         </el-tab-pane>
-        <el-tab-pane label="自有账号认证" name="account-auth">
+        <el-tab-pane label="自有账号认证" name="account-auth" lazy>
           <AccountAuthTab :game-id="game.gameId" />
         </el-tab-pane>
-        <el-tab-pane label="商品" name="products">
+        <el-tab-pane label="商品" name="products" lazy>
           <ProductTab :game-id="game.gameId" />
         </el-tab-pane>
-        <el-tab-pane label="IAP" name="iap">
+        <el-tab-pane label="IAP" name="iap" lazy>
           <IapConfigTab :game-id="game.gameId" />
         </el-tab-pane>
-        <el-tab-pane label="收银台" name="cashier">
+        <el-tab-pane label="收银台" name="cashier" lazy>
           <GameCashierTab :game-id="game.gameId" />
         </el-tab-pane>
-        <el-tab-pane label="支付路由" name="payment-routes">
+        <el-tab-pane label="支付路由" name="payment-routes" lazy>
           <PaymentRoutesTab :game-id="game.gameId" />
         </el-tab-pane>
-        <el-tab-pane label="配置快照" name="snapshot">
+        <el-tab-pane label="配置快照" name="snapshot" lazy>
           <SnapshotTab :game-id="game.gameId" />
         </el-tab-pane>
-        <el-tab-pane label="同步记录" name="sync">
+        <el-tab-pane label="同步记录" name="sync" lazy>
           <SyncJobsTab v-if="game" ref="syncJobsTabRef" :game-id="game.gameId" />
         </el-tab-pane>
         <el-tab-pane v-for="ph in downstreamTabs" :key="ph.name" :label="ph.label" :name="ph.name" lazy>
@@ -89,7 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import PageCard from "@/components/page/PageCard.vue";
@@ -150,6 +150,9 @@ function openSyncDrawer() {
 async function onSyncExecuted(_: SyncExecuteResponse) {
   syncDrawerOpen.value = false;
   activeTab.value = "sync";
+  // 同步记录 Tab 为 lazy 挂载：切换后需等下一帧组件就绪再取 ref 触发刷新。
+  // 若此前从未激活过该 Tab，其 onMounted 会自行 reload(1)，此处再显式拉取第 1 页以覆盖已挂载场景。
+  await nextTick();
   await syncJobsTabRef.value?.reload(1);
 }
 
