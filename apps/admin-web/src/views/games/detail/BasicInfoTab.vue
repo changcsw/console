@@ -5,27 +5,51 @@
       <el-button v-perm="'game.write'" type="primary" @click="openEdit">编辑基础信息</el-button>
     </div>
 
-    <el-descriptions :column="2" border>
-      <el-descriptions-item label="Game ID">
-        <span class="mono">{{ game.gameId }}</span>
-        <el-button link type="primary" class="copy-btn" @click="copy(game.gameId)">复制</el-button>
-      </el-descriptions-item>
-      <el-descriptions-item label="代号 alias">{{ game.alias }}</el-descriptions-item>
-      <el-descriptions-item label="游戏名称">{{ game.name }}</el-descriptions-item>
-      <el-descriptions-item label="默认市场">{{ game.defaultMarketCode }}</el-descriptions-item>
-      <el-descriptions-item label="状态">
-        <PageStatusTag :tone="statusMeta(game.status).tone" :label="statusMeta(game.status).label" />
-      </el-descriptions-item>
-      <el-descriptions-item label="Game Secret">
-        <span class="mono text-muted">{{ game.gameSecret || "masked" }}</span>
-        <span class="secret-note">（恒脱敏，仅创建时一次性明文）</span>
-      </el-descriptions-item>
-      <el-descriptions-item label="图标 URL">
-        <a v-if="game.iconUrl" :href="game.iconUrl" target="_blank" rel="noreferrer">{{ game.iconUrl }}</a>
-        <span v-else class="text-muted">—</span>
-      </el-descriptions-item>
-      <el-descriptions-item label="环境">{{ game.environment || app.environment }}</el-descriptions-item>
-    </el-descriptions>
+    <div class="basic-grid">
+      <div class="basic-item">
+        <span class="basic-item__label">Game ID</span>
+        <div class="basic-item__value">
+          <span class="mono">{{ game.gameId }}</span>
+          <el-button link type="primary" class="copy-icon-btn" :icon="CopyDocument" @click="copy(game.gameId)" />
+        </div>
+      </div>
+      <div class="basic-item">
+        <span class="basic-item__label">代号 alias</span>
+        <span class="basic-item__value">{{ game.alias }}</span>
+      </div>
+      <div class="basic-item">
+        <span class="basic-item__label">游戏名称</span>
+        <span class="basic-item__value">{{ game.name }}</span>
+      </div>
+      <div class="basic-item">
+        <span class="basic-item__label">默认市场</span>
+        <span class="basic-item__value">{{ game.defaultMarketCode }}</span>
+      </div>
+      <div class="basic-item">
+        <span class="basic-item__label">状态</span>
+        <span class="basic-item__value">
+          <PageStatusTag :tone="statusMeta(game.status).tone" :label="statusMeta(game.status).label" />
+        </span>
+      </div>
+      <div class="basic-item">
+        <span class="basic-item__label">Game Secret</span>
+        <div class="basic-item__value">
+          <span class="mono text-muted">{{ game.gameSecret || "masked" }}</span>
+          <span class="secret-note">（恒脱敏，仅创建时一次性明文）</span>
+        </div>
+      </div>
+      <div class="basic-item">
+        <span class="basic-item__label">图标 URL</span>
+        <span class="basic-item__value">
+          <a v-if="game.iconUrl" :href="game.iconUrl" target="_blank" rel="noreferrer">{{ game.iconUrl }}</a>
+          <span v-else class="text-muted">—</span>
+        </span>
+      </div>
+      <div class="basic-item">
+        <span class="basic-item__label">环境</span>
+        <span class="basic-item__value">{{ game.environment || app.environment }}</span>
+      </div>
+    </div>
 
     <el-drawer v-model="drawerVisible" title="编辑基础信息" size="460px">
       <el-form label-position="top">
@@ -67,6 +91,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
+import { CopyDocument } from "@element-plus/icons-vue";
 import PageStatusTag from "@/components/page/PageStatusTag.vue";
 import { useAppStore } from "@/stores/app";
 import { ApiError } from "@/api/http";
@@ -159,12 +184,39 @@ async function submit() {
   gap: 12px;
 }
 
+.basic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 28px;
+}
+
+.basic-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.basic-item__label {
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.basic-item__value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text-main);
+  min-width: 0;
+  word-break: break-all;
+}
+
 .mono {
   font-family: monospace;
 }
 
-.copy-btn {
-  margin-left: 8px;
+.copy-icon-btn {
+  padding: 0;
 }
 
 .secret-note {
@@ -191,5 +243,11 @@ async function submit() {
   color: var(--danger);
   font-size: 13px;
   margin: 4px 0 0;
+}
+
+@media (max-width: 980px) {
+  .basic-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

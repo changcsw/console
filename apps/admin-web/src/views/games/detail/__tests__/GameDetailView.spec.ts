@@ -48,7 +48,6 @@ function mountView() {
         EnvironmentBadge: true,
         BasicInfoTab: true,
         MarketsTab: true,
-        LegalLinksTab: true,
         AccountAuthTab: true,
         ProductTab: true,
         IapConfigTab: true,
@@ -91,9 +90,8 @@ describe("GameDetailView", () => {
     const wrapper = mountView();
     await flushPromises();
     const text = wrapper.text();
-    expect(text).toContain("基础信息");
-    expect(text).toContain("市场");
-    expect(text).toContain("法务链接");
+    expect(text).not.toContain("基础信息");
+    expect(text).toContain("市场与法务");
     expect(text).toContain("自有账号认证");
     expect(text).toContain("收银台");
     // 下游占位 Tab（渠道/支付路由等）

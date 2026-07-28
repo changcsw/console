@@ -3,8 +3,10 @@ import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
 
 const replaceMarketsApi = vi.fn();
+const replaceLegalLinksApi = vi.fn();
 vi.mock("@/api/modules/games", () => ({
-  replaceMarkets: (...args: unknown[]) => replaceMarketsApi(...args)
+  replaceMarkets: (...args: unknown[]) => replaceMarketsApi(...args),
+  replaceLegalLinks: (...args: unknown[]) => replaceLegalLinksApi(...args)
 }));
 
 import { ApiError } from "@/api/http";
@@ -38,7 +40,15 @@ interface MarketsVM {
   formError: string;
   selectedMarkets: string[];
   defaultMarketCode: string;
-  rows: { marketCode: string; enabled: boolean; defaultLocale: string }[];
+  rows: {
+    marketCode: string;
+    enabled: boolean;
+    defaultLocale: string;
+    inheritGlobal: boolean;
+    termsUrl: string;
+    privacyUrl: string;
+    deleteAccountUrl: string;
+  }[];
   openEdit: () => void;
   submit: () => Promise<void>;
 }
@@ -56,6 +66,7 @@ function mountTab(perms: string[] = ["game.write"]) {
 describe("MarketsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    replaceLegalLinksApi.mockResolvedValue({ ...makeGame(), legalLinks: [] });
   });
 
   test("openEdit 用当前聚合预填行与默认市场", async () => {
@@ -89,6 +100,7 @@ describe("MarketsTab", () => {
 
   test("提交构造恰好一条 isDefault=true 的全量覆盖载荷", async () => {
     replaceMarketsApi.mockResolvedValue({ ...makeGame(), defaultMarketCode: "JP" });
+    replaceLegalLinksApi.mockResolvedValue({ ...makeGame(), legalLinks: [] });
     const { wrapper, vm } = mountTab();
     vm.openEdit();
     vm.defaultMarketCode = "JP";
@@ -101,6 +113,7 @@ describe("MarketsTab", () => {
     const defaults = payload.markets.filter((m: { isDefault: boolean }) => m.isDefault);
     expect(defaults).toHaveLength(1);
     expect(defaults[0].marketCode).toBe("JP");
+    expect(replaceLegalLinksApi).toHaveBeenCalledTimes(1);
     expect(wrapper.emitted("updated")).toBeTruthy();
     expect(vm.drawerVisible).toBe(false);
   });

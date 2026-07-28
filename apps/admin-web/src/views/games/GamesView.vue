@@ -34,7 +34,6 @@
             <PageStatusTag :tone="statusMeta(row.status).tone" :label="statusMeta(row.status).label" />
           </template>
         </el-table-column>
-        <el-table-column prop="defaultMarketCode" label="默认市场" width="110" />
         <el-table-column label="市场" min-width="180">
           <template #default="{ row }">
             <span v-if="row.marketCodes?.length" class="market-tags">
@@ -44,7 +43,7 @@
                 size="small"
                 :type="market === row.defaultMarketCode ? 'success' : 'info'"
               >
-                {{ market }}
+                {{ market }}{{ market === row.defaultMarketCode ? "（默认）" : "" }}
               </el-tag>
             </span>
             <span v-else class="text-muted">—</span>

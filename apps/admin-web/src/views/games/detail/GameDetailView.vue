@@ -3,15 +3,15 @@
     <PageCard>
       <div class="detail-head">
         <div class="detail-head__left">
-          <el-button link @click="goBack">← 返回列表</el-button>
           <template v-if="game">
             <h2 class="detail-head__title">{{ game.name }}</h2>
             <PageStatusTag :tone="statusMeta(game.status).tone" :label="statusMeta(game.status).label" />
           </template>
         </div>
         <div class="detail-head__actions">
+          <el-button v-if="!hasTopbarBridge" link @click="goBack">← 返回列表</el-button>
           <el-button
-            v-if="app.environment === 'sandbox'"
+            v-if="!hasTopbarBridge && app.environment === 'sandbox'"
             v-perm="'sync.execute'"
             type="primary"
             :disabled="!canSyncExecute || !game"
@@ -19,7 +19,7 @@
           >
             Sync to Production
           </el-button>
-          <EnvironmentBadge :environment="app.environment" />
+          <EnvironmentBadge v-if="!hasTopbarBridge" :environment="app.environment" />
         </div>
       </div>
 
@@ -31,6 +31,10 @@
       </div>
     </PageCard>
 
+    <PageCard v-if="game" class="detail-basic-card">
+      <BasicInfoTab :game="game" @updated="onUpdated" />
+    </PageCard>
+
     <PageCard v-loading="loading">
       <div v-if="notFound" class="empty-state">
         <p class="empty-state__title">游戏不存在或已切换环境</p>
@@ -39,14 +43,8 @@
       </div>
 
       <el-tabs v-else-if="game" v-model="activeTab">
-        <el-tab-pane label="基础信息" name="basic">
-          <BasicInfoTab :game="game" @updated="onUpdated" />
-        </el-tab-pane>
-        <el-tab-pane label="市场" name="markets" lazy>
+        <el-tab-pane label="市场与法务" name="markets" lazy>
           <MarketsTab :game="game" @updated="onUpdated" />
-        </el-tab-pane>
-        <el-tab-pane label="法务链接" name="legal" lazy>
-          <LegalLinksTab :game="game" @updated="onUpdated" />
         </el-tab-pane>
         <el-tab-pane label="自有账号认证" name="account-auth" lazy>
           <AccountAuthTab :game-id="game.gameId" />
@@ -89,7 +87,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import PageCard from "@/components/page/PageCard.vue";
@@ -102,7 +100,6 @@ import type { SyncExecuteResponse } from "@/api/syncSections";
 import { getGame, type GameDetail } from "@/api/modules/games";
 import BasicInfoTab from "./BasicInfoTab.vue";
 import MarketsTab from "./MarketsTab.vue";
-import LegalLinksTab from "./LegalLinksTab.vue";
 import AccountAuthTab from "./AccountAuthTab.vue";
 import ProductTab from "./ProductTab.vue";
 import IapConfigTab from "./IapConfigTab.vue";
@@ -112,6 +109,7 @@ import SnapshotTab from "./SnapshotTab.vue";
 import SyncJobsTab from "./SyncJobsTab.vue";
 import SyncSectionDrawer from "./components/SyncSectionDrawer.vue";
 import { statusMeta } from "../constants";
+import { useTopbarBridge } from "@/layouts/topbarBridge";
 
 const route = useRoute();
 const router = useRouter();
@@ -121,10 +119,12 @@ const permission = usePermissionStore();
 const game = ref<GameDetail | null>(null);
 const loading = ref(false);
 const notFound = ref(false);
-const activeTab = ref("basic");
+const activeTab = ref("markets");
 const syncDrawerOpen = ref(false);
 const syncJobsTabRef = ref<{ reload: (page?: number) => Promise<void> } | null>(null);
 const canSyncExecute = computed(() => permission.hasPerm("sync.execute"));
+const topbar = useTopbarBridge();
+const hasTopbarBridge = computed(() => topbar.connected.value);
 
 const downstreamTabs = [
   { name: "channels", label: "渠道", hint: "渠道实例（GameMarketChannel）由 channel 模块实现。" },
@@ -156,6 +156,37 @@ async function onSyncExecuted(_: SyncExecuteResponse) {
   await syncJobsTabRef.value?.reload(1);
 }
 
+function applyTopbarState() {
+  topbar.setBreadcrumb([
+    {
+      key: "games",
+      label: "游戏管理",
+      onClick: () => {
+        goBack();
+      }
+    },
+    {
+      key: "game-detail",
+      label: game.value?.alias || game.value?.name || "游戏详情"
+    }
+  ]);
+  topbar.setActions({
+    environment: app.environment,
+    showSyncButton: app.environment === "sandbox",
+    canSyncExecute: canSyncExecute.value && Boolean(game.value),
+    onChangeEnvironment(next) {
+      app.setEnvironment(next);
+      const gameId = route.params.gameId;
+      if (typeof gameId === "string" && gameId) {
+        void load(gameId);
+      }
+    },
+    onSyncToProduction() {
+      openSyncDrawer();
+    }
+  });
+}
+
 async function load(gameId: string) {
   loading.value = true;
   notFound.value = false;
@@ -184,11 +215,24 @@ watch(
   }
 );
 
+watch(
+  [() => game.value?.alias, () => game.value?.name, () => app.environment, canSyncExecute],
+  () => {
+    applyTopbarState();
+  }
+);
+
 onMounted(() => {
+  applyTopbarState();
   const gameId = route.params.gameId;
   if (typeof gameId === "string" && gameId) {
     void load(gameId);
   }
+});
+
+onBeforeUnmount(() => {
+  topbar.setBreadcrumb(null);
+  topbar.setActions(null);
 });
 </script>
 
@@ -260,5 +304,9 @@ onMounted(() => {
 .empty-state__hint {
   margin: 0;
   color: var(--text-subtle);
+}
+
+.detail-basic-card {
+  margin-top: 14px;
 }
 </style>

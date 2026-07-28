@@ -2,15 +2,14 @@
   <div class="markets-tab">
     <div class="markets-tab__toolbar">
       <PageStatusTag tone="neutral" :label="`市场数：${game.markets.length}`" />
-      <el-button v-perm="'game.write'" type="primary" @click="openEdit">编辑市场</el-button>
+      <el-button v-perm="'game.write'" type="primary" @click="openEdit">编辑市场与法务链接</el-button>
     </div>
 
     <el-table :data="game.markets" border>
-      <el-table-column prop="marketCode" label="市场" min-width="120" />
-      <el-table-column label="默认市场" width="110">
+      <el-table-column label="市场" min-width="140">
         <template #default="{ row }">
-          <el-tag v-if="row.isDefault" type="success" size="small">默认</el-tag>
-          <span v-else class="text-muted">—</span>
+          <span>{{ row.marketCode }}</span>
+          <el-tag v-if="row.isDefault" type="success" size="small" class="market-default-tag">默认市场</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="启用" width="100">
@@ -18,13 +17,52 @@
           <PageStatusTag :tone="row.enabled ? 'success' : 'danger'" :label="row.enabled ? '启用' : '停用'" />
         </template>
       </el-table-column>
-      <el-table-column prop="defaultLocale" label="默认语言" min-width="120" />
+      <el-table-column prop="defaultLocale" label="默认语言" width="130" />
+      <el-table-column label="服务条款 URL" min-width="210" show-overflow-tooltip>
+        <template #default="{ row }">
+          <a
+            v-if="effectiveLegalByMarket(row.marketCode).termsUrl"
+            :href="effectiveLegalByMarket(row.marketCode).termsUrl"
+            target="_blank"
+            rel="noreferrer"
+          >
+            {{ effectiveLegalByMarket(row.marketCode).termsUrl }}
+          </a>
+          <span v-else class="text-muted">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="隐私政策 URL" min-width="210" show-overflow-tooltip>
+        <template #default="{ row }">
+          <a
+            v-if="effectiveLegalByMarket(row.marketCode).privacyUrl"
+            :href="effectiveLegalByMarket(row.marketCode).privacyUrl"
+            target="_blank"
+            rel="noreferrer"
+          >
+            {{ effectiveLegalByMarket(row.marketCode).privacyUrl }}
+          </a>
+          <span v-else class="text-muted">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="账号注销 URL" min-width="210" show-overflow-tooltip>
+        <template #default="{ row }">
+          <a
+            v-if="effectiveLegalByMarket(row.marketCode).deleteAccountUrl"
+            :href="effectiveLegalByMarket(row.marketCode).deleteAccountUrl"
+            target="_blank"
+            rel="noreferrer"
+          >
+            {{ effectiveLegalByMarket(row.marketCode).deleteAccountUrl }}
+          </a>
+          <span v-else class="text-muted">—</span>
+        </template>
+      </el-table-column>
       <template #empty>
         <span class="text-muted">暂无市场</span>
       </template>
     </el-table>
 
-    <el-drawer v-model="drawerVisible" title="编辑市场（全量覆盖）" size="560px">
+    <el-drawer v-model="drawerVisible" title="编辑市场与法务链接（全量覆盖）" size="860px">
       <el-form label-position="top">
         <el-form-item label="发行市场">
           <el-select v-model="selectedMarkets" multiple class="full-width" placeholder="选择发行市场">
@@ -60,8 +98,39 @@
           </el-table-column>
         </el-table>
 
+        <div class="legal-editor">
+          <h4>法务链接（按市场）</h4>
+          <div v-for="row in rows" :key="row.marketCode" class="legal-card">
+            <div class="legal-card__head">
+              <strong>{{ row.marketCode }}</strong>
+              <el-switch
+                v-if="row.marketCode !== 'GLOBAL'"
+                v-model="row.inheritGlobal"
+                inline-prompt
+                active-text="引用 GLOBAL"
+                inactive-text="独立配置"
+              />
+            </div>
+            <el-input
+              v-model="row.termsUrl"
+              placeholder="服务条款 URL"
+              :disabled="row.marketCode !== 'GLOBAL' && row.inheritGlobal"
+            />
+            <el-input
+              v-model="row.privacyUrl"
+              placeholder="隐私政策 URL"
+              :disabled="row.marketCode !== 'GLOBAL' && row.inheritGlobal"
+            />
+            <el-input
+              v-model="row.deleteAccountUrl"
+              placeholder="账号注销 URL"
+              :disabled="row.marketCode !== 'GLOBAL' && row.inheritGlobal"
+            />
+          </div>
+        </div>
+
         <p v-if="formError" class="panel__error" role="alert">{{ formError }}</p>
-        <p class="field-hint">默认市场必须为启用状态；移除已有渠道实例或默认的市场会被后端拒绝（409）。</p>
+        <p class="field-hint">新增市场默认引用 GLOBAL 法务链接；关闭“引用 GLOBAL”后可为该市场单独编辑。</p>
       </el-form>
       <template #footer>
         <el-button @click="drawerVisible = false">取消</el-button>
@@ -76,7 +145,15 @@ import { reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import PageStatusTag from "@/components/page/PageStatusTag.vue";
 import { ApiError } from "@/api/http";
-import { replaceMarkets, type GameDetail, type Market, type ReplaceMarketsItem } from "@/api/modules/games";
+import {
+  replaceLegalLinks,
+  replaceMarkets,
+  type GameDetail,
+  type GameLegalLink,
+  type Market,
+  type ReplaceLegalLinksItem,
+  type ReplaceMarketsItem
+} from "@/api/modules/games";
 import { DEFAULT_LOCALE, MARKET_OPTIONS } from "../constants";
 
 const props = defineProps<{ game: GameDetail }>();
@@ -90,23 +167,44 @@ interface MarketRow {
   marketCode: Market;
   enabled: boolean;
   defaultLocale: string;
+  inheritGlobal: boolean;
+  termsUrl: string;
+  privacyUrl: string;
+  deleteAccountUrl: string;
 }
 
 const selectedMarkets = ref<Market[]>([]);
 const rows = reactive<MarketRow[]>([]);
 const defaultMarketCode = ref<Market>("GLOBAL");
 
-// 跟随多选变化同步行（保留已填值）
+const DEFAULT_GLOBAL_LEGAL = {
+  termsUrl: "https://legal.example.com/global/terms",
+  privacyUrl: "https://legal.example.com/global/privacy",
+  deleteAccountUrl: "https://legal.example.com/global/delete-account"
+};
+
 watch(selectedMarkets, (markets) => {
+  const globalRow = rows.find((item) => item.marketCode === "GLOBAL");
   const next: MarketRow[] = markets.map((code) => {
     const existing = rows.find((r) => r.marketCode === code);
-    return existing ?? { marketCode: code, enabled: true, defaultLocale: DEFAULT_LOCALE };
+    if (existing) {
+      return existing;
+    }
+    return {
+      marketCode: code,
+      enabled: true,
+      defaultLocale: DEFAULT_LOCALE,
+      inheritGlobal: code !== "GLOBAL",
+      termsUrl: globalRow?.termsUrl || "",
+      privacyUrl: globalRow?.privacyUrl || "",
+      deleteAccountUrl: globalRow?.deleteAccountUrl || ""
+    };
   });
   rows.splice(0, rows.length, ...next);
   ensureDefaultEnabled();
+  syncInheritedRows();
 });
 
-// 默认市场只能落在已启用的行：当前默认缺失或被停用时，回退到首个启用市场。
 function ensureDefaultEnabled() {
   const current = rows.find((r) => r.marketCode === defaultMarketCode.value);
   if (current?.enabled) {
@@ -116,28 +214,137 @@ function ensureDefaultEnabled() {
   defaultMarketCode.value = (firstEnabled?.marketCode ?? rows[0]?.marketCode ?? "GLOBAL") as Market;
 }
 
-// 停用某行时若其为默认市场，自动改选其它启用市场（默认市场须 enabled）。
 function onEnabledChange(row: MarketRow) {
   if (!row.enabled && row.marketCode === defaultMarketCode.value) {
     ensureDefaultEnabled();
   }
 }
 
+function normalizeLink(raw?: Partial<GameLegalLink>) {
+  return {
+    termsUrl: raw?.termsUrl || "",
+    privacyUrl: raw?.privacyUrl || "",
+    deleteAccountUrl: raw?.deleteAccountUrl || ""
+  };
+}
+
+function resolveGameGlobalLegal() {
+  const defaultScope = props.game.legalLinks.find((item) => item.scopeType === "default");
+  const globalMarket = props.game.legalLinks.find((item) => item.scopeType === "market" && item.scopeValue === "GLOBAL");
+  return normalizeLink(globalMarket || defaultScope || DEFAULT_GLOBAL_LEGAL);
+}
+
+function resolveGameMarketLegal(marketCode: Market) {
+  const marketScope = props.game.legalLinks.find((item) => item.scopeType === "market" && item.scopeValue === marketCode);
+  return normalizeLink(marketScope);
+}
+
+function syncInheritedRows() {
+  const globalRow = rows.find((item) => item.marketCode === "GLOBAL");
+  if (!globalRow) {
+    return;
+  }
+  rows.forEach((row) => {
+    if (row.marketCode !== "GLOBAL" && row.inheritGlobal) {
+      row.termsUrl = globalRow.termsUrl;
+      row.privacyUrl = globalRow.privacyUrl;
+      row.deleteAccountUrl = globalRow.deleteAccountUrl;
+    }
+  });
+}
+
 function openEdit() {
   formError.value = "";
+  const globalLegal = resolveGameGlobalLegal();
   rows.splice(
     0,
     rows.length,
-    ...props.game.markets.map((m) => ({
-      marketCode: m.marketCode,
-      enabled: m.enabled,
-      defaultLocale: m.defaultLocale || DEFAULT_LOCALE
-    }))
+    ...props.game.markets.map((m) => {
+      const marketLegal = resolveGameMarketLegal(m.marketCode);
+      const inheritGlobal =
+        m.marketCode !== "GLOBAL" &&
+        !props.game.legalLinks.some((item) => item.scopeType === "market" && item.scopeValue === m.marketCode);
+      return {
+        marketCode: m.marketCode,
+        enabled: m.enabled,
+        defaultLocale: m.defaultLocale || DEFAULT_LOCALE,
+        inheritGlobal,
+        termsUrl: m.marketCode === "GLOBAL" ? globalLegal.termsUrl : inheritGlobal ? globalLegal.termsUrl : marketLegal.termsUrl,
+        privacyUrl:
+          m.marketCode === "GLOBAL" ? globalLegal.privacyUrl : inheritGlobal ? globalLegal.privacyUrl : marketLegal.privacyUrl,
+        deleteAccountUrl:
+          m.marketCode === "GLOBAL"
+            ? globalLegal.deleteAccountUrl
+            : inheritGlobal
+              ? globalLegal.deleteAccountUrl
+              : marketLegal.deleteAccountUrl
+      };
+    })
   );
   selectedMarkets.value = props.game.markets.map((m) => m.marketCode);
   const current = props.game.markets.find((m) => m.isDefault);
   defaultMarketCode.value = (current?.marketCode ?? props.game.defaultMarketCode) as Market;
   drawerVisible.value = true;
+}
+
+function validateUrl(value: string) {
+  return !value || /^https?:\/\//.test(value);
+}
+
+function buildLegalPayload(): ReplaceLegalLinksItem[] | null {
+  const globalRow = rows.find((row) => row.marketCode === "GLOBAL");
+  if (!globalRow) {
+    formError.value = "必须包含 GLOBAL 市场，用于兜底法务链接";
+    return null;
+  }
+  const allRows = rows.map((row) => ({
+    ...row,
+    termsUrl: row.termsUrl.trim(),
+    privacyUrl: row.privacyUrl.trim(),
+    deleteAccountUrl: row.deleteAccountUrl.trim()
+  }));
+  for (const row of allRows) {
+    for (const [label, value] of [
+      ["服务条款 URL", row.termsUrl],
+      ["隐私政策 URL", row.privacyUrl],
+      ["账号注销 URL", row.deleteAccountUrl]
+    ] as const) {
+      if (!validateUrl(value)) {
+        formError.value = `${row.marketCode} ${label} 需以 http:// 或 https:// 开头（留空则不填）`;
+        return null;
+      }
+    }
+  }
+  const payload: ReplaceLegalLinksItem[] = [
+    {
+      scopeType: "default",
+      scopeValue: "*",
+      termsUrl: globalRow.termsUrl.trim(),
+      privacyUrl: globalRow.privacyUrl.trim(),
+      deleteAccountUrl: globalRow.deleteAccountUrl.trim()
+    }
+  ];
+  allRows.forEach((row) => {
+    if (row.marketCode === "GLOBAL" || row.inheritGlobal) {
+      return;
+    }
+    payload.push({
+      scopeType: "market",
+      scopeValue: row.marketCode,
+      termsUrl: row.termsUrl,
+      privacyUrl: row.privacyUrl,
+      deleteAccountUrl: row.deleteAccountUrl
+    });
+  });
+  return payload;
+}
+
+function effectiveLegalByMarket(marketCode: Market) {
+  const marketScope = props.game.legalLinks.find((item) => item.scopeType === "market" && item.scopeValue === marketCode);
+  if (marketScope) {
+    return normalizeLink(marketScope);
+  }
+  return resolveGameGlobalLegal();
 }
 
 async function submit() {
@@ -155,17 +362,22 @@ async function submit() {
     formError.value = "默认市场必须为启用状态";
     return;
   }
-  const payload: ReplaceMarketsItem[] = rows.map((r) => ({
+  const marketsPayload: ReplaceMarketsItem[] = rows.map((r) => ({
     marketCode: r.marketCode,
     isDefault: r.marketCode === defaultMarketCode.value,
     enabled: r.enabled,
     defaultLocale: r.defaultLocale || DEFAULT_LOCALE
   }));
+  const legalPayload = buildLegalPayload();
+  if (!legalPayload) {
+    return;
+  }
   saving.value = true;
   try {
-    const updated = await replaceMarkets(props.game.gameId, { markets: payload });
-    ElMessage.success("市场已更新");
-    emit("updated", updated);
+    const marketUpdated = await replaceMarkets(props.game.gameId, { markets: marketsPayload });
+    const legalUpdated = await replaceLegalLinks(props.game.gameId, { legalLinks: legalPayload });
+    ElMessage.success("市场与法务链接已更新");
+    emit("updated", { ...marketUpdated, legalLinks: legalUpdated.legalLinks });
     drawerVisible.value = false;
   } catch (err) {
     if (err instanceof ApiError) {
@@ -203,6 +415,34 @@ async function submit() {
 
 .text-muted {
   color: var(--text-subtle);
+}
+
+.market-default-tag {
+  margin-left: 8px;
+}
+
+.legal-editor {
+  margin-top: 16px;
+}
+
+.legal-editor h4 {
+  margin: 0 0 10px;
+}
+
+.legal-card {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.legal-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .field-hint {
