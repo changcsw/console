@@ -16,7 +16,7 @@ type AccountAuthRepo struct{ db DBTX }
 func (r *AccountAuthRepo) ListTypeCatalog(ctx context.Context) ([]accountauthapp.TypeCatalogItem, error) {
 	rows, err := r.db.Query(ctx, `
 SELECT t.id, t.auth_type_id, t.auth_type_name, t.enabled, t.sort,
-       tmp.template_version, tmp.form_schema_json, tmp.secret_fields_json, tmp.file_fields_json, tmp.validation_rules_json
+       COALESCE(tmp.template_version, ''), tmp.form_schema_json, tmp.secret_fields_json, tmp.file_fields_json, tmp.validation_rules_json
 FROM platform.account_auth_types t
 LEFT JOIN LATERAL (
   SELECT template_version, form_schema_json, secret_fields_json, file_fields_json, validation_rules_json
@@ -89,7 +89,7 @@ func (r *AccountAuthRepo) ListAllowedTypesByGame(ctx context.Context, gameIDRef 
 SELECT t.id, t.auth_type_id,
        BOOL_OR(cat.default_enabled) AS default_enabled,
        BOOL_OR(cat.locked)          AS locked,
-       tmp.template_version, tmp.form_schema_json, tmp.secret_fields_json, tmp.file_fields_json, tmp.validation_rules_json
+       COALESCE(tmp.template_version, ''), tmp.form_schema_json, tmp.secret_fields_json, tmp.file_fields_json, tmp.validation_rules_json
 FROM game_channels gc
 JOIN platform.channels ch ON ch.id = gc.channel_id_ref
 JOIN platform.channel_policies cp ON cp.channel_id_ref = ch.id
