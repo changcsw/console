@@ -1,12 +1,10 @@
 <template>
   <div class="page-shell">
-    <PageCard>
+    <PageCard v-if="game" class="detail-basic-card">
       <div class="detail-head">
         <div class="detail-head__left">
-          <template v-if="game">
-            <h2 class="detail-head__title">{{ game.name }}</h2>
-            <PageStatusTag :tone="statusMeta(game.status).tone" :label="statusMeta(game.status).label" />
-          </template>
+          <h2 class="detail-head__title">{{ game.name }}</h2>
+          <PageStatusTag :tone="statusMeta(game.status).tone" :label="statusMeta(game.status).label" />
         </div>
         <div class="detail-head__actions">
           <el-button v-if="!hasTopbarBridge" link @click="goBack">← 返回列表</el-button>
@@ -14,25 +12,17 @@
             v-if="!hasTopbarBridge && app.environment === 'sandbox'"
             v-perm="'sync.execute'"
             type="primary"
-            :disabled="!canSyncExecute || !game"
+            :disabled="!canSyncExecute"
             @click="openSyncDrawer"
           >
             Sync to Production
           </el-button>
           <EnvironmentBadge v-if="!hasTopbarBridge" :environment="app.environment" />
+          <el-button v-perm="'game.write'" type="primary" @click="basicInfoRef?.openEdit()">编辑基础信息</el-button>
         </div>
       </div>
 
-      <div v-if="game" class="detail-head__meta">
-        <span class="meta-item"><b>Game ID</b> <code>{{ game.gameId }}</code></span>
-        <span class="meta-item"><b>代号</b> {{ game.alias }}</span>
-        <span class="meta-item"><b>默认市场</b> {{ game.defaultMarketCode }}</span>
-        <span class="meta-item"><b>Secret</b> <code class="text-muted">{{ game.gameSecret || "masked" }}</code></span>
-      </div>
-    </PageCard>
-
-    <PageCard v-if="game" class="detail-basic-card">
-      <BasicInfoTab :game="game" @updated="onUpdated" />
+      <BasicInfoTab ref="basicInfoRef" :game="game" hide-toolbar @updated="onUpdated" />
     </PageCard>
 
     <PageCard v-loading="loading">
@@ -122,6 +112,7 @@ const notFound = ref(false);
 const activeTab = ref("markets");
 const syncDrawerOpen = ref(false);
 const syncJobsTabRef = ref<{ reload: (page?: number) => Promise<void> } | null>(null);
+const basicInfoRef = ref<{ openEdit: () => void } | null>(null);
 const canSyncExecute = computed(() => permission.hasPerm("sync.execute"));
 const topbar = useTopbarBridge();
 const hasTopbarBridge = computed(() => topbar.connected.value);
@@ -261,20 +252,6 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
-.detail-head__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
-  margin-top: 14px;
-  color: var(--text-subtle);
-  font-size: 13px;
-}
-
-.meta-item b {
-  color: var(--text-main);
-  margin-right: 6px;
-}
-
 .placeholder {
   display: flex;
   flex-direction: column;
@@ -306,7 +283,7 @@ onBeforeUnmount(() => {
   color: var(--text-subtle);
 }
 
-.detail-basic-card {
-  margin-top: 14px;
+.detail-basic-card :deep(.basic-tab) {
+  margin-top: 16px;
 }
 </style>

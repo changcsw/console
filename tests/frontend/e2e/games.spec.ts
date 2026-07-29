@@ -340,7 +340,7 @@ test("详情页脱敏展示 Secret + 多 Tab + 下游占位", async ({ page }) =
   await gotoGames(page);
 
   await openGameDetail(page);
-  await expect(page.locator(".detail-head__meta").getByText("masked").first()).toBeVisible();
+  await expect(page.locator(".basic-grid").getByText("masked").first()).toBeVisible();
   await expect(page.locator("body")).not.toContainText("PLAINTEXT");
   // 主 Tab
   await expect(page.getByRole("tab", { name: "基础信息" })).toBeVisible();

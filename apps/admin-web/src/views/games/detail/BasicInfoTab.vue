@@ -1,6 +1,6 @@
 <template>
   <div class="basic-tab">
-    <div class="basic-tab__toolbar">
+    <div v-if="!hideToolbar" class="basic-tab__toolbar">
       <PageStatusTag :tone="statusMeta(game.status).tone" :label="statusMeta(game.status).label" />
       <el-button v-perm="'game.write'" type="primary" @click="openEdit">编辑基础信息</el-button>
     </div>
@@ -98,8 +98,10 @@ import { ApiError } from "@/api/http";
 import { updateGame, type GameDetail, type GameStatus, type Market, type UpdateGameRequest } from "@/api/modules/games";
 import { isValidOptionalUrl, STATUS_OPTIONS, statusMeta } from "../constants";
 
-const props = defineProps<{ game: GameDetail }>();
+const props = withDefaults(defineProps<{ game: GameDetail; hideToolbar?: boolean }>(), { hideToolbar: false });
 const emit = defineEmits<{ updated: [game: GameDetail] }>();
+
+defineExpose({ openEdit });
 
 const app = useAppStore();
 

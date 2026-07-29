@@ -18,6 +18,8 @@ vi.mock("@/api/modules/games", () => ({
   getGame: (...args: unknown[]) => getGameApi(...args)
 }));
 
+import permDirective from "@/directives/perm";
+import { usePermissionStore } from "@/stores/permission";
 import { ApiError } from "@/api/http";
 import GameDetailView from "@/views/games/detail/GameDetailView.vue";
 import type { GameDetail } from "@/api/modules/games";
@@ -42,11 +44,12 @@ function maskedGame(): GameDetail {
 
 function mountView() {
   setActivePinia(createPinia());
+  usePermissionStore().setFromUser({ roles: [], permissions: ["game.write", "sync.execute"] });
   return mount(GameDetailView, {
     global: {
+      directives: { perm: permDirective },
       stubs: {
         EnvironmentBadge: true,
-        BasicInfoTab: true,
         MarketsTab: true,
         AccountAuthTab: true,
         ProductTab: true,
@@ -70,7 +73,6 @@ describe("GameDetailView", () => {
     expect(getGameApi).toHaveBeenCalledWith("100001");
     const text = wrapper.text();
     expect(text).toContain("masked");
-    // 头部展示 Game ID / 代号，但 Secret 区只显示脱敏值
     expect(text).toContain("100001");
     expect(text).not.toContain("PLAINTEXT");
   });
@@ -90,7 +92,8 @@ describe("GameDetailView", () => {
     const wrapper = mountView();
     await flushPromises();
     const text = wrapper.text();
-    expect(text).not.toContain("基础信息");
+    const tabLabels = wrapper.findAll(".el-tabs__item").map((node) => node.text());
+    expect(tabLabels.some((label) => label.includes("基础信息"))).toBe(false);
     expect(text).toContain("市场与法务");
     expect(text).toContain("自有账号认证");
     expect(text).toContain("收银台");
