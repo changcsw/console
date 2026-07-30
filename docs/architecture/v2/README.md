@@ -29,7 +29,7 @@
 | --- | --- | --- | --- | --- |
 | 10 | `auth` | [后台鉴权与 RBAC](./modules/10-auth/README.md) | JWT、密码/飞书登录、权限码 `resource.action` | — |
 | 11 | `game` | [游戏主数据](./modules/11-game/README.md) | games/markets/legal、game_id/secret、多 market | channel, product, snapshot, sync… |
-| 12 | `channel` | [渠道与渠道实例](./modules/12-channel/README.md) | GameMarketChannel(D2)、region(D3)、可见性/复制/隐藏 | account-auth, channel-login, feature-plugin, product, payment, snapshot, sync |
+| 12 | `channel` | [渠道与渠道实例](./modules/12-channel/README.md)<br>└ [平台渠道与渠道模版（system 侧）](./modules/12-channel/platform-admin.md) | GameMarketChannel(D2)、region(D3)、可见性/复制/隐藏；子文档：系统管理员维护的平台渠道 + 登录/IAP 模版 | account-auth, channel-login, feature-plugin, product, payment, snapshot, sync |
 | 13 | `account-auth` | [自有账号认证](./modules/13-account-auth/README.md) | 模板驱动、config_status、按渠道允许集合 | snapshot, sync |
 | 14 | `channel-login` | [渠道登录](./modules/14-channel-login/README.md) | channel_only 强制登录、模板驱动 | snapshot, sync |
 | 15 | `feature-plugin` | [功能插件](./modules/15-feature-plugin/README.md) | **新增**：国内/海外、必接/可勾选、参数模板、渠道+包级、引导补齐 | snapshot, sync |

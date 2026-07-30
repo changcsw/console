@@ -219,7 +219,8 @@ published --(发布新版本时自动)--> archived
 
 ### 4.4 模板版本维护（基础数据）
 
-- 模板本身由"基础数据/模板管理后台"维护。
+- 模板本身由"基础数据/模板管理后台"维护，即**系统管理员**职责，与具体游戏无关；消费方模块（`channel-login`/`product`/…）只读取模板做渲染与校验，不维护模板。
+- 该后台的 system 侧入口**已落地**为顶部菜单「渠道管理」，覆盖 `channel_login_templates` 与 `channel_iap_templates`（权限码 `platform_channel.*` / `channel_template.*`），见 `modules/12-channel/platform-admin.md`；`account_auth_templates` / `feature_plugin_templates` / `cashier_provider_templates` 沿用同一理念，维护入口按同样方式后续补齐。
 - 同一逻辑渠道在不同 market 下**可复用同一套模板定义**，但**实际配置实例必须各自独立**（不共享 secret/file/状态）。
 
 #### 4.4.1 版本状态机适用边界（重要）

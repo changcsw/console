@@ -294,9 +294,23 @@ func mergeMissingSensitiveAndFiles(req, existing map[string]any, tpl accountauth
 func toTemplateView(tpl accountauth.Template) dto.TemplateView {
 	formSchema := make([]any, 0, len(tpl.FormSchema))
 	for _, f := range tpl.FormSchema {
-		formSchema = append(formSchema, map[string]any{
+		entry := map[string]any{
 			"key": f.Key, "label": f.Label, "component": f.Component, "required": f.Required, "order": f.Order, "scope": f.Scope,
-		})
+		}
+		if f.Group != "" {
+			entry["group"] = f.Group
+		}
+		if f.Placeholder != "" {
+			entry["placeholder"] = f.Placeholder
+		}
+		if len(f.Options) > 0 {
+			options := make([]any, 0, len(f.Options))
+			for _, opt := range f.Options {
+				options = append(options, map[string]any{"label": opt.Label, "value": opt.Value})
+			}
+			entry["options"] = options
+		}
+		formSchema = append(formSchema, entry)
 	}
 	fileFields := make([]any, 0, len(tpl.FileFields))
 	for _, f := range tpl.FileFields {

@@ -17,12 +17,21 @@ const (
 
 // FormField 模板字段定义（来自 form_schema_json）。
 type FormField struct {
-	Key       string `json:"key"`
-	Label     string `json:"label"`
-	Component string `json:"component"`
-	Required  bool   `json:"required"`
-	Order     int    `json:"order"`
-	Scope     string `json:"scope"`
+	Key         string        `json:"key"`
+	Label       string        `json:"label"`
+	Component   string        `json:"component"`
+	Required    bool          `json:"required"`
+	Order       int           `json:"order"`
+	Scope       string        `json:"scope"`
+	Group       string        `json:"group,omitempty"`
+	Placeholder string        `json:"placeholder,omitempty"`
+	Options     []FieldOption `json:"options,omitempty"`
+}
+
+// FieldOption 下拉字段候选项（component=select 时使用）。
+type FieldOption struct {
+	Label string `json:"label"`
+	Value any    `json:"value"`
 }
 
 // FileField 文件字段定义（来自 file_fields_json）。

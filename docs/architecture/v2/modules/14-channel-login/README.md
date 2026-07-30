@@ -44,7 +44,7 @@ children: []
 
 负责：
 
-- 维护 `channel_login_templates`（渠道登录模板四件套，平台级，**不带 env**）的"消费"——本模块只读取/校验模板，模板维护属于「基础数据/模板管理后台」（见 `00` §4.4，归 system 模块）。该表为**简单模板表**，不走 §3.3 三态机，仅用 `enabled` + `template_version`。
+- 维护 `channel_login_templates`（渠道登录模板四件套，平台级，**不带 env**）的"消费"——本模块只读取/校验模板，模板维护属于「基础数据/模板管理后台」（见 `00` §4.4，归 system 模块；**现已落地**为系统管理员的「渠道管理」页，见 `channel/platform-admin`）。该表为**简单模板表**，不走 §3.3 三态机，仅用 `enabled` + `template_version`。
 - 维护 `game_channel_login_configs`（渠道登录配置实例，**游戏维度业务表，每环境独立 schema，不带 env 列**）：`enabled`、`config_json`（含密文位）、`config_status`、`last_check_at`、`last_check_message`。
 - 提供单实例的读取与整体更新接口（`GET/PUT .../login-config`）。
 - 基于模板做配置校验、推导并持久化 `config_status` 与 `last_check_message`。
@@ -54,7 +54,7 @@ children: []
 
 - 渠道实例本身的增删（属 `channel` 渠道实例）；本模块只在已存在的 `game_channel` 上挂登录配置。
 - 渠道包、IAP 配置（`channel` / `product`）。
-- 模板版本的维护（新增/停用，属 system 模块；该表为简单模板表，仅用 `enabled` + `template_version`，不走 §3.3 三态机）。
+- 模板版本的维护（新增/停用，属 system 模块，由系统管理员在「渠道管理」→「渠道模版」完成，权限 `channel_template.write`，契约见 `channel §6.7` / `channel/platform-admin`；该表为简单模板表，仅用 `enabled` + `template_version`，不走 §3.3 三态机）。
 - 客户端最终配置的合并与快照（`snapshot`），本模块只产出"有效配置实例"供其消费。
 - `sandbox -> production` 的 diff/执行（`sync`），本模块数据按 `section=channels` 的下游随渠道实例一起进入同步集（见 §9）。
 
@@ -557,7 +557,7 @@ type ChannelLoginTemplateRepository interface {
 | env（D1 / §2） | `game_channel_login_configs` 每环境独立 schema、不带 env 列，唯一键 `(game_channel_id_ref)`；写操作落当前运行环境对应 schema；父子行必然同 schema=同 env，普通外键即可，无需额外校验 |
 | 模板四件套（§4） | 消费 `channel_login_templates` 的 `form_schema_json`/`secret_fields_json`/`file_fields_json`/`validation_rules_json`；模板平台级、不带 env |
 | ConfigStatus 状态机（§3.4） | `config_status` 后端推导 `empty/invalid/valid`；复制创建强制 `invalid` |
-| 模板版本（§4.4.1 简单模板表） | 运行时只取该渠道 `enabled=TRUE` 的最新 `template_version`；不走 §3.3 三态机；版本维护归 system 模块 |
+| 模板版本（§4.4.1 简单模板表） | 运行时只取该渠道 `enabled=TRUE` 的最新 `template_version`；不走 §3.3 三态机；版本维护归 system 模块（已落地：`channel/platform-admin`，其响应中的 `effective` 即本模块运行时会取到的版本） |
 | 密文（§6.1） | `secret_fields_json` 字段 AES-GCM 加密落库，响应脱敏 `******`，明文禁止落库 |
 | 文件（§6.2） | `file_fields_json` 字段存引用，复制创建清空 |
 | API 包络（§7） | `{data}` / `{error{code,message,details}}`；camelCase；Bearer 鉴权 |
@@ -642,4 +642,4 @@ type ChannelLoginTemplateRepository interface {
 1. **多密文字段的部分更新**：当模板含多个 secret 字段时，是否允许"逐字段独立保持/更新"？本文按"传 `******` 即保持、传明文即更新"逐字段处理，需 system 模块模板规范确认是否所有 secret 控件都遵循该哨兵约定。
 2. **登录配置是否需要"复制初始值"的专用接口**：当前复制发生在 `channel` 的"新增渠道实例"流程内（连带复制下游登录配置普通字段、清空 secret/file）。是否需要本模块单独暴露 `POST .../login-config:copy-from` 待定；当前假设不需要。
 3. **`login_locked=TRUE` 且 `config_status!=valid` 时的强拦截位置**：在 PUT 即拦截，还是仅在快照/同步前置校验拦截？本文建议放在快照/同步前置（`snapshot` / `sync`），PUT 仍允许保存草稿态以便分步填写；需与 `snapshot` / `sync` 对齐拦截口径。
-4. **模板缺失时的降级**：若某 `channel_only` 渠道尚未配置 `channel_login_templates`，当前按"拒绝写入"。是否需要一个"无模板渠道"的兜底自由表单待 system 模块决定（默认不提供，保持模板强约束）。
+4. **模板缺失时的降级**：若某 `channel_only` 渠道尚未配置 `channel_login_templates`，当前按"拒绝写入"。system 侧已落地模板维护入口（`channel/platform-admin`），因此该场景的处理方式是**让系统管理员先建模板版本**；"无模板渠道"的兜底自由表单仍不提供（保持模板强约束）。

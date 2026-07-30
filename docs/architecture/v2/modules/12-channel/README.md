@@ -5,11 +5,13 @@ title: 渠道与渠道实例（GameMarketChannel）
 status: target
 code_paths:
   - services/admin-api/internal/domain/channel
+  - services/admin-api/internal/app/platformchannel
   - services/admin-api/internal/transport/http/channels
+  - services/admin-api/internal/transport/http/platformchannel
   - apps/admin-web/src/views/channels
 depends_on: [game, common]
 impacts: [account-auth, channel-login, feature-plugin, product, payment, snapshot, sync, testing]
-children: []
+children: [channel/platform-admin]
 ---
 
 # 12 · 渠道与渠道实例（GameMarketChannel）
@@ -26,6 +28,19 @@ children: []
 - 维护游戏在某个 market 下的**渠道实例** `game_channels`（即 `GameMarketChannel`）。
 - 维护渠道实例下的**渠道包** `channel_packages`。
 - 实现 market × 渠道的**可见性/兼容性校验**、**复制创建**、**隐藏/恢复**、**运行态标识推导**。
+
+#### 1.1.1 两类使用者：system 侧平台渠道 vs 游戏侧渠道实例
+
+本模块的数据分两层，**由不同角色在不同入口维护**，二者不可混为一谈：
+
+| 层 | 表 | 维护者 | 入口 | 权限码 | env 语义 |
+| --- | --- | --- | --- | --- | --- |
+| **平台渠道**（渠道主数据 + 渠道策略 + 渠道模版） | `platform.channels`、`platform.channel_policies`、`platform.channel_login_templates`、`platform.channel_iap_templates` | **系统管理员**（system 侧），**与具体游戏无关** | 顶部菜单「渠道管理」 | `platform_channel.read/write`、`channel_template.read/write` | 位于共享 schema `platform`，**跨运行环境共享**（不按 env 分身） |
+| **渠道实例**（GameMarketChannel + 渠道包 + 各类配置） | `game_channels`、`channel_packages` 及下游配置表 | **游戏运营** | 游戏详情页「渠道」页签 | `channel.read/write` | 游戏维度业务表，每环境 schema 各一份 |
+
+- 平台渠道（channel master / channel policy）与渠道模版的 **CRUD 归 system 侧**：系统管理员先在「渠道管理」里新增渠道、维护该渠道的登录 / IAP 模版四件套；游戏侧再在自己的渠道实例上**引用模版填参**，不能新增/改写渠道主数据与模版。
+- 该能力**现已落地**（原先只在 `00 §4.4` / `channel-login §1.2` 约定「模板维护归 system 模块」，缺前后端实现）：领域规则 `domain/channel/platform_admin.go`、应用服务 `app/platformchannel`、传输层 `transport/http/platformchannel`，权限码 seed 见迁移 `000018_platform_channel_admin_perms`。契约见 §6.7，完整说明见子文档 [`channel/platform-admin`](./platform-admin.md)。
+- 模版覆盖两类：**渠道登录模版**（`login`，被 `channel-login` 消费）与**渠道 IAP 模版**（`iap`，被 `product` 消费）。`account_auth_templates`（`account-auth`）、`feature_plugin_templates`（`feature-plugin`）不在本入口内。
 
 ### 1.2 上下游
 - 依赖：`game`（游戏主数据，游戏已启用的 market 集合）、`00 §3.2`（Market 语义与可见性）。
@@ -268,7 +283,9 @@ ValidateMarketChannelCompatibility(market, region):
 
 ## 6. 后端 API
 
-> 统一前缀 `/api/admin`，遵循 `00 §7` 包络与错误码。写操作挂权限码 `channel.write`，读 `channel.read`。
+> 统一前缀 `/api/admin`，遵循 `00 §7` 包络与错误码。
+>
+> **权限码分两组**（§1.1.1）：游戏侧渠道实例/渠道包接口（§6.1–§6.6）读 `channel.read`、写 `channel.write`；system 侧平台渠道与渠道模版接口（§6.7）读写用独立的 `platform_channel.read/write` 与 `channel_template.read/write`，不复用 `channel.*` —— 避免把「改平台主数据」的能力混进游戏运营的日常授权。
 
 ### 6.0 资源 ID 口径（统一约定）
 
@@ -368,6 +385,169 @@ Query 参数（全部可选）：
   | `enabled` | bool | 否 | `true` | |
 - **PATCH `/api/admin/channel-packages/{packageId}`** 权限 `channel.write`。可改 `packageName/bundleId/inheritChannelConfig/enabled/overrideJson`。
 
+### 6.7 平台渠道与渠道模版（system 侧，系统管理员）
+
+> 面向系统管理员，**与具体游戏无关**；操作的是共享 schema `platform` 下的表，**跨运行环境共享**，因此不接受 env 入参、也不做 env 过滤。详细语义与不变量见子文档 [`channel/platform-admin`](./platform-admin.md)。
+
+接口一览：
+
+| 方法 + 路径 | 权限码 | 说明 |
+| --- | --- | --- |
+| GET `/api/admin/platform/channels` | `platform_channel.read` | 渠道主数据分页列表（含策略与模版版本数） |
+| POST `/api/admin/platform/channels` | `platform_channel.write` | 新建渠道 + 策略，`201` |
+| GET `/api/admin/platform/channels/{channelId}` | `platform_channel.read` | 渠道详情 |
+| PATCH `/api/admin/platform/channels/{channelId}` | `platform_channel.write` | 改名 / 启停 / 排序 / 策略 |
+| GET `/api/admin/platform/channels/{channelId}/templates` | `channel_template.read` | 该渠道的模版版本列表 |
+| POST `/api/admin/platform/channels/{channelId}/templates` | `channel_template.write` | 新建模版版本，`201` |
+| GET `/api/admin/platform/channel-templates/{kind}/{templateId}` | `channel_template.read` | 单个模版版本 |
+| PATCH `/api/admin/platform/channel-templates/{kind}/{templateId}` | `channel_template.write` | 改四件套 / 启停 |
+
+`{kind}` 取 `login`（渠道登录模版，落 `platform.channel_login_templates`）或 `iap`（渠道 IAP 模版，落 `platform.channel_iap_templates`）。
+
+#### 6.7.1 GET `/api/admin/platform/channels`
+
+Query 参数（全部可选）：
+
+| 参数 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `keyword` | string | `''` | 模糊匹配 `channelId` / `channelName` |
+| `region` | enum | 不限 | `domestic` / `overseas` |
+| `channelType` | enum | 不限 | `store/oem/web/direct/mini_game` |
+| `enabled` | bool | 不限 | 启停过滤 |
+| `page`/`pageSize` | int | `1`/`20` | 见 `00 §7.3`（`pageSize` 上限 100） |
+
+响应（排序 `sort ASC, id ASC`）：
+```json
+{ "data": { "items": [
+  { "channelId": "huawei_cn", "channelName": "华为应用市场", "channelType": "oem", "region": "domestic",
+    "enabled": true, "sort": 10,
+    "loginMode": "channel_only", "paymentMode": "channel_only", "loginLocked": true, "paymentLocked": true,
+    "loginTemplateCount": 2, "iapTemplateCount": 1, "updatedAt": "2026-07-20T10:00:00Z" }
+], "page": 1, "pageSize": 20, "total": 1 } }
+```
+
+`PlatformChannelView` 字段：`channelId`、`channelName`、`channelType`、`region`、`enabled`、`sort`、`loginMode`、`paymentMode`、`loginLocked`、`paymentLocked`、`loginTemplateCount`、`iapTemplateCount`、`updatedAt`。
+
+#### 6.7.2 POST `/api/admin/platform/channels`
+
+请求 DTO：
+
+| 字段 | 类型 | 必填 | 默认 | 校验 |
+| --- | --- | --- | --- | --- |
+| `channelId` | string | 是 | — | `^[a-z0-9][a-z0-9_]*$` 且 ≤64；全局唯一 |
+| `channelName` | string | 是 | — | 非空、≤64 |
+| `channelType` | enum | 是 | — | `store/oem/web/direct/mini_game` |
+| `region` | enum | 是 | — | `domestic/overseas` |
+| `enabled` | bool | 否 | `true` | |
+| `sort` | int | 否 | `0` | `0..9999` |
+| `loginMode` | enum | 是 | — | `channel_only/account_system` |
+| `paymentMode` | enum | 是 | — | `channel_only/hybrid/cashier_only` |
+| `loginLocked` | bool | 否 | `false` | 锁定后游戏侧不可改登录策略 |
+| `paymentLocked` | bool | 否 | `false` | 锁定后游戏侧不可改支付策略 |
+
+主数据与策略在**同一事务**内写入（保证 `channels` ↔ `channel_policies` 一对一）。成功 `201` 返回 `PlatformChannelView`。
+`channelId` 重复 ⇒ `409 CONFLICT`。
+
+#### 6.7.3 GET / PATCH `/api/admin/platform/channels/{channelId}`
+
+- **GET** 权限 `platform_channel.read`，返回 `PlatformChannelView`；不存在 ⇒ `404 NOT_FOUND`。
+- **PATCH** 权限 `platform_channel.write`，请求体为补丁语义（字段省略=不改）：`channelName?`、`enabled?`、`sort?`、`loginMode?`、`paymentMode?`、`loginLocked?`、`paymentLocked?`。
+- **`channelId` / `channelType` / `region` 创建后不可改**，因此不出现在补丁里：`channelId` 是渠道实例（`game_channels.channel_id_ref`）与模版的引用键；`region` 决定与 market 的兼容性（§5.1），改动会让既有渠道实例集体失配。需要换身份 ⇒ 另建渠道。
+- 空补丁（无任何字段）幂等返回当前视图，**不写审计**。
+
+#### 6.7.4 GET `/api/admin/platform/channels/{channelId}/templates`
+
+- 权限 `channel_template.read`。Query `kind=login|iap`；**省略则两类都返**。
+- 响应：`{ "data": { "items": ChannelTemplateView[] } }`（不分页）。
+
+```json
+{ "data": { "items": [
+  { "templateId": 71, "kind": "login", "channelId": "huawei_cn", "templateVersion": "v2",
+    "formSchemaJson": [
+      { "key": "appId", "label": "App ID", "component": "input", "required": true, "order": 10, "group": "basic", "scope": "both" },
+      { "key": "appSecret", "label": "App Secret", "component": "password", "required": true, "order": 20, "group": "secret", "scope": "server" }
+    ],
+    "secretFieldsJson": ["appSecret"],
+    "fileFieldsJson": [],
+    "validationRulesJson": { "appId": { "minLen": 1, "maxLen": 64, "pattern": "^[0-9A-Za-z_-]+$" } },
+    "enabled": true, "effective": true,
+    "createdAt": "2026-07-01T08:00:00Z", "updatedAt": "2026-07-20T10:00:00Z" }
+] } }
+```
+
+- `effective`（派生，只读）：**同渠道同 `kind` 中 `enabled=true` 的最新 `template_version`** 即当前生效版本，与 `channel-login` / `product` 运行时取版本口径一致（`00 §4.4.1` 简单模板表：无 `status` 列、不走 draft/published 三态机）。
+- `login` / `iap` **分表同构**，同一版本号在两表之间互不冲突。
+
+#### 6.7.5 POST `/api/admin/platform/channels/{channelId}/templates`
+
+请求 DTO：
+
+| 字段 | 类型 | 必填 | 默认 | 校验 |
+| --- | --- | --- | --- | --- |
+| `kind` | enum | 是 | — | `login` / `iap` |
+| `templateVersion` | string | 是 | — | `^[A-Za-z0-9][A-Za-z0-9._-]*$` 且 ≤32；同渠道同 `kind` 内唯一 |
+| `formSchemaJson` | array | 是 | — | 非空；见下「四件套字段结构」与校验清单 |
+| `secretFieldsJson` | string[] | 否 | `[]` | 每项必须是 `formSchemaJson` 已声明的 key |
+| `fileFieldsJson` | array | 否 | `[]` | 同上；项为 `{key,accept?,maxSizeKB?}` |
+| `validationRulesJson` | object | 否 | `{}` | key 必须已在 `formSchemaJson` 声明 |
+| `enabled` | bool | 否 | `true` | |
+
+成功 `201` 返回 `ChannelTemplateView`。同渠道同 `kind` 下 `templateVersion` 重复 ⇒ `409 CONFLICT`。
+
+**四件套字段结构**（与 `00 §4.1`/`§4.2`/`§4.3` 一致）：
+
+```json
+// formSchemaJson 项
+{ "key": "appId", "label": "App ID", "component": "input", "required": true,
+  "order": 10, "group": "basic", "scope": "both",
+  "placeholder": "华为开放平台 App ID", "options": [{ "label": "沙箱", "value": "sandbox" }] }
+// secretFieldsJson: ["appSecret"]
+// fileFieldsJson 项
+{ "key": "keystore", "accept": [".keystore", ".jks"], "maxSizeKB": 2048 }
+// validationRulesJson
+{ "appId": { "required": true, "minLen": 1, "maxLen": 64, "pattern": "^[0-9A-Za-z_-]+$", "format": "", "enum": [] } }
+```
+
+- `component ∈ input|password|textarea|number|select|switch|file|json`；`scope ∈ ''|client|server|both`（空串=不区分，运行时按 `00 §4.1.1` 的 `both` 解释）。
+- `placeholder` / `options` 仅在有值时出现在响应里。
+
+**校验清单**（不通过 ⇒ `400 VALIDATION_FAILED`，`details` 为 `[{field,rule,message}]`）：
+
+| 规则 | 说明 |
+| --- | --- |
+| `formSchemaJson` 非空 | 至少一个字段 |
+| 字段 key 合法且不重复 | `^[A-Za-z][A-Za-z0-9_]*$`、≤64 |
+| `label` 非空且 ≤64 | |
+| `component` / `scope` 必须是枚举值 | |
+| `component=select` 必须带 `options` | |
+| `component=file` 的 key 必须登记进 `fileFieldsJson` | 否则前端拿不到 `accept`/`maxSizeKB` 约束 |
+| `component=password` 的 key 必须登记进 `secretFieldsJson` | 防止管理员建出「口令字段明文入库」的模版 |
+| `secretFieldsJson` / `fileFieldsJson` / `validationRulesJson` 不得出现 `formSchemaJson` 未声明的 key | 三者均不可重复登记同一 key |
+| `validationRulesJson.*.pattern` 必须可编译 | 正则非法即拒 |
+| `fileFieldsJson.*.maxSizeKB` 为正整数 | |
+
+#### 6.7.6 GET / PATCH `/api/admin/platform/channel-templates/{kind}/{templateId}`
+
+- **GET** 权限 `channel_template.read`，返回 `ChannelTemplateView`（含 `effective`）；`templateId` 非 int64 或 ≤0 ⇒ `400`，不存在 ⇒ `404 NOT_FOUND`。
+- **PATCH** 权限 `channel_template.write`，请求体 `{formSchemaJson?, secretFieldsJson?, fileFieldsJson?, validationRulesJson?, enabled?}`。
+  - **`templateVersion` 与所属渠道不可改**：要改版本号请新建一个版本（升级=写更高版本号，停用=`enabled=false`，`00 §4.4.1`）。
+  - **四件套是整体替换语义**：某件省略 = 保留原值；传了就整段覆盖（不做数组/对象逐项 merge）。
+  - 合并后的完整模版重跑 §6.7.5 全部校验（避免「只改一件」把模版改成自相矛盾的状态）。
+  - 空补丁幂等返回当前视图，**不写审计**。
+
+#### 6.7.7 错误码与审计
+
+| code | HTTP | 触发场景 |
+| --- | --- | --- |
+| `UNAUTHENTICATED` | 401 | 未带/失效 token |
+| `FORBIDDEN` | 403 | 缺 `platform_channel.*` / `channel_template.*` |
+| `NOT_FOUND` | 404 | `channelId` / `templateId` 不存在 |
+| `VALIDATION_FAILED` | 400 | 枚举/格式/四件套自洽性校验未过、`kind` 非法、请求体不是合法 JSON |
+| `CONFLICT` | 409 | `channelId` 重复；同渠道同 `kind` 下 `templateVersion` 重复 |
+| `INTERNAL` | 500 | 持久化等内部错误 |
+
+审计事件（`00 §8`）：`platform_channel.create`、`platform_channel.update`、`channel_template.create`、`channel_template.update`；`detail_json` 记录 `channelId` / `kind` / `templateVersion` 与本次变更的字段名列表。空 patch 幂等，不写审计。
+
 ---
 
 ## 7. 应用服务与 command/query
@@ -383,7 +563,16 @@ Query 参数（全部可选）：
 ## 8. 前端信息架构
 
 ### 8.1 入口
-游戏详情页 → "渠道实例" Tab（`ChannelInstancesTab.vue`）。默认展示当前游戏**所有 market 的所有实例**。
+
+前端有**两个互不相同的入口**，对应 §1.1.1 的两层数据：
+
+| 入口 | 页面 | 内容 | 权限 |
+| --- | --- | --- | --- |
+| 顶部菜单「渠道管理」（路由 `channels`） | `views/channels/ChannelsView.vue` | **平台级管理页**（system 侧）：PageCard + 两个页签「渠道」（`components/platform/PlatformChannelsPanel.vue`）与「渠道模版」（`components/platform/ChannelTemplatesPanel.vue`）。**不需要先选游戏**。 | `meta.perm = platform_channel.read` |
+| 游戏详情页 →「渠道」页签（「市场与法务」之后） | `views/channels/components/ChannelInstancesTab.vue` | **游戏维度渠道实例**（GameMarketChannel），默认展示当前游戏**所有 market 的所有实例**。 | `channel.read` |
+
+- 「渠道管理」页**故意不显示 `EnvironmentBadge`**：`platform.*` 表跨运行环境共享，挂 env 徽标会误导为"按环境各一份"（与 `views/system/SystemView.vue` 同口径）。渠道实例页仍按 `01 §5` 展示 env 徽标。
+- 游戏详情页原先的 `channels` / `packages` / `channel-login` 三个"下游模块"占位页签已删除：渠道实例改由「渠道」页签承载，渠道包与渠道登录在实例详情内。
 
 ### 8.2 过滤区
 - `market`（默认"全部"）、渠道名、兼容状态、隐藏状态（默认不含隐藏，提供"显示隐藏项"）、`config_status`。
@@ -410,7 +599,7 @@ Query 参数（全部可选）：
 
 ## 9. 与公共能力的关系
 
-- 模板四件套：同一逻辑渠道在不同 market **复用模板定义**，但**配置实例独立**（secret/file/状态各自维护）—— 见 `00 §4`。
+- 模板四件套：同一逻辑渠道在不同 market **复用模板定义**，但**配置实例独立**（secret/file/状态各自维护）—— 见 `00 §4`。模板定义本身由**系统管理员**在 system 侧维护（`00 §4.4`），入口与契约见 §6.7 与子文档 [`channel/platform-admin`](./platform-admin.md)。
 - currency：本模块自身不涉及金额（金额在 `product`/`cashier-template`/`game-cashier`）。
 - 密文/文件：渠道实例的 secret/file 字段经 `00 §6` 加密与脱敏；复制清空。
 - 审计：`channel.create/hide/unhide`、包的 `package.create/update` 等写操作写 `audit_logs`。
@@ -436,6 +625,8 @@ Query 参数（全部可选）：
 | GET /api/admin/game-channels/{gameChannelId}/packages | ✓ | ✓ | ✓ | — | — | ✓ | — | — | — | — | 按所属实例归属过滤 |
 | POST /api/admin/game-channels/{gameChannelId}/packages | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | ✓ | marketCode 须等于实例 market、inherit/override |
 | PATCH /api/admin/channel-packages/{packageId} | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — | — | ✓ | override_json 仅存差异、inherit/override |
+
+> system 侧 8 个接口（§6.7）的场景矩阵与用例见子文档 [`channel/platform-admin`](./platform-admin.md) §7。
 
 前端：Playwright e2e（`channels.spec.ts`）覆盖渠道实例列表全 market 展示、可见性过滤(CN/overseas)、隐藏/恢复二次确认、新增/复制抽屉（`secret/file` 清空且高亮需补填）、不兼容标红与运行态徽标灰显态 / vitest 组件（`ChannelInstanceStatusTag.vue`、`ChannelInstanceRuntimeFlags.vue`、`ChannelInstanceTable.vue`、`CreateMarketChannelDrawer.vue`）。
 

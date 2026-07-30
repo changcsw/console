@@ -18,6 +18,7 @@ import (
 	"github.com/csw/console/services/admin-api/internal/app/command"
 	gameapp "github.com/csw/console/services/admin-api/internal/app/game"
 	paymentapp "github.com/csw/console/services/admin-api/internal/app/payment"
+	platformchannelapp "github.com/csw/console/services/admin-api/internal/app/platformchannel"
 	pluginapp "github.com/csw/console/services/admin-api/internal/app/plugin"
 	productapp "github.com/csw/console/services/admin-api/internal/app/product"
 	dashboardquery "github.com/csw/console/services/admin-api/internal/app/query/dashboard"
@@ -37,6 +38,7 @@ import (
 	dashboardhttp "github.com/csw/console/services/admin-api/internal/transport/http/dashboard"
 	gameshttp "github.com/csw/console/services/admin-api/internal/transport/http/games"
 	paymenthttp "github.com/csw/console/services/admin-api/internal/transport/http/payment"
+	platformchannelhttp "github.com/csw/console/services/admin-api/internal/transport/http/platformchannel"
 	snapshothttp "github.com/csw/console/services/admin-api/internal/transport/http/snapshot"
 	syncapi "github.com/csw/console/services/admin-api/internal/transport/http/sync"
 )
@@ -68,6 +70,7 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 		r := adminhttp.NewRouter(adminhttp.NewHandler(adminhttp.Deps{Env: env}), iss, env, logger, false, nil)
 		gameshttp.RegisterRoutes(r, gameshttp.NewHandler(nil, env), iss, env, logger, false, nil)
 		channelshttp.RegisterRoutes(r, channelshttp.NewHandler(nil, env), iss, env, logger, false, nil)
+		platformchannelhttp.RegisterRoutes(r, platformchannelhttp.NewHandler(nil), iss, env, logger, false, nil)
 		cashierhttp.RegisterRoutes(r, cashierhttp.NewHandler(nil), iss, env, logger, false, nil)
 		paymenthttp.RegisterRoutes(r, paymenthttp.NewHandler(nil), iss, env, logger, false, nil)
 		snapshothttp.RegisterRoutes(r, snapshothttp.NewHandler(nil), iss, env, logger, false, nil)
@@ -140,6 +143,9 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 	channelLoginSvc := channelloginapp.NewService(postgres.NewChannelLoginStore(pool), cipher, nil, auditSink, time.Now, env)
 	channelPluginSvc := pluginapp.NewService(postgres.NewPluginStore(pool), cipher, auditSink, env)
 	channelshttp.RegisterRoutes(r, channelshttp.NewHandler(channelSvc, env, channelLoginSvc).WithPluginService(channelPluginSvc), issuer, env, logger, true, auditSvc)
+
+	platformChannelSvc := platformchannelapp.NewService(postgres.NewPlatformChannelStore(pool), auditSink)
+	platformchannelhttp.RegisterRoutes(r, platformchannelhttp.NewHandler(platformChannelSvc), issuer, env, logger, true, auditSvc)
 
 	cashierSvc := cashierapp.NewService(postgres.NewCashierStore(pool), auditSink, time.Now)
 	cashierhttp.RegisterRoutes(r, cashierhttp.NewHandler(cashierSvc), issuer, env, logger, true, auditSvc)

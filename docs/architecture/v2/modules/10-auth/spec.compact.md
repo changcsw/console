@@ -101,7 +101,7 @@ UNIQUE(identity_type, identity_key)；建议附 `(user_id_ref)` 索引。
 格式 `resource.action`（全小写，resource 单数多词用 `_`，action 动词）。正则 `^[a-z0-9_]+\.[a-z0-9_]+$`。标准 action：read/write/delete/publish/approve/preview/execute。约定 `write` 覆盖新建+更新+启停（含删除，本模块不单列 `*.delete`）。
 
 seed 固化清单（permission_code → 归属模块）：
-game.read/write(game)、channel.read/write(channel)、account_auth.read/write(account-auth)、channel_login.read/write(channel-login)、plugin.read/write(feature-plugin)、product.read/write(product)、cashier.read/write/publish + fx.approve(cashier-template)、payment.read/write(payment)、snapshot.read/generate/publish(snapshot)、sync.preview/execute(sync)、audit.read(audit)、dashboard.read(dashboard)、system.read + admin_user.write + role.write + permission.write(auth)。
+game.read/write(game)、channel.read/write + platform_channel.read/write + channel_template.read/write(channel；后两组是 system 侧平台渠道主数据与渠道模版，与游戏侧 channel.* 分权，迁移 000018 seed)、account_auth.read/write(account-auth)、channel_login.read/write(channel-login)、plugin.read/write(feature-plugin)、product.read/write(product)、cashier.read/write/publish + fx.approve(cashier-template)、payment.read/write(payment)、snapshot.read/generate/publish(snapshot)、sync.preview/execute(sync)、audit.read(audit)、dashboard.read(dashboard)、system.read + admin_user.write + role.write + permission.write(auth)。
 
 策略：读接口默认仅需登录、不强校验权限码；敏感读(`audit.read`/`system.read`)与写/危险操作必须挂权限码(00 §7.5)。
 

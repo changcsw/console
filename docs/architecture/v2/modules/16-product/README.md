@@ -192,6 +192,8 @@ ChannelPackageIapOverride (包级覆盖, channel_package_iap_overrides, 每环�
 | 唯一键 | — | — | `UNIQUE(channel_id_ref, template_version)`（**不前置 env**，平台级共享） |
 
 > 该表是平台级基础数据（见 `00` §2.2 不带 env 清单），全环境共享同一套模板定义；模板内容维护由基础数据/模板管理后台负责（模块 system），本模块只**消费**模板渲染表单与校验。
+>
+> 该维护入口**现已落地**：系统管理员在顶部菜单「渠道管理」→「渠道模版」以 `kind=iap` 维护本表的版本（权限 `channel_template.read/write`），契约见 `channel §6.7`、口径见 `channel/platform-admin`。本模块运行时取到的版本即那里标记为 `effective`（`enabled` 的最新 `template_version`）的版本。
 
 ### 3.4 `game_channel_iap_configs`（渠道 IAP 配置实例，**每环境独立 schema，不带 env 列**）
 
@@ -792,7 +794,7 @@ PUT /api/admin/channel-packages/5001/iap-override
 | currency 归一化（§5） | `products.base_amount_minor` 写入强制走读 spec→校验精度→校验下限→舍入→存 minor |
 | 模板四件套（§4） | `channel_iap_templates` 提供 form/secret/file/validation；IAP 配置实例据此渲染与校验 |
 | ConfigStatus（§3.4） | IAP 配置与包级覆盖的 `config_status`，复制清空 secret/file ⇒ `invalid` |
-| 模板版本（§4.4.1 简单模板表） | `channel_iap_templates` 无 `status` 列，不走 §3.3 三态机；取 `enabled` 最新 `template_version`（由模板管理后台维护） |
+| 模板版本（§4.4.1 简单模板表） | `channel_iap_templates` 无 `status` 列，不走 §3.3 三态机；取 `enabled` 最新 `template_version`（由模板管理后台维护 —— 已落地为 system 侧「渠道管理」→「渠道模版」`kind=iap`，见 `channel/platform-admin`） |
 | 密文/文件（§6） | IAP `config_json` 密文加密落库、响应脱敏；文件存引用 |
 | 统一 API/包络/错误码（§7） | 全部接口遵循 `{data}`/`{error}`、`CURRENCY_NOT_SUPPORTED`/`VALIDATION_FAILED`/`CONFLICT`/`NOT_FOUND` |
 | 审计（§8） | 商品/映射/IAP 写操作写 `audit_logs`，action 与权限码同源 |

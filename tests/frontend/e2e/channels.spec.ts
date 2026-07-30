@@ -11,7 +11,26 @@ const SESSION = {
     userName: "admin",
     displayName: "管理员",
     roles: [],
-    permissions: ["dashboard.read", "channel.read", "channel.write"]
+    permissions: ["dashboard.read", "game.read", "channel.read", "channel.write"]
+  }
+};
+
+// 渠道实例已迁入游戏详情页「渠道」页签，故导航需先经游戏列表 → 游戏详情。
+const GAME_DETAIL = {
+  data: {
+    gameId: "100001",
+    name: "星际远征",
+    alias: "starfront",
+    iconUrl: "",
+    status: "active",
+    defaultMarketCode: "GLOBAL",
+    gameSecret: "masked",
+    secretMasked: true,
+    environment: "sandbox",
+    markets: [{ marketCode: "GLOBAL", isDefault: true, enabled: true, defaultLocale: "en-US" }],
+    legalLinks: [],
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z"
   }
 };
 
@@ -70,6 +89,7 @@ async function setup(page: Page, permissions: string[]) {
       }
     })
   );
+  await page.route(/\/api\/admin\/games\/100001(\?.*)?$/, (route) => json(route, 200, GAME_DETAIL));
   await page.route(/\/api\/admin\/games\/100001\/channels$/, (route) =>
     json(route, 200, {
       data: {
@@ -117,14 +137,18 @@ async function setup(page: Page, permissions: string[]) {
   );
 }
 
+// 渠道实例入口：工作台 → 游戏管理 → 游戏详情 → 「渠道」页签。
 async function gotoChannels(page: Page) {
   await page.goto("/dashboard");
-  await page.getByRole("link", { name: "渠道管理" }).click();
-  await expect(page.getByText("渠道实例管理")).toBeVisible();
+  await page.getByRole("link", { name: "游戏管理" }).click();
+  await page.getByText("星际远征").first().click();
+  await expect(page.locator(".detail-head__title")).toContainText("星际远征", { timeout: 15_000 });
+  await page.getByRole("tab", { name: "渠道", exact: true }).click();
+  await expect(page.getByRole("button", { name: "新建渠道实例" })).toBeVisible({ timeout: 15_000 });
 }
 
 test("渠道列表行展示渠道名优先（同时保留 channelId / displayKey）", async ({ page }) => {
-  await setup(page, ["channel.read", "channel.write"]);
+  await setup(page, ["game.read", "channel.read", "channel.write"]);
   await gotoChannels(page);
 
   await expect(page.locator(".cell-channel__id").first()).toHaveText("Google Play");
@@ -133,7 +157,7 @@ test("渠道列表行展示渠道名优先（同时保留 channelId / displayKey
 });
 
 test("无 channel.write 权限时复制创建按钮置灰", async ({ page }) => {
-  await setup(page, ["channel.read"]);
+  await setup(page, ["game.read", "channel.read"]);
   await gotoChannels(page);
   await expect(page.getByRole("button", { name: "复制创建" })).toBeDisabled();
 });

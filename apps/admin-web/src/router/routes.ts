@@ -41,7 +41,7 @@ export const routes: RouteRecordRaw[] = [
         path: "channels",
         name: "channels",
         component: () => import("@/views/channels/ChannelsView.vue"),
-        meta: { title: "渠道管理", icon: "Connection", perm: "channel.read" }
+        meta: { title: "渠道管理", icon: "Connection", perm: "platform_channel.read" }
       },
       {
         path: "cashier",

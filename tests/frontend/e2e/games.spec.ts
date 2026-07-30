@@ -185,6 +185,24 @@ const MARKET_CHANNELS = {
   }
 };
 
+// 游戏详情「渠道」页签（ChannelInstancesTab）依赖的可用渠道主数据：GET /games/{id}/channels
+const GAME_CHANNELS = {
+  data: {
+    items: [
+      {
+        channelId: "ch1",
+        channelName: "渠道一",
+        channelType: "store",
+        region: "overseas",
+        loginMode: "channel_only",
+        paymentMode: "channel_only",
+        loginLocked: false,
+        paymentLocked: false
+      }
+    ]
+  }
+};
+
 const ACCOUNT_AUTH_CONFIGS = {
   data: {
     items: [
@@ -272,6 +290,8 @@ async function setup(page: Page, opts: SetupOptions = {}) {
     json(route, 200, CHANNEL_ALLOWED)
   );
   await page.route(/\/api\/admin\/games\/[^/]+\/market-channels(\?.*)?$/, (route) => json(route, 200, MARKET_CHANNELS));
+  // 「渠道」页签的可用渠道主数据（表格用它把 channelId 映射为渠道名）
+  await page.route(/\/api\/admin\/games\/[^/]+\/channels(\?.*)?$/, (route) => json(route, 200, GAME_CHANNELS));
   await page.route(/\/api\/admin\/games\/[^/]+\/account-auth-configs(\?.*)?$/, (route) =>
     json(route, 200, ACCOUNT_AUTH_CONFIGS)
   );
@@ -286,7 +306,7 @@ async function gotoGames(page: Page) {
   await expect(page.getByText("发行后台根聚合")).toBeVisible();
 }
 
-// 进入游戏详情：GameDetailView 的非激活 Tab 已改为 lazy 挂载（仅首屏挂载默认「基础信息」
+// 进入游戏详情：GameDetailView 的非激活 Tab 已改为 lazy 挂载（仅首屏挂载默认「市场与法务」
 // Tab），其余 Tab 在被点击激活时才挂载并发起 API 请求。首帧渲染已回落到 <5s，这里用常规
 // 15s 超时即可（仍远低于 90s 用例超时）。
 async function openGameDetail(page: Page, gameName = "星际远征") {
@@ -335,47 +355,69 @@ test("创建游戏成功后弹出一次性明文 gameSecret", async ({ page }) =
   await expect(page.getByText("游戏密钥（仅此一次）")).toBeHidden();
 });
 
-test("详情页脱敏展示 Secret + 多 Tab + 下游占位", async ({ page }) => {
+test("详情页脱敏展示 Secret + 多 Tab + 渠道页签", async ({ page }) => {
   await setup(page);
   await gotoGames(page);
 
   await openGameDetail(page);
-  await expect(page.locator(".basic-grid").getByText("masked").first()).toBeVisible();
+  // 「基础信息」不再是 Tab：已合并进详情页顶部卡片（.detail-basic-card），字段仍需可见
+  const basicCard = page.locator(".detail-basic-card .basic-grid");
+  await expect(basicCard.getByText("Game ID")).toBeVisible();
+  await expect(basicCard.getByText("100001")).toBeVisible();
+  await expect(basicCard.getByText("starfront")).toBeVisible();
+  await expect(basicCard.getByText("masked").first()).toBeVisible();
   await expect(page.locator("body")).not.toContainText("PLAINTEXT");
-  // 主 Tab
-  await expect(page.getByRole("tab", { name: "基础信息" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "市场" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "法务链接" })).toBeVisible();
-  // 下游占位
+  await expect(page.getByRole("tab", { name: "基础信息" })).toHaveCount(0);
+  // 主 Tab：原「市场」「法务链接」两个 Tab 已合并为「市场与法务」
+  await expect(page.getByRole("tab", { name: "市场与法务", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "法务链接" })).toHaveCount(0);
+  // 渠道实例已从「下游占位」落地为游戏详情页的「渠道」页签
+  await expect(page.getByRole("tab", { name: "渠道", exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "支付路由" })).toBeVisible();
 
   await page.screenshot({ path: "../../tests/frontend/screenshots/game-detail.png", fullPage: true });
+
+  // 点开「渠道」页签：lazy 挂载 ChannelInstancesTab，并按契约 mock 渲染出渠道实例行
+  await page.getByRole("tab", { name: "渠道", exact: true }).click();
+  const channelsPane = page.locator(".instances");
+  await expect(channelsPane).toBeVisible();
+  await expect(channelsPane.getByRole("button", { name: "新建渠道实例" })).toBeVisible();
+  await expect(channelsPane.getByText("100001:GLOBAL:ch1")).toBeVisible();
+  await expect(channelsPane.getByText("渠道一")).toBeVisible();
 });
 
-test("市场 Tab 编辑抽屉打开并展示单默认 radio", async ({ page }) => {
+test("市场与法务 Tab 编辑抽屉打开并展示单默认 radio", async ({ page }) => {
   await setup(page);
   await gotoGames(page);
   await openGameDetail(page);
-  await page.getByRole("tab", { name: "市场" }).click();
-  const editBtn = page.getByRole("button", { name: "编辑市场" });
+  await page.getByRole("tab", { name: "市场与法务", exact: true }).click();
+  const editBtn = page.getByRole("button", { name: "编辑市场与法务链接" });
   await expect(editBtn).toBeEnabled();
   await editBtn.click();
-  await expect(page.getByText("编辑市场（全量覆盖）")).toBeVisible();
-  await expect(page.getByText(/移除已有渠道实例/)).toBeVisible();
+  await expect(page.getByText("编辑市场与法务链接（全量覆盖）")).toBeVisible();
+  // 两个市场各一个「默认」radio，且只有 GLOBAL（isDefault）处于选中态
+  await expect(page.locator(".edit-table .el-radio")).toHaveCount(2);
+  await expect(page.locator(".edit-table .el-radio.is-checked")).toHaveCount(1);
 });
 
-test("法务链接 Tab scopeType 联动 scopeValue", async ({ page }) => {
+test("市场与法务抽屉内非 GLOBAL 市场默认引用 GLOBAL 法务链接", async ({ page }) => {
   await setup(page);
   await gotoGames(page);
   await openGameDetail(page);
-  await page.getByRole("tab", { name: "法务链接" }).click();
-  const editBtn = page.getByRole("button", { name: "编辑法务链接" });
-  await expect(editBtn).toBeEnabled();
-  await editBtn.click();
-  await expect(page.getByText("编辑法务链接（全量覆盖）")).toBeVisible();
-  await page.getByRole("button", { name: "+ 新增一行" }).click();
-  // 新增行默认 default → scopeValue 锁 '*'（disabled 输入框）
-  await expect(page.locator(".legal-row input[disabled]").last()).toHaveValue("*");
+  await page.getByRole("tab", { name: "市场与法务", exact: true }).click();
+  await page.getByRole("button", { name: "编辑市场与法务链接" }).click();
+  await expect(page.getByText("法务链接（按市场）")).toBeVisible();
+  // 法务链接编辑已并入市场抽屉，按市场分卡片：GLOBAL 兜底 + JP
+  const jpCard = page.locator(".legal-card").nth(1);
+  await expect(jpCard.getByText("JP", { exact: true })).toBeVisible();
+  // JP 无 market 级 scope → 默认「引用 GLOBAL」：三个 URL 输入框锁定并取 GLOBAL 兜底值
+  const jpInputs = jpCard.locator("input.el-input__inner");
+  await expect(jpInputs).toHaveCount(3);
+  await expect(jpInputs.first()).toBeDisabled();
+  await expect(jpInputs.first()).toHaveValue("https://example.com/terms");
+  // 关闭「引用 GLOBAL」→ 该市场可独立配置
+  await jpCard.locator(".el-switch").click();
+  await expect(jpInputs.first()).toBeEnabled();
 });
 
 test("无 game.write 权限时新建/编辑按钮置灰禁用", async ({ page }) => {

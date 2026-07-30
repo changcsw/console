@@ -199,7 +199,7 @@
       "title": "公共部分（跨模块契约）",
       "kind": "foundation",
       "path": "00-common.md",
-      "lines": 383,
+      "lines": 384,
       "depends_on": [],
       "impacts": [
         "auth",
@@ -351,7 +351,7 @@
       "title": "后台鉴权与 RBAC",
       "kind": "module",
       "path": "modules/10-auth/README.md",
-      "lines": 1305,
+      "lines": 1311,
       "depends_on": [
         "common"
       ],
@@ -407,7 +407,7 @@
       "title": "渠道与渠道实例（GameMarketChannel）",
       "kind": "module",
       "path": "modules/12-channel/README.md",
-      "lines": 456,
+      "lines": 647,
       "depends_on": [
         "game",
         "common"
@@ -424,8 +424,17 @@
       ],
       "code_paths": [
         "services/admin-api/internal/domain/channel",
+        "services/admin-api/internal/app/platformchannel",
         "services/admin-api/internal/transport/http/channels",
+        "services/admin-api/internal/transport/http/platformchannel",
         "apps/admin-web/src/views/channels"
+      ],
+      "children": [
+        {
+          "id": "channel/platform-admin",
+          "title": "平台渠道与渠道模版管理（system 侧）",
+          "path": "modules/12-channel/platform-admin.md"
+        }
       ],
       "lane": "channels-surface",
       "artifacts_dir": "modules/12-channel/artifacts",
@@ -514,7 +523,7 @@
       "title": "商品与 IAP 映射（Product / Channel IAP）",
       "kind": "module",
       "path": "modules/16-product/README.md",
-      "lines": 868,
+      "lines": 870,
       "depends_on": [
         "channel",
         "game",

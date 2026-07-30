@@ -28,13 +28,21 @@ type ValidationIssue struct {
 
 // ChannelLoginFormField 模板 form_schema 字段定义。
 type ChannelLoginFormField struct {
-	Key       string `json:"key"`
-	Label     string `json:"label"`
-	Component string `json:"component"`
-	Required  bool   `json:"required"`
-	Order     int    `json:"order"`
-	Group     string `json:"group"`
-	Scope     string `json:"scope"`
+	Key         string        `json:"key"`
+	Label       string        `json:"label"`
+	Component   string        `json:"component"`
+	Required    bool          `json:"required"`
+	Order       int           `json:"order"`
+	Group       string        `json:"group"`
+	Scope       string        `json:"scope"`
+	Placeholder string        `json:"placeholder,omitempty"`
+	Options     []FieldOption `json:"options,omitempty"`
+}
+
+// FieldOption 下拉字段候选项（component=select 时使用）。
+type FieldOption struct {
+	Label string `json:"label"`
+	Value any    `json:"value"`
 }
 
 // ChannelLoginFileField 模板 file_fields 字段定义。

@@ -21,7 +21,7 @@ code_paths:
 - 判定是否走本模块的**唯一依据**是 `channel_policies.login_mode == 'channel_only'`，非渠道名硬编码。`account_system` 走 `account-auth`。
 - 配置粒度：渠道实例级（挂 `game_channels` 行，按 `(game, market, channel)` 独立），**非** game 级。
 - 负责：消费 `channel_login_templates`（只读校验）+ 维护 `game_channel_login_configs` + 单实例读/整体更新 + 模板校验推导 `config_status` + 密文加密脱敏。
-- 不负责：渠道实例增删（`channel`）、渠道包/IAP（`channel`/`product`）、模板版本维护（system 模块）、快照合并（`snapshot`）、sandbox→prod 同步（`sync`，本模块数据随 `section=channels` 下游进入同步集）。
+- 不负责：渠道实例增删（`channel`）、渠道包/IAP（`channel`/`product`）、模板版本维护（system 模块，已落地：系统管理员在「渠道管理」→「渠道模版」维护，权限 `channel_template.*`，见 `channel/platform-admin`）、快照合并（`snapshot`）、sandbox→prod 同步（`sync`，本模块数据随 `section=channels` 下游进入同步集）。
 
 ## 数据模型
 两表：`channel_login_templates`（平台级模板，共享 schema `platform`，**不带 env**）+ `game_channel_login_configs`（配置实例，**游戏维度业务表/每环境独立 schema/不带 env 列**）。公共列约定：`id BIGSERIAL PK`、`created_at/updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`。

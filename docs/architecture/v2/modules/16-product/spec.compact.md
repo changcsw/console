@@ -70,7 +70,7 @@ UNIQUE(package_id_ref, product_id_ref)。两组 mode+override **完全正交**�
 | validation_rules_json | JSONB | `{}` | 四件套：校验规则 |
 | enabled | BOOLEAN | TRUE | NOT NULL |
 
-UNIQUE(channel_id_ref, template_version)（不前置 env，平台级共享）。模板内容由基础数据/模板管理后台维护，本模块只消费。
+UNIQUE(channel_id_ref, template_version)（不前置 env，平台级共享）。模板内容由基础数据/模板管理后台维护（已落地：系统管理员在「渠道管理」→「渠道模版」以 `kind=iap` 维护，权限 `channel_template.*`，见 `channel/platform-admin`），本模块只消费。
 
 ### game_channel_iap_configs（渠道 IAP 配置实例 / 每环境 schema）
 | 列 | 类型 | 默认 | 约束/说明 |

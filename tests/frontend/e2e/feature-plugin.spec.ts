@@ -19,7 +19,26 @@ const SESSION = {
     userName: "admin",
     displayName: "管理员",
     roles: [],
-    permissions: ["dashboard.read", "channel.read", "plugin.read", "plugin.write"]
+    permissions: ["dashboard.read", "game.read", "channel.read", "plugin.read", "plugin.write"]
+  }
+};
+
+// 渠道实例已迁入游戏详情页「渠道」页签，故导航需先经游戏列表 → 游戏详情。
+const GAME_DETAIL = {
+  data: {
+    gameId: "100001",
+    name: "星际远征",
+    alias: "starfront",
+    iconUrl: "",
+    status: "active",
+    defaultMarketCode: "CN",
+    gameSecret: "masked",
+    secretMasked: true,
+    environment: "sandbox",
+    markets: [{ marketCode: "CN", isDefault: true, enabled: true, defaultLocale: "zh-CN" }],
+    legalLinks: [],
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z"
   }
 };
 
@@ -140,7 +159,7 @@ interface SetupOptions {
 }
 
 async function setup(page: Page, options: SetupOptions = {}) {
-  const permissions = options.permissions ?? ["channel.read", "plugin.read", "plugin.write"];
+  const permissions = options.permissions ?? ["game.read", "channel.read", "plugin.read", "plugin.write"];
   const plugins = options.plugins ?? [PLUGIN_REQUIRED, PLUGIN_OPTIONAL];
 
   await page.addInitScript((session) => {
@@ -172,6 +191,7 @@ async function setup(page: Page, options: SetupOptions = {}) {
       }
     })
   );
+  await page.route(/\/api\/admin\/games\/100001(\?.*)?$/, (route) => json(route, 200, GAME_DETAIL));
   await page.route(/\/api\/admin\/games\/100001\/channels$/, (route) =>
     json(route, 200, {
       data: {
@@ -202,9 +222,12 @@ async function setup(page: Page, options: SetupOptions = {}) {
 }
 
 async function openPluginTab(page: Page) {
+  // 渠道实例入口：工作台 → 游戏管理 → 游戏详情 → 「渠道」页签。
   await page.goto("/dashboard");
-  await page.getByRole("link", { name: "渠道管理" }).click();
-  await expect(page.getByText("渠道实例管理")).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("link", { name: "游戏管理" }).click();
+  await page.getByText("星际远征").first().click();
+  await expect(page.locator(".detail-head__title")).toContainText("星际远征", { timeout: 60_000 });
+  await page.getByRole("tab", { name: "渠道", exact: true }).click();
   const detailBtn = page.getByRole("button", { name: "详情" }).first();
   await expect(detailBtn).toBeVisible({ timeout: 60_000 });
   await detailBtn.click();
@@ -248,7 +271,7 @@ test("必接 selectable=false 实例启用开关强制选中且禁用", async ({
 });
 
 test("无 plugin.write 权限时保存按钮置灰", async ({ page }) => {
-  await setup(page, { permissions: ["channel.read", "plugin.read"] });
+  await setup(page, { permissions: ["game.read", "channel.read", "plugin.read"] });
   await openPluginTab(page);
   const panel = pluginPanel(page);
   await expect(panel.getByRole("button", { name: "保存插件配置" }).first()).toBeDisabled();

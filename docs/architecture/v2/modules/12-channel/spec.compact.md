@@ -7,7 +7,9 @@ source: ./README.md
 depends_on: [game, common]
 code_paths:
   - services/admin-api/internal/domain/channel
+  - services/admin-api/internal/app/platformchannel
   - services/admin-api/internal/transport/http/channels
+  - services/admin-api/internal/transport/http/platformchannel
   - apps/admin-web/src/views/channels
 ---
 
@@ -18,6 +20,7 @@ code_paths:
 
 ## 边界 / 红线
 - 维护平台级渠道主数据 `channels` 与策略 `channel_policies`；游戏维度渠道实例 `game_channels`（GameMarketChannel）与渠道包 `channel_packages`。
+- **两类使用者分开**：平台渠道主数据/策略/渠道模版（`platform.*`，跨环境共享，**与游戏无关**）由**系统管理员**在顶部菜单「渠道管理」维护，权限 `platform_channel.*` / `channel_template.*`（见「后端 API · system 侧」与子文档 `./platform-admin.md`）；渠道实例与渠道包由**游戏运营**在游戏详情页「渠道」页签维护，权限 `channel.*`。
 - 渠道**强制登录**(`channel-login`) 与**自有账号认证**(`account-auth`) 底层分开，本模块只提供"渠道实例"挂载点。
 - 被隐藏 / 不兼容 / 无效(`config_status!=valid`) 的实例：**不进默认列表、不进快照、不参与同步、不进客户端最终配置**（00 §9）。
 - 可见性/兼容性是纯函数（`domain/channel`，无 IO），服务端强制二次校验，不能只信前端。
@@ -189,6 +192,24 @@ PATCH `/channel-packages/{packageId}`（channel.write）可改 packageName/bundl
 
 错误码：`MARKET_CHANNEL_INCOMPATIBLE`(400)、`CONFLICT`(409 唯一标识冲突)、`VALIDATION_FAILED`。
 
+### system 侧：平台渠道 + 渠道模版（系统管理员，与游戏无关；表在 `platform`，跨环境共享，无 env 入参）
+
+> 完整 DTO/校验清单见 README §6.7，语义与不变量见 `./platform-admin.md`。`{kind}` = `login`（`platform.channel_login_templates`）/ `iap`（`platform.channel_iap_templates`），两表同构、版本号空间独立。
+
+GET `/platform/channels`（platform_channel.read）Query: keyword(匹配 channelId/channelName)、region、channelType、enabled、page/pageSize(默认 1/20，max 100)；排序 sort ASC,id ASC
+→ items[]: `PlatformChannelView` { channelId, channelName, channelType, region, enabled, sort, loginMode, paymentMode, loginLocked, paymentLocked, loginTemplateCount, iapTemplateCount, updatedAt } + page/pageSize/total
+POST `/platform/channels`（platform_channel.write）body { channelId, channelName, channelType, region, enabled?=true, sort?=0, loginMode, paymentMode, loginLocked?=false, paymentLocked?=false } → 201；主数据+策略同事务写；channelId `^[a-z0-9][a-z0-9_]*$` ≤64、重复 ⇒ 409
+GET `/platform/channels/{channelId}`（platform_channel.read）→ `PlatformChannelView`；不存在 404
+PATCH `/platform/channels/{channelId}`（platform_channel.write）body { channelName?, enabled?, sort?, loginMode?, paymentMode?, loginLocked?, paymentLocked? }；**channelId/channelType/region 创建后不可改**（channelId 是渠道实例引用键；region 决定 market 兼容性）；空 patch 幂等不写审计
+GET `/platform/channels/{channelId}/templates?kind=login|iap`（channel_template.read，kind 省略返两类，不分页）
+→ items[]: `ChannelTemplateView` { templateId, kind, channelId, templateVersion, formSchemaJson, secretFieldsJson, fileFieldsJson, validationRulesJson, enabled, effective, createdAt, updatedAt }；`effective` = 同渠道同 kind 中 enabled 的最新 template_version（00 §4.4.1，无 status 列/不走三态机）
+POST `/platform/channels/{channelId}/templates`（channel_template.write）body { kind, templateVersion, formSchemaJson[](必填非空), secretFieldsJson[]?=[], fileFieldsJson[]?=[], validationRulesJson{}?={}, enabled?=true } → 201；templateVersion `^[A-Za-z0-9][A-Za-z0-9._-]*$` ≤32，同渠道同 kind 重复 ⇒ 409
+GET `/platform/channel-templates/{kind}/{templateId}`（channel_template.read）
+PATCH `/platform/channel-templates/{kind}/{templateId}`（channel_template.write）body { formSchemaJson?, secretFieldsJson?, fileFieldsJson?, validationRulesJson?, enabled? }；templateVersion 与所属渠道不可改；**四件套整体替换**（省略=保留，传了=整段覆盖），合并后重跑全部校验；空 patch 幂等不写审计
+
+模版四件套校验（VALIDATION_FAILED，details=[{field,rule,message}]）：formSchema 非空；字段 key `^[A-Za-z][A-Za-z0-9_]*$` ≤64 且不重复；label 非空 ≤64；component ∈ input|password|textarea|number|select|switch|file|json；scope ∈ ''|client|server|both；select 必带 options；**component=file 的 key 必须进 fileFieldsJson**；**component=password 的 key 必须进 secretFieldsJson**（否则等于密钥明文入库）；secretFields/fileFields/validationRules 不得含 formSchema 未声明的 key；validationRules pattern 必须可编译；fileFields maxSizeKB 为正整数。
+审计：`platform_channel.create/update`、`channel_template.create/update`（空 patch 不写）。
+
 ## 应用服务 / 仓储
 - command：`CreateMarketChannelCommand{ Env, GameID, Market, ChannelID, Mode, CopyFromMarket, ... }`（校验兼容性→空白或复制清 secret/file 置 invalid）、`HideMarketChannel`/`UnhideMarketChannel`（+审计）。
 - query：`ListMarketChannelsQuery{ Env, GameID, Market(ALL), ChannelID, Compatible, Hidden, ConfigStatus, Page, PageSize }` + `FilterMarketChannels` + 运行态推导。
@@ -200,7 +221,11 @@ type ChannelPackageRepository interface { /* 包 CRUD */ }
 ```
 - 审计：`channel.create/hide/unhide`、`package.create/update` 写 audit_logs。
 
-## 前端要点（游戏详情 → "渠道实例" Tab）
+## 前端要点
+
+两个入口：顶部菜单「渠道管理」（路由 `channels`，`meta.perm=platform_channel.read`）= `ChannelsView.vue`（PageCard + 「渠道」`components/platform/PlatformChannelsPanel.vue` / 「渠道模版」`components/platform/ChannelTemplatesPanel.vue` 两页签，**不需先选游戏**，**不挂 EnvironmentBadge**——platform.* 跨环境共享，与 SystemView 同口径，API 客户端 `api/modules/platformChannels.ts`）；游戏详情页「渠道」页签（「市场与法务」之后）= `ChannelInstancesTab.vue`（渠道实例，`channel.read`）。
+
+### 游戏详情 → "渠道" Tab（渠道实例）
 - `ChannelInstancesTab.vue` 默认展示该游戏全 market 所有实例；过滤区：market(默认全部)、渠道名、兼容状态、隐藏状态(默认不含，可"显示隐藏项")、config_status。
 - `ChannelInstanceTable.vue` 每行一个 GameMarketChannel：market、渠道名、国内/非国内、兼容状态、隐藏状态、config_status、是否进最终配置、最近更新。同逻辑渠道不同 market 分行（GLOBAL/Google、JP/Google）；不兼容行标红+提示；隐藏行灰显归隐藏分组。
 - 组件：`ChannelInstanceStatusTag.vue`（empty/invalid/valid + 兼容/隐藏）、`ChannelInstanceRuntimeFlags.vue`（Snapshot/Sync/Runtime Config 徽标，不可生效灰显+tooltip 原因）。

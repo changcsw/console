@@ -272,6 +272,10 @@ admin_roles *───* admin_permissions （经 admin_role_permissions）
 | `game.write` | 游戏-编辑 | game |
 | `channel.read` | 渠道实例-查看 | channel |
 | `channel.write` | 渠道实例-编辑 | channel |
+| `platform_channel.read` | 平台渠道-查看（渠道主数据/策略，system 侧） | channel |
+| `platform_channel.write` | 平台渠道-编辑（渠道主数据/策略，system 侧） | channel |
+| `channel_template.read` | 渠道模版-查看（登录/IAP 模版四件套） | channel |
+| `channel_template.write` | 渠道模版-编辑（登录/IAP 模版四件套） | channel |
 | `account_auth.read` | 自有账号认证-查看 | account-auth |
 | `account_auth.write` | 自有账号认证-编辑 | account-auth |
 | `channel_login.read` | 渠道登录-查看 | channel-login |
@@ -297,6 +301,8 @@ admin_roles *───* admin_permissions （经 admin_role_permissions）
 | `admin_user.write` | 管理员-管理（增改禁用/分配角色/重置密码） | auth |
 | `role.write` | 角色-管理（增改删/配权限） | auth |
 | `permission.write` | 权限码目录-维护 | auth |
+
+> 分权说明：`platform_channel.*` / `channel_template.*` 与 `channel.*` **有意分开** —— 前两者是**系统管理员**维护平台渠道主数据与渠道模版（跨运行环境共享的基础数据，与具体游戏无关，入口为顶部菜单「渠道管理」），后者是**游戏运营**维护游戏维度的渠道实例与渠道包（入口为游戏详情页「渠道」页签）。不复用 `channel.write`，避免把「改平台主数据」的能力混进游戏运营的日常授权。这 4 个码由迁移 `000018_platform_channel_admin_perms` seed 并给 `super_admin` 补授；口径见 `channel §1.1.1` 与 `channel/platform-admin`。
 
 > 说明：`*.read` 类是否进权限码目录、是否做接口级强校验，取决于策略。本模块默认**读接口要求登录但不强制特定权限码**（除敏感读如 `audit.read`、`system.read`）；**写/危险操作必须挂权限码**（`00 §7.5`）。
 

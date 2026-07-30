@@ -364,14 +364,25 @@ func cloneMap(input map[string]any) map[string]any {
 func mapFormSchema(fields []channel.ChannelLoginFormField) []any {
 	out := make([]any, 0, len(fields))
 	for _, item := range fields {
-		out = append(out, map[string]any{
+		entry := map[string]any{
 			"key":       item.Key,
 			"label":     item.Label,
 			"component": item.Component,
 			"required":  item.Required,
 			"order":     item.Order,
 			"group":     item.Group,
-		})
+		}
+		if item.Placeholder != "" {
+			entry["placeholder"] = item.Placeholder
+		}
+		if len(item.Options) > 0 {
+			options := make([]any, 0, len(item.Options))
+			for _, opt := range item.Options {
+				options = append(options, map[string]any{"label": opt.Label, "value": opt.Value})
+			}
+			entry["options"] = options
+		}
+		out = append(out, entry)
 	}
 	return out
 }
