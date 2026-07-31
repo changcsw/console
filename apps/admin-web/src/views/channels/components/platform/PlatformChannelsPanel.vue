@@ -27,32 +27,34 @@
 
     <el-table v-loading="loading" :data="rows" border>
       <el-table-column prop="channelId" label="渠道 ID" min-width="140" />
-      <el-table-column prop="channelName" label="渠道名" min-width="140" />
-      <el-table-column label="类型" width="110">
+      <el-table-column prop="channelName" label="渠道名" min-width="120" />
+      <el-table-column label="类型" min-width="92">
         <template #default="{ row }">{{ channelTypeLabel(row.channelType) }}</template>
       </el-table-column>
-      <el-table-column label="发行市场" min-width="130">
-        <template #default="{ row }">{{ regionFullLabel(row.region) }}</template>
-      </el-table-column>
-      <el-table-column label="登录模式" min-width="130">
-        <template #default="{ row }">{{ loginModeLabel(row.loginMode) }}</template>
-      </el-table-column>
-      <el-table-column label="支付模式" min-width="120">
-        <template #default="{ row }">{{ paymentModeLabel(row.paymentMode) }}</template>
-      </el-table-column>
-      <el-table-column label="锁定位" width="140">
+      <el-table-column label="发行市场" min-width="136" class-name="cell-region">
         <template #default="{ row }">
-          <span v-if="!row.loginLocked && !row.paymentLocked" class="text-muted">无</span>
-          <template v-else>
-            <PageStatusTag v-if="row.loginLocked" tone="warning" label="登录锁定" />
-            <PageStatusTag v-if="row.paymentLocked" tone="warning" label="支付锁定" />
-          </template>
+          <span class="cell-region__text">{{ regionFullLabel(row.region) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="模版数" width="130">
+      <el-table-column label="登录模式" min-width="96">
+        <template #default="{ row }">{{ loginModeLabel(row.loginMode) }}</template>
+      </el-table-column>
+      <el-table-column label="支付模式" min-width="96">
+        <template #default="{ row }">{{ paymentModeLabel(row.paymentMode) }}</template>
+      </el-table-column>
+      <el-table-column label="锁定位" min-width="152">
+        <template #default="{ row }">
+          <span v-if="!row.loginLocked && !row.paymentLocked" class="text-muted">无</span>
+          <div v-else class="cell-locks">
+            <PageStatusTag v-if="row.loginLocked" tone="warning" label="登录锁定" />
+            <PageStatusTag v-if="row.paymentLocked" tone="warning" label="支付锁定" />
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="模版数" min-width="118">
         <template #default="{ row }">登录 {{ row.loginTemplateCount }} / IAP {{ row.iapTemplateCount }}</template>
       </el-table-column>
-      <el-table-column label="启用状态" width="100">
+      <el-table-column label="启用状态" min-width="88">
         <template #default="{ row }">
           <PageStatusTag
             :tone="row.enabled ? 'success' : 'neutral'"
@@ -60,7 +62,7 @@
           />
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right">
+      <el-table-column label="操作" width="136" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" v-perm="'platform_channel.write'" @click="openEdit(row)">编辑</el-button>
           <el-button link type="primary" v-perm="'channel_template.read'" @click="emit('view-templates', row.channelId)">
@@ -377,5 +379,17 @@ onMounted(() => {
 
 .text-muted {
   color: var(--text-subtle);
+}
+
+.cell-locks {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+:deep(.cell-region .cell-region__text) {
+  white-space: nowrap;
 }
 </style>
