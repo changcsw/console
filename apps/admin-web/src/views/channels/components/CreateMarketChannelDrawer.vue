@@ -11,7 +11,7 @@
         <el-select v-model="form.market" placeholder="选择 market" class="full" @change="onMarketChange">
           <el-option v-for="m in MARKET_OPTIONS" :key="m" :label="m" :value="m" />
         </el-select>
-        <div class="form-hint">GLOBAL/海外 market 仅显示 overseas 渠道；CN 仅显示 domestic 渠道。</div>
+        <div class="form-hint">CN 市场仅显示发行市场为 CN 的渠道；其它 market 显示全球（GLOBAL）及该市场专属渠道。</div>
       </el-form-item>
 
       <el-form-item label="创建方式" prop="mode">

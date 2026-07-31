@@ -30,8 +30,8 @@ function channel(overrides: Partial<PlatformChannel> = {}): PlatformChannel {
   return {
     channelId: "huawei_cn",
     channelName: "华为",
-    channelType: "oem",
-    region: "domestic",
+    channelType: "domestic",
+    region: "CN",
     enabled: true,
     sort: 2,
     loginMode: "channel_only",
@@ -79,10 +79,14 @@ type PanelVm = {
   submitForm: () => Promise<void>;
 };
 
-async function mountPanel(perms = ["channel_template.read", "channel_template.write"]) {
+async function mountPanel(
+  perms = ["channel_template.read", "channel_template.write"],
+  props: { focusChannel?: { channelId: string } } = {}
+) {
   setActivePinia(createPinia());
   usePermissionStore().setFromUser({ roles: [], permissions: perms });
   const wrapper = mount(ChannelTemplatesPanel, {
+    props,
     global: { directives: { perm: permDirective } }
   });
   await flushPromises();
@@ -238,5 +242,54 @@ describe("ChannelTemplatesPanel", () => {
     const wrapper = await mountPanel();
     expect(listChannelTemplatesApi).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("请选择渠道");
+  });
+
+  test("挂载时带 focusChannel 预设则优先选中该渠道而非列表首个", async () => {
+    listPlatformChannelsApi.mockResolvedValue({
+      items: [channel({ channelId: "google", channelName: "Google Play" }), channel()],
+      page: 1,
+      pageSize: 100,
+      total: 2
+    });
+    const wrapper = await mountPanel(undefined, { focusChannel: { channelId: "huawei_cn" } });
+    const vm = wrapper.vm as unknown as PanelVm;
+    expect(vm.selectedChannelId).toBe("huawei_cn");
+    expect(listChannelTemplatesApi).toHaveBeenCalledWith("huawei_cn", undefined);
+  });
+
+  test("focusChannel 换新对象即切换选中渠道并重拉模版（同一渠道重复定位也生效）", async () => {
+    listPlatformChannelsApi.mockResolvedValue({
+      items: [channel({ channelId: "google", channelName: "Google Play" }), channel()],
+      page: 1,
+      pageSize: 100,
+      total: 2
+    });
+    const wrapper = await mountPanel();
+    const vm = wrapper.vm as unknown as PanelVm;
+    expect(vm.selectedChannelId).toBe("google");
+
+    await wrapper.setProps({ focusChannel: { channelId: "huawei_cn" } });
+    await flushPromises();
+    expect(vm.selectedChannelId).toBe("huawei_cn");
+    expect(listChannelTemplatesApi).toHaveBeenLastCalledWith("huawei_cn", undefined);
+
+    // 手动改选其它渠道后，再点同一渠道的「渠道模版」（父级给新对象）仍会切回来
+    vm.selectedChannelId = "google";
+    await wrapper.setProps({ focusChannel: { channelId: "huawei_cn" } });
+    await flushPromises();
+    expect(vm.selectedChannelId).toBe("huawei_cn");
+    expect(listChannelTemplatesApi).toHaveBeenLastCalledWith("huawei_cn", undefined);
+  });
+
+  test("focusChannel 指向不存在的渠道时保持现状不拉模版", async () => {
+    const wrapper = await mountPanel();
+    const vm = wrapper.vm as unknown as PanelVm;
+    expect(vm.selectedChannelId).toBe("huawei_cn");
+    listChannelTemplatesApi.mockClear();
+
+    await wrapper.setProps({ focusChannel: { channelId: "ghost" } });
+    await flushPromises();
+    expect(vm.selectedChannelId).toBe("huawei_cn");
+    expect(listChannelTemplatesApi).not.toHaveBeenCalled();
   });
 });

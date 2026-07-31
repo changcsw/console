@@ -58,7 +58,7 @@
 
 - D1 单库 + 每环境独立 schema（`develop`/`sandbox`/`production` 各一套同名业务表，平台数据在 `platform` schema，业务表不带 `env` 列）
 - D2 `game_channels` 加 `market_code`，即 GameMarketChannel 落地表
-- D3 `channels` 加 `region`（domestic/overseas）
+- D3 `channels` 加 `region`（发行市场，取值同 Market：`GLOBAL/CN/JP/KR/SEA/HMT`）
 - D4 配置快照 per-game，`config_json` 按 market 分区
 - D5 JWT + RBAC（权限码 `resource.action`）
 - D6 `sync/execute` 必带 baseline，目标 hash 复核 + nonce 去重（幂等，防重复执行，见 `sync`）

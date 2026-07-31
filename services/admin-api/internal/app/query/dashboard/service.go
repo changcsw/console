@@ -545,8 +545,8 @@ func (s *QueryService) loadChannelIssues(ctx context.Context, tx pgx.Tx, withTop
 SELECT COUNT(*)
 FROM game_channels gc
 JOIN platform.channels c ON c.id=gc.channel_id_ref
-WHERE (gc.market_code='CN' AND c.region <> 'domestic')
-   OR (gc.market_code <> 'CN' AND c.region <> 'overseas')`).Scan(&out.IncompatibleCount); err != nil {
+WHERE (gc.market_code='CN' AND c.region <> 'CN')
+   OR (gc.market_code <> 'CN' AND c.region NOT IN ('GLOBAL', gc.market_code))`).Scan(&out.IncompatibleCount); err != nil {
 		return dto.DashboardChannelIssueMetric{}, err
 	}
 	if !withTopItems {
@@ -557,8 +557,8 @@ SELECT gc.id, gc.game_id_ref, c.channel_id, c.region, gc.market_code, gc.hidden,
 FROM game_channels gc
 JOIN platform.channels c ON c.id=gc.channel_id_ref
 WHERE gc.hidden=TRUE
-   OR (gc.market_code='CN' AND c.region <> 'domestic')
-   OR (gc.market_code <> 'CN' AND c.region <> 'overseas')
+   OR (gc.market_code='CN' AND c.region <> 'CN')
+   OR (gc.market_code <> 'CN' AND c.region NOT IN ('GLOBAL', gc.market_code))
 ORDER BY gc.updated_at DESC, gc.id DESC
 LIMIT $1`, topN*2)
 	if err != nil {

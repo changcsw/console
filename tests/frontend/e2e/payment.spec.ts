@@ -174,7 +174,7 @@ async function setup(page: Page, permissions: string[] = SESSION.user.permission
             gameId: "100001",
             market: "GLOBAL",
             channelId: "google",
-            region: "overseas",
+            region: "GLOBAL",
             hidden: false,
             compatible: true,
             configStatus: "valid",

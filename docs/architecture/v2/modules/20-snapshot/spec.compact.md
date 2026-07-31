@@ -69,7 +69,7 @@ RuntimeConfig: schemaVersion, gameRef, generatedAt,
   markets map[Market]MarketConfig, checksum
 MarketConfig: market, game(GameBaseConfig 法务/账号认证/商品...),
   channels []ResolvedChannel, paymentRoutes []ResolvedRoute
-ResolvedChannel: channelId, region(domestic|overseas),
+ResolvedChannel: channelId, region(发行市场，GLOBAL|CN|JP|KR|SEA|HMT),
   sourceMarket(GLOBAL 或具体 market，便于审计/调试),
   login *LoginConfig, iap *IapConfig, packages []PackageConfig
 ```
@@ -132,16 +132,16 @@ BuildRuntimeConfig(game, targetMarket, validData):
     "GLOBAL": {
       "game": { "legalLinks": [], "accountAuth": [], "products": [] },
       "channels": [
-        { "channelId": "google", "region": "overseas", "sourceMarket": "GLOBAL",
+        { "channelId": "google", "region": "GLOBAL", "sourceMarket": "GLOBAL",
           "login": {}, "iap": {}, "packages": [] }
       ],
       "paymentRoutes": []
     },
     "JP": { "game": {}, "channels": [
-        { "channelId": "google", "region": "overseas", "sourceMarket": "JP" } ],
+        { "channelId": "google", "region": "GLOBAL", "sourceMarket": "JP" } ],
       "paymentRoutes": [] },
     "CN": { "game": {}, "channels": [
-        { "channelId": "huawei_cn", "region": "domestic", "sourceMarket": "CN" } ],
+        { "channelId": "huawei_cn", "region": "CN", "sourceMarket": "CN" } ],
       "paymentRoutes": [] }
   }
 }

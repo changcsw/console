@@ -2,8 +2,12 @@ import { request } from "@/api/http";
 
 // 枚举（与 00-common §3 / 12-channel compact 全局事实源一致；本模块本地引用，待 dictionary store 落地后可切换）
 export type Market = "GLOBAL" | "JP" | "KR" | "SEA" | "HMT" | "CN";
-export type ChannelRegion = "domestic" | "overseas";
-export type ChannelType = "store" | "oem" | "web" | "direct" | "mini_game";
+/** 渠道发行市场：取值与 Market 同集（GLOBAL=全球发行不含中国大陆） */
+export type ChannelRegion = "GLOBAL" | "CN" | "JP" | "KR" | "SEA" | "HMT";
+/** 渠道类型：海外商店 / 国内渠道 / 小游戏 */
+export type ChannelType = "store" | "domestic" | "mini_game";
+/** 特性插件的国内/海外属性（与渠道发行市场是两个维度，勿混用） */
+export type PluginRegion = "domestic" | "overseas";
 export type LoginMode = "channel_only" | "account_system";
 export type PaymentMode = "channel_only" | "hybrid" | "cashier_only";
 export type ConfigStatus = "empty" | "invalid" | "valid";
@@ -235,7 +239,7 @@ export interface GameChannelPluginItem {
   id: number;
   pluginId: string;
   pluginName: string;
-  region: ChannelRegion;
+  region: PluginRegion;
   required: boolean;
   selectable: boolean;
   locked: boolean;
@@ -264,7 +268,7 @@ export interface ChannelPackagePluginItem {
   packageId: number;
   pluginId: string;
   pluginName: string;
-  region: ChannelRegion;
+  region: PluginRegion;
   required: boolean;
   selectable: boolean;
   locked: boolean;

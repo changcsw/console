@@ -15,7 +15,7 @@ func TestNewCopiedMarketChannelClearsSensitiveFields(t *testing.T) {
 		FileConfig:   map[string]string{"keystore": "file-id"},
 	}
 
-	copied := NewCopiedMarketChannel("100001", "JP", "google", ChannelRegionOverseas, source)
+	copied := NewCopiedMarketChannel("100001", "JP", "google", ChannelRegionGlobal, source)
 
 	if copied.ConfigStatus != common.ConfigStatusInvalid {
 		t.Fatalf("expected invalid status, got %s", copied.ConfigStatus)
@@ -40,7 +40,7 @@ func TestNewCopiedMarketChannelClearsSensitiveFields(t *testing.T) {
 func TestHideRecordsOperatorAndExcludesFromRuntime(t *testing.T) {
 	item := GameMarketChannel{
 		Market:       string(common.MarketJP),
-		Region:       ChannelRegionOverseas,
+		Region:       ChannelRegionGlobal,
 		ConfigStatus: common.ConfigStatusValid,
 	}
 	now := time.Now()
@@ -62,7 +62,7 @@ func TestUnhideRestoresRuntimeEligibility(t *testing.T) {
 	now := time.Now()
 	item := GameMarketChannel{
 		Market:       string(common.MarketJP),
-		Region:       ChannelRegionOverseas,
+		Region:       ChannelRegionGlobal,
 		Hidden:       true,
 		HiddenBy:     "ops@example.com",
 		HiddenAt:     &now,
@@ -79,18 +79,18 @@ func TestUnhideRestoresRuntimeEligibility(t *testing.T) {
 }
 
 func TestResolveRuntimeFlagsReasons(t *testing.T) {
-	// 不兼容：JP + domestic region。
-	incompatible := GameMarketChannel{Market: string(common.MarketJP), Region: ChannelRegionDomestic, ConfigStatus: common.ConfigStatusValid}
+	// 不兼容：JP + CN region。
+	incompatible := GameMarketChannel{Market: string(common.MarketJP), Region: ChannelRegionCN, ConfigStatus: common.ConfigStatusValid}
 	if got := incompatible.ResolveRuntimeFlags(); got.IncludedInRuntimeConfig || got.Reason != RuntimeReasonIncompatible {
 		t.Fatalf("expected incompatible reason, got %#v", got)
 	}
 	// 无效配置。
-	invalid := GameMarketChannel{Market: string(common.MarketJP), Region: ChannelRegionOverseas, ConfigStatus: common.ConfigStatusInvalid}
+	invalid := GameMarketChannel{Market: string(common.MarketJP), Region: ChannelRegionGlobal, ConfigStatus: common.ConfigStatusInvalid}
 	if got := invalid.ResolveRuntimeFlags(); got.IncludedInRuntimeConfig || got.Reason != RuntimeReasonInvalidConfig {
 		t.Fatalf("expected invalid_config reason, got %#v", got)
 	}
 	// 全过。
-	ok := GameMarketChannel{Market: string(common.MarketGlobal), Region: ChannelRegionOverseas, ConfigStatus: common.ConfigStatusValid}
+	ok := GameMarketChannel{Market: string(common.MarketGlobal), Region: ChannelRegionGlobal, ConfigStatus: common.ConfigStatusValid}
 	if got := ok.ResolveRuntimeFlags(); !got.IncludedInRuntimeConfig || got.Reason != "" {
 		t.Fatalf("expected runtime-eligible with no reason, got %#v", got)
 	}

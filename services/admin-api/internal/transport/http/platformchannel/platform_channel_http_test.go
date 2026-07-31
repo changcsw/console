@@ -204,7 +204,7 @@ func TestPlatformChannelRBACForbidden(t *testing.T) {
 		body any
 	}{
 		{http.MethodPost, "/api/admin/platform/channels", map[string]any{
-			"channelId": "vivo_cn", "channelName": "vivo", "channelType": "oem", "region": "domestic",
+			"channelId": "vivo_cn", "channelName": "vivo", "channelType": "domestic", "region": "CN",
 			"loginMode": "channel_only", "paymentMode": "channel_only",
 		}},
 		{http.MethodPatch, "/api/admin/platform/channels/google", map[string]any{"channelName": "Google Play 商店"}},
@@ -253,8 +253,8 @@ func TestListPlatformChannels(t *testing.T) {
 	// 视图字段齐全，含策略与模版计数（huawei_cn 有 2 个登录模版、0 个 IAP 模版）。
 	hw := items[1]
 	assertField(t, hw, "channelName", "华为")
-	assertField(t, hw, "channelType", "oem")
-	assertField(t, hw, "region", "domestic")
+	assertField(t, hw, "channelType", "domestic")
+	assertField(t, hw, "region", "CN")
 	assertField(t, hw, "enabled", true)
 	assertField(t, hw, "loginMode", "channel_only")
 	assertField(t, hw, "paymentMode", "channel_only")
@@ -282,8 +282,8 @@ func TestListPlatformChannelsFilters(t *testing.T) {
 		query string
 		want  []string
 	}{
-		{"region 过滤", "?region=overseas", []string{"google"}},
-		{"channelType 过滤", "?channelType=oem", []string{"huawei_cn"}},
+		{"region 过滤", "?region=GLOBAL", []string{"google"}},
+		{"channelType 过滤", "?channelType=domestic", []string{"huawei_cn"}},
 		{"keyword 命中 channelId", "?keyword=huawei", []string{"huawei_cn"}},
 		{"keyword 命中渠道名", "?keyword=Google", []string{"google"}},
 		{"enabled=true 全命中", "?enabled=true", []string{"google", "huawei_cn"}},
@@ -327,15 +327,15 @@ func TestGetPlatformChannelNotFound(t *testing.T) {
 func TestCreatePlatformChannelSuccess(t *testing.T) {
 	h := newHarness(t)
 	res := h.do(t, http.MethodPost, "/api/admin/platform/channels", h.writeToken(t), map[string]any{
-		"channelId": "vivo_cn", "channelName": "vivo", "channelType": "oem", "region": "domestic",
+		"channelId": "vivo_cn", "channelName": "vivo", "channelType": "domestic", "region": "CN",
 		"sort": 5, "loginMode": "account_system", "paymentMode": "hybrid", "paymentLocked": true,
 	})
 	assertStatus(t, res, http.StatusCreated)
 	d := res.data()
 	assertField(t, d, "channelId", "vivo_cn")
 	assertField(t, d, "channelName", "vivo")
-	assertField(t, d, "channelType", "oem")
-	assertField(t, d, "region", "domestic")
+	assertField(t, d, "channelType", "domestic")
+	assertField(t, d, "region", "CN")
 	assertField(t, d, "sort", float64(5))
 	assertField(t, d, "enabled", true) // 缺省启用
 	assertField(t, d, "loginMode", "account_system")
@@ -361,7 +361,7 @@ func TestCreatePlatformChannelSuccess(t *testing.T) {
 	if entry.ResourceType != "platform_channel" || entry.ResourceID != "vivo_cn" {
 		t.Fatalf("audit resource: got %s/%s", entry.ResourceType, entry.ResourceID)
 	}
-	if entry.Detail["channelType"] != "oem" || entry.Detail["region"] != "domestic" {
+	if entry.Detail["channelType"] != "domestic" || entry.Detail["region"] != "CN" {
 		t.Fatalf("audit detail: got %+v", entry.Detail)
 	}
 }
@@ -369,7 +369,7 @@ func TestCreatePlatformChannelSuccess(t *testing.T) {
 func TestCreatePlatformChannelDuplicate(t *testing.T) {
 	h := newHarness(t)
 	res := h.do(t, http.MethodPost, "/api/admin/platform/channels", h.writeToken(t), map[string]any{
-		"channelId": "google", "channelName": "Google Play 2", "channelType": "store", "region": "overseas",
+		"channelId": "google", "channelName": "Google Play 2", "channelType": "store", "region": "GLOBAL",
 		"loginMode": "channel_only", "paymentMode": "channel_only",
 	})
 	assertStatus(t, res, http.StatusConflict)
@@ -386,7 +386,7 @@ func TestCreatePlatformChannelValidation(t *testing.T) {
 	token := h.writeToken(t)
 	base := func(over map[string]any) map[string]any {
 		body := map[string]any{
-			"channelId": "ok_id", "channelName": "名字", "channelType": "store", "region": "overseas",
+			"channelId": "ok_id", "channelName": "名字", "channelType": "store", "region": "GLOBAL",
 			"loginMode": "channel_only", "paymentMode": "channel_only",
 		}
 		for k, v := range over {
@@ -444,7 +444,7 @@ func TestUpdatePlatformChannel(t *testing.T) {
 	// 身份与 market 兼容性口径不受编辑影响。
 	assertField(t, d, "channelId", "google")
 	assertField(t, d, "channelType", "store")
-	assertField(t, d, "region", "overseas")
+	assertField(t, d, "region", "GLOBAL")
 
 	// 审计记录改动字段集合。
 	entry, ok := h.audit.byAction("platform_channel.update")
@@ -471,15 +471,15 @@ func TestUpdatePlatformChannelIgnoresImmutableFields(t *testing.T) {
 	res := h.do(t, http.MethodPatch, "/api/admin/platform/channels/huawei_cn", h.writeToken(t), map[string]any{
 		"channelName": "华为应用市场",
 		"channelId":   "huawei_global",
-		"channelType": "web",
-		"region":      "overseas",
+		"channelType": "store",
+		"region":      "GLOBAL",
 	})
 	assertStatus(t, res, http.StatusOK)
 	d := res.data()
 	assertField(t, d, "channelName", "华为应用市场")
 	assertField(t, d, "channelId", "huawei_cn")
-	assertField(t, d, "channelType", "oem")
-	assertField(t, d, "region", "domestic")
+	assertField(t, d, "channelType", "domestic")
+	assertField(t, d, "region", "CN")
 
 	// 原业务键仍可读，未产生新键。
 	assertStatus(t, h.do(t, http.MethodGet, "/api/admin/platform/channels/huawei_cn", h.readToken(t), nil), http.StatusOK)

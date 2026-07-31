@@ -213,13 +213,13 @@ func (h *harness) createChannel2(t *testing.T, token, gameID, market string, bod
 // S4 + 模块私有错误码：market 与渠道 region 不兼容 → 400 MARKET_CHANNEL_INCOMPATIBLE。
 func TestCreateMarketChannelIncompatible(t *testing.T) {
 	h := newHarness(t)
-	// google 为 overseas，CN 仅允许 domestic → 不兼容。
+	// google 发行市场为 GLOBAL，CN 仅允许 CN 渠道 → 不兼容。
 	res := h.createChannel(t, "100001", "CN", map[string]any{"channelId": "google"})
 	assertStatus(t, res, http.StatusBadRequest)
 	if res.errCode() != "MARKET_CHANNEL_INCOMPATIBLE" {
 		t.Fatalf("want MARKET_CHANNEL_INCOMPATIBLE got %q (%s)", res.errCode(), res.raw)
 	}
-	// 反向：wechat 为 domestic，JP 仅允许 overseas → 不兼容。
+	// 反向：wechat 发行市场为 CN，JP 仅允许 GLOBAL/JP → 不兼容。
 	res2 := h.createChannel(t, "100001", "JP", map[string]any{"channelId": "wechat"})
 	assertStatus(t, res2, http.StatusBadRequest)
 	if res2.errCode() != "MARKET_CHANNEL_INCOMPATIBLE" {

@@ -9,7 +9,7 @@ import (
 	"github.com/csw/console/services/admin-api/internal/domain/common"
 )
 
-// Channel 平台级渠道主数据（platform.channels）。region 为国内/非国内属性（D3）。
+// Channel 平台级渠道主数据（platform.channels）。region 为发行市场属性（D3，取值同 Market）。
 type Channel struct {
 	ID          int64
 	ChannelID   string
@@ -35,19 +35,17 @@ type ChannelWithPolicy struct {
 	Policy  ChannelPolicy
 }
 
-// ChannelType 取值集合（00 §3.1，无默认）。
+// ChannelType 取值集合（00 §3.1，无默认）：海外商店 / 国内渠道 / 小游戏。
 const (
 	ChannelTypeStore    = "store"
-	ChannelTypeOEM      = "oem"
-	ChannelTypeWeb      = "web"
-	ChannelTypeDirect   = "direct"
+	ChannelTypeDomestic = "domestic"
 	ChannelTypeMiniGame = "mini_game"
 )
 
 // IsValidChannelType 校验渠道类型枚举（00 §3.1）。
 func IsValidChannelType(t string) bool {
 	switch t {
-	case ChannelTypeStore, ChannelTypeOEM, ChannelTypeWeb, ChannelTypeDirect, ChannelTypeMiniGame:
+	case ChannelTypeStore, ChannelTypeDomestic, ChannelTypeMiniGame:
 		return true
 	default:
 		return false

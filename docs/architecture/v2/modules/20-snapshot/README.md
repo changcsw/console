@@ -86,7 +86,7 @@ MarketConfig
 
 ResolvedChannel
   ├─ channelId          string
-  ├─ region             ChannelRegion             // domestic | overseas
+  ├─ region             ChannelRegion             // 发行市场：GLOBAL | CN | JP | KR | SEA | HMT
   ├─ sourceMarket       Market                    // 该实例来源（GLOBAL 或具体 market），便于审计/调试
   ├─ login              *LoginConfig
   ├─ iap                *IapConfig
@@ -230,7 +230,7 @@ BuildRuntimeConfig(game, targetMarket, validData):
     "GLOBAL": {
       "game": { "legalLinks": [], "accountAuth": [], "products": [] },
       "channels": [
-        { "channelId": "google", "region": "overseas", "sourceMarket": "GLOBAL",
+        { "channelId": "google", "region": "GLOBAL", "sourceMarket": "GLOBAL",
           "login": {}, "iap": {}, "packages": [] }
       ],
       "paymentRoutes": []
@@ -238,7 +238,7 @@ BuildRuntimeConfig(game, targetMarket, validData):
     "JP": {
       "game": { "legalLinks": [], "accountAuth": [], "products": [] },
       "channels": [
-        { "channelId": "google", "region": "overseas", "sourceMarket": "JP",
+        { "channelId": "google", "region": "GLOBAL", "sourceMarket": "JP",
           "login": {}, "iap": {}, "packages": [] }
       ],
       "paymentRoutes": []
@@ -246,7 +246,7 @@ BuildRuntimeConfig(game, targetMarket, validData):
     "CN": {
       "game": { "legalLinks": [], "accountAuth": [], "products": [] },
       "channels": [
-        { "channelId": "huawei_cn", "region": "domestic", "sourceMarket": "CN",
+        { "channelId": "huawei_cn", "region": "CN", "sourceMarket": "CN",
           "login": {}, "iap": {}, "packages": [] }
       ],
       "paymentRoutes": []

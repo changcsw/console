@@ -118,7 +118,7 @@ const MARKET_CHANNELS = {
         gameId: "100001",
         market: "GLOBAL",
         channelId: "google",
-        region: "overseas",
+        region: "GLOBAL",
         compatible: true,
         hidden: false,
         configStatus: "valid",
@@ -243,7 +243,8 @@ test("商品 Tab 编辑抽屉：两维独立 placeholder 防混填，且 product
   await setup(page);
   await gotoProductTab(page);
 
-  await page.getByRole("button", { name: "编辑" }).click();
+  // exact：页头另有「编辑基础信息」按钮，默认子串匹配会撞严格模式
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
   await expect(page.getByRole("heading", { name: "编辑商品" })).toBeVisible();
   // productId 身份键：编辑态禁用
   const productIdInput = page.locator(".el-drawer input").first();

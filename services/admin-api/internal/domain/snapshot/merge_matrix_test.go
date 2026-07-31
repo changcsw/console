@@ -12,11 +12,11 @@ func fixedTime() time.Time {
 	return time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC)
 }
 
-// validOverseasChannel 构造一个通过 I2 有效性闭包的海外渠道实例。
-func validOverseasChannel(id string, market common.Market) ChannelInput {
+// validGlobalChannel 构造一个通过 I2 有效性闭包的全球发行渠道实例。
+func validGlobalChannel(id string, market common.Market) ChannelInput {
 	return ChannelInput{
 		ChannelID:    id,
-		Region:       "overseas",
+		Region:       "GLOBAL",
 		Market:       market,
 		Hidden:       false,
 		Enabled:      true,
@@ -41,8 +41,8 @@ func TestBuildRuntimeConfig_GlobalMarketUsesGlobalOnly(t *testing.T) {
 		GameID:      "100001",
 		GeneratedAt: fixedTime(),
 		Channels: []ChannelInput{
-			validOverseasChannel("google", common.MarketGlobal),
-			validOverseasChannel("line", common.MarketJP), // JP 独有，不应进 GLOBAL
+			validGlobalChannel("google", common.MarketGlobal),
+			validGlobalChannel("line", common.MarketJP), // JP 独有，不应进 GLOBAL
 		},
 	}
 
@@ -62,10 +62,10 @@ func TestBuildRuntimeConfig_CNDoesNotLoadGlobal(t *testing.T) {
 		GameID:      "100001",
 		GeneratedAt: fixedTime(),
 		Channels: []ChannelInput{
-			validOverseasChannel("google", common.MarketGlobal),
+			validGlobalChannel("google", common.MarketGlobal),
 			{
 				ChannelID:    "huawei_cn",
-				Region:       "domestic",
+				Region:       "CN",
 				Market:       common.MarketCN,
 				Enabled:      true,
 				ConfigStatus: common.ConfigStatusValid,
@@ -92,10 +92,10 @@ func TestBuildRuntimeConfig_FallbackMarketsMergeByInstance(t *testing.T) {
 				GameID:      "100001",
 				GeneratedAt: fixedTime(),
 				Channels: []ChannelInput{
-					validOverseasChannel("google", common.MarketGlobal),   // 打底
-					validOverseasChannel("facebook", common.MarketGlobal), // 仅 GLOBAL
-					validOverseasChannel("google", market),                // 覆盖 GLOBAL google
-					validOverseasChannel("local_only", market),            // market 独有追加
+					validGlobalChannel("google", common.MarketGlobal),   // 打底
+					validGlobalChannel("facebook", common.MarketGlobal), // 仅 GLOBAL
+					validGlobalChannel("google", market),                // 覆盖 GLOBAL google
+					validGlobalChannel("local_only", market),            // market 独有追加
 				},
 			}
 
@@ -123,14 +123,14 @@ func TestBuildRuntimeConfig_FallbackMarketsMergeByInstance(t *testing.T) {
 // I3：具体 market 覆盖以「完整实例」为单位替换，禁止字段级深合并。
 // GLOBAL google 带 packages + login；JP google 无 packages、login 不同 —— 覆盖后不得残留 GLOBAL 的 packages。
 func TestBuildRuntimeConfig_I3_WholeInstanceOverride_NoFieldMerge(t *testing.T) {
-	globalGoogle := validOverseasChannel("google", common.MarketGlobal)
+	globalGoogle := validGlobalChannel("google", common.MarketGlobal)
 	globalGoogle.Login = &TemplateConfig{
 		Enabled: true, ConfigStatus: common.ConfigStatusValid,
 		Config: map[string]any{"clientId": "GLOBAL_CLIENT"},
 	}
 	globalGoogle.Packages = []PackageConfig{{PackageCode: "p_global", BundleID: "b1", Enabled: true}}
 
-	jpGoogle := validOverseasChannel("google", common.MarketJP)
+	jpGoogle := validGlobalChannel("google", common.MarketJP)
 	jpGoogle.Login = &TemplateConfig{
 		Enabled: true, ConfigStatus: common.ConfigStatusValid,
 		Config: map[string]any{"clientId": "JP_CLIENT"},
@@ -166,7 +166,7 @@ func TestBuildRuntimeConfig_I3_WholeInstanceOverride_NoFieldMerge(t *testing.T) 
 
 func TestBuildRuntimeConfig_I2_ExcludesInvalidChannels(t *testing.T) {
 	base := func(mut func(*ChannelInput)) ChannelInput {
-		c := validOverseasChannel("google", common.MarketGlobal)
+		c := validGlobalChannel("google", common.MarketGlobal)
 		mut(&c)
 		return c
 	}
@@ -177,7 +177,7 @@ func TestBuildRuntimeConfig_I2_ExcludesInvalidChannels(t *testing.T) {
 		{"hidden", base(func(c *ChannelInput) { c.Hidden = true })},
 		{"disabled", base(func(c *ChannelInput) { c.Enabled = false })},
 		{"config_status_invalid", base(func(c *ChannelInput) { c.ConfigStatus = common.ConfigStatusInvalid })},
-		{"incompatible_region", base(func(c *ChannelInput) { c.Region = "domestic" })}, // 海外 market 要求 overseas
+		{"incompatible_region", base(func(c *ChannelInput) { c.Region = "CN" })}, // 海外 market 不接受 CN 渠道
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -193,10 +193,10 @@ func TestBuildRuntimeConfig_I2_ExcludesInvalidChannels(t *testing.T) {
 
 // I2：Login/IAP 子模板未 valid → 整渠道无效剔除。
 func TestBuildRuntimeConfig_I2_InvalidLoginOrIapExcludesChannel(t *testing.T) {
-	withLogin := validOverseasChannel("google", common.MarketGlobal)
+	withLogin := validGlobalChannel("google", common.MarketGlobal)
 	withLogin.Login = &TemplateConfig{Enabled: true, ConfigStatus: common.ConfigStatusInvalid, Config: map[string]any{"x": "y"}}
 
-	withIap := validOverseasChannel("apple", common.MarketGlobal)
+	withIap := validGlobalChannel("apple", common.MarketGlobal)
 	withIap.IAP = &TemplateConfig{Enabled: false, ConfigStatus: common.ConfigStatusValid, Config: map[string]any{"x": "y"}}
 
 	view := ValidDataView{GameID: "100001", GeneratedAt: fixedTime(), Channels: []ChannelInput{withLogin, withIap}}
@@ -208,11 +208,11 @@ func TestBuildRuntimeConfig_I2_InvalidLoginOrIapExcludesChannel(t *testing.T) {
 
 // I2：required 插件未 valid → 整渠道剔除；非 required 插件无效 → 保留渠道但剔除该插件。
 func TestBuildRuntimeConfig_I2_RequiredPluginGate(t *testing.T) {
-	requiredBad := validOverseasChannel("google", common.MarketGlobal)
+	requiredBad := validGlobalChannel("google", common.MarketGlobal)
 	requiredBad.Plugins = []PluginConfig{
 		{PluginID: "must", Required: true, Region: "overseas", Enabled: false, ConfigStatus: common.ConfigStatusInvalid},
 	}
-	optionalBad := validOverseasChannel("facebook", common.MarketGlobal)
+	optionalBad := validGlobalChannel("facebook", common.MarketGlobal)
 	optionalBad.Plugins = []PluginConfig{
 		{PluginID: "opt", Required: false, Region: "overseas", Enabled: false, ConfigStatus: common.ConfigStatusInvalid, Config: map[string]any{"k": "v"}},
 		{PluginID: "good", Required: false, Region: "overseas", Enabled: true, ConfigStatus: common.ConfigStatusValid, Config: map[string]any{"k": "v"}},
@@ -236,7 +236,7 @@ func TestBuildRuntimeConfig_I2_RequiredPluginGate(t *testing.T) {
 // ─────────────────────────── scope 过滤（00 §4.1.1） ───────────────────────────
 
 func TestBuildRuntimeConfig_ScopeFilter_ClientBothInServerOut(t *testing.T) {
-	ch := validOverseasChannel("google", common.MarketGlobal)
+	ch := validGlobalChannel("google", common.MarketGlobal)
 	ch.Login = &TemplateConfig{
 		Enabled: true, ConfigStatus: common.ConfigStatusValid,
 		Config: map[string]any{
@@ -269,7 +269,7 @@ func TestBuildRuntimeConfig_ScopeFilter_ClientBothInServerOut(t *testing.T) {
 
 func TestBuildRuntimeConfig_I6_SecretMaskedNeverPlaintext(t *testing.T) {
 	const plaintext = "PLAINTEXT_SECRET_VALUE"
-	ch := validOverseasChannel("google", common.MarketGlobal)
+	ch := validGlobalChannel("google", common.MarketGlobal)
 	ch.Login = &TemplateConfig{
 		Enabled: true, ConfigStatus: common.ConfigStatusValid,
 		Config:       map[string]any{"apiKey": plaintext, "clientId": "public"},
@@ -312,7 +312,7 @@ func bytesIndex(b []byte, s string) int {
 // ─────────────────────────── packages 过滤与排序 ───────────────────────────
 
 func TestBuildRuntimeConfig_PackagesEnabledOnlyAndSorted(t *testing.T) {
-	ch := validOverseasChannel("google", common.MarketGlobal)
+	ch := validGlobalChannel("google", common.MarketGlobal)
 	ch.Packages = []PackageConfig{
 		{PackageCode: "z_pkg", Enabled: true},
 		{PackageCode: "disabled", Enabled: false},
@@ -396,14 +396,14 @@ func TestBuildRuntimeConfig_I4_DeterministicAcrossInputOrder(t *testing.T) {
 		}
 	}
 	chA := []ChannelInput{
-		validOverseasChannel("google", common.MarketGlobal),
-		validOverseasChannel("apple", common.MarketGlobal),
-		validOverseasChannel("google", common.MarketJP),
+		validGlobalChannel("google", common.MarketGlobal),
+		validGlobalChannel("apple", common.MarketGlobal),
+		validGlobalChannel("google", common.MarketJP),
 	}
 	chB := []ChannelInput{ // 逆序输入
-		validOverseasChannel("google", common.MarketJP),
-		validOverseasChannel("apple", common.MarketGlobal),
-		validOverseasChannel("google", common.MarketGlobal),
+		validGlobalChannel("google", common.MarketJP),
+		validGlobalChannel("apple", common.MarketGlobal),
+		validGlobalChannel("google", common.MarketGlobal),
 	}
 	aaA := []AccountAuthItem{{AuthTypeID: "b", Config: map[string]any{"k": "1"}}, {AuthTypeID: "a", Config: map[string]any{"k": "2"}}}
 	aaB := []AccountAuthItem{{AuthTypeID: "a", Config: map[string]any{"k": "2"}}, {AuthTypeID: "b", Config: map[string]any{"k": "1"}}}
@@ -433,9 +433,9 @@ func TestBuildRuntimeConfig_I4_StableAcrossRuns(t *testing.T) {
 		GameID:      "100001",
 		GeneratedAt: fixedTime(),
 		Channels: []ChannelInput{
-			validOverseasChannel("google", common.MarketGlobal),
-			validOverseasChannel("apple", common.MarketGlobal),
-			validOverseasChannel("line", common.MarketJP),
+			validGlobalChannel("google", common.MarketGlobal),
+			validGlobalChannel("apple", common.MarketGlobal),
+			validGlobalChannel("line", common.MarketJP),
 		},
 	}
 	var first string

@@ -37,18 +37,18 @@ func newMemChannelState() *memChannelState {
 	// 种子：两个游戏。
 	st.games["100001"] = 1
 	st.games["100002"] = 2
-	// 种子：平台渠道主数据 + 策略（google/apple 海外；wechat 国内）。
+	// 种子：平台渠道主数据 + 策略（google/apple 全球发行；wechat 中国大陆）。
 	seed := []domainchannel.ChannelWithPolicy{
 		{
-			Channel: domainchannel.Channel{ID: 11, ChannelID: "google", ChannelName: "Google Play", ChannelType: domainchannel.ChannelTypeStore, Region: domainchannel.ChannelRegionOverseas, Enabled: true, Sort: 1},
+			Channel: domainchannel.Channel{ID: 11, ChannelID: "google", ChannelName: "Google Play", ChannelType: domainchannel.ChannelTypeStore, Region: domainchannel.ChannelRegionGlobal, Enabled: true, Sort: 1},
 			Policy:  domainchannel.ChannelPolicy{ChannelIDRef: 11, LoginMode: common.LoginModeChannelOnly, PaymentMode: common.PaymentModeChannelOnly},
 		},
 		{
-			Channel: domainchannel.Channel{ID: 12, ChannelID: "apple", ChannelName: "App Store", ChannelType: domainchannel.ChannelTypeStore, Region: domainchannel.ChannelRegionOverseas, Enabled: true, Sort: 2},
+			Channel: domainchannel.Channel{ID: 12, ChannelID: "apple", ChannelName: "App Store", ChannelType: domainchannel.ChannelTypeStore, Region: domainchannel.ChannelRegionGlobal, Enabled: true, Sort: 2},
 			Policy:  domainchannel.ChannelPolicy{ChannelIDRef: 12, LoginMode: common.LoginModeAccountSystem, PaymentMode: common.PaymentModeHybrid},
 		},
 		{
-			Channel: domainchannel.Channel{ID: 13, ChannelID: "wechat", ChannelName: "WeChat", ChannelType: domainchannel.ChannelTypeStore, Region: domainchannel.ChannelRegionDomestic, Enabled: true, Sort: 3},
+			Channel: domainchannel.Channel{ID: 13, ChannelID: "wechat", ChannelName: "WeChat", ChannelType: domainchannel.ChannelTypeDomestic, Region: domainchannel.ChannelRegionCN, Enabled: true, Sort: 3},
 			Policy:  domainchannel.ChannelPolicy{ChannelIDRef: 13, LoginMode: common.LoginModeChannelOnly, PaymentMode: common.PaymentModeChannelOnly, LoginLocked: true, PaymentLocked: true},
 		},
 	}
@@ -287,7 +287,7 @@ func (r *memGameChannelRepo) List(_ context.Context, q dto.ListMarketChannelsQue
 			continue
 		}
 		if q.Compatible != nil {
-			compat := common.Market(g.Market).IsCN() == (g.Region == domainchannel.ChannelRegionDomestic)
+			compat := domainchannel.IsCompatible(common.Market(g.Market), g.Region)
 			if compat != *q.Compatible {
 				continue
 			}

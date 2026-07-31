@@ -120,7 +120,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import PageStatusTag from "@/components/page/PageStatusTag.vue";
 import { ApiError } from "@/api/http";
@@ -136,6 +136,11 @@ import {
 import TemplateQuartetEditor from "./TemplateQuartetEditor.vue";
 import { templateKindLabel } from "./labels";
 import { draftFromTemplate, draftToPayload, emptyDraft, type TemplateDraft } from "./templateDraft";
+
+const props = defineProps<{
+  /** 渠道页签「渠道模版」操作带入的目标渠道；新对象引用即视为一次新的定位请求 */
+  focusChannel?: { channelId: string };
+}>();
 
 const channels = ref<PlatformChannel[]>([]);
 const channelsLoading = ref(false);
@@ -186,7 +191,11 @@ async function loadChannels() {
   try {
     const res = await listPlatformChannels({ page: 1, pageSize: 100 });
     channels.value = res.items;
-    if (!selectedChannelId.value && res.items.length > 0) {
+    const preset = props.focusChannel?.channelId;
+    if (preset && res.items.some((c) => c.channelId === preset)) {
+      selectedChannelId.value = preset;
+      await reload();
+    } else if (!selectedChannelId.value && res.items.length > 0) {
       selectedChannelId.value = res.items[0].channelId;
       await reload();
     }
@@ -279,6 +288,19 @@ function formatTime(value?: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
+
+// 页签 lazy 挂载后保活：从渠道页签点「渠道模版」时父级会换一个新的 focusChannel 对象，
+// 这里按引用变化把选中渠道切过去并重拉模版列表。
+watch(
+  () => props.focusChannel,
+  (focus) => {
+    if (!focus?.channelId || !channels.value.some((c) => c.channelId === focus.channelId)) {
+      return;
+    }
+    selectedChannelId.value = focus.channelId;
+    void reload();
+  }
+);
 
 onMounted(() => {
   void loadChannels();

@@ -29,8 +29,8 @@ func NewService(tx TxManager, audit AuditSink) *Service {
 // ListChannels 平台渠道分页列表（GET /platform/channels）。
 func (s *Service) ListChannels(ctx context.Context, q dto.ListPlatformChannelsQuery) (dto.Page[dto.PlatformChannelView], error) {
 	empty := dto.Page[dto.PlatformChannelView]{}
-	if q.Region != "" && q.Region != string(domainchannel.ChannelRegionDomestic) && q.Region != string(domainchannel.ChannelRegionOverseas) {
-		return empty, validationErr("region 非法", fieldDetail("region", "enum"))
+	if q.Region != "" && !domainchannel.ChannelRegion(q.Region).IsKnown() {
+		return empty, validationErr("发行市场非法", fieldDetail("region", "enum"))
 	}
 	if q.ChannelType != "" && !domainchannel.IsValidChannelType(q.ChannelType) {
 		return empty, validationErr("channelType 非法", fieldDetail("channelType", "enum"))

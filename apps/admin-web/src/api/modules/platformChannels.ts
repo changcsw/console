@@ -17,8 +17,9 @@ export type { ChannelRegion, ChannelType, LoginMode, PaymentMode, TemplateFieldO
 /** 模版字段作用域，空串表示不区分 */
 export type TemplateFieldScope = "" | "client" | "server" | "both";
 
-export const CHANNEL_TYPE_OPTIONS: ChannelType[] = ["store", "oem", "web", "direct", "mini_game"];
-export const CHANNEL_REGION_OPTIONS: ChannelRegion[] = ["domestic", "overseas"];
+export const CHANNEL_TYPE_OPTIONS: ChannelType[] = ["store", "domestic", "mini_game"];
+/** 发行市场下拉顺序固定：全球 → 中国大陆 → 日本 → 韩国 → 东南亚 → 港澳台 */
+export const CHANNEL_REGION_OPTIONS: ChannelRegion[] = ["GLOBAL", "CN", "JP", "KR", "SEA", "HMT"];
 export const LOGIN_MODE_OPTIONS: LoginMode[] = ["channel_only", "account_system"];
 export const PAYMENT_MODE_OPTIONS: PaymentMode[] = ["channel_only", "hybrid", "cashier_only"];
 export const TEMPLATE_COMPONENT_OPTIONS: FormFieldComponent[] = [

@@ -10,8 +10,8 @@
           @keyup.enter="reload(1)"
           @clear="reload(1)"
         />
-        <el-select v-model="filterRegion" class="filter-select" placeholder="region" clearable @change="reload(1)">
-          <el-option v-for="r in CHANNEL_REGION_OPTIONS" :key="r" :label="regionLabel(r)" :value="r" />
+        <el-select v-model="filterRegion" class="filter-select filter-select--region" placeholder="发行市场" clearable @change="reload(1)">
+          <el-option v-for="r in CHANNEL_REGION_OPTIONS" :key="r" :label="regionFullLabel(r)" :value="r" />
         </el-select>
         <el-select v-model="filterChannelType" class="filter-select" placeholder="渠道类型" clearable @change="reload(1)">
           <el-option v-for="t in CHANNEL_TYPE_OPTIONS" :key="t" :label="channelTypeLabel(t)" :value="t" />
@@ -31,8 +31,8 @@
       <el-table-column label="类型" width="110">
         <template #default="{ row }">{{ channelTypeLabel(row.channelType) }}</template>
       </el-table-column>
-      <el-table-column label="region" width="100">
-        <template #default="{ row }">{{ regionLabel(row.region) }}</template>
+      <el-table-column label="发行市场" min-width="130">
+        <template #default="{ row }">{{ regionFullLabel(row.region) }}</template>
       </el-table-column>
       <el-table-column label="登录模式" min-width="130">
         <template #default="{ row }">{{ loginModeLabel(row.loginMode) }}</template>
@@ -60,9 +60,12 @@
           />
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="100" fixed="right">
+      <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" v-perm="'platform_channel.write'" @click="openEdit(row)">编辑</el-button>
+          <el-button link type="primary" v-perm="'channel_template.read'" @click="emit('view-templates', row.channelId)">
+            渠道模版
+          </el-button>
         </template>
       </el-table-column>
       <template #empty>
@@ -100,12 +103,13 @@
           </el-select>
           <p v-if="editing" class="panel__hint">创建后不可改。</p>
         </el-form-item>
-        <el-form-item label="region">
+        <el-form-item label="发行市场">
           <el-select v-model="form.region" :disabled="editing" class="form-control">
-            <el-option v-for="r in CHANNEL_REGION_OPTIONS" :key="r" :label="regionLabel(r)" :value="r" />
+            <el-option v-for="r in CHANNEL_REGION_OPTIONS" :key="r" :label="regionFullLabel(r)" :value="r" />
           </el-select>
+          <p class="panel__hint">CN 市场仅可见发行市场为 CN 的渠道；海外各市场可见全球（GLOBAL）及本市场专属渠道。</p>
           <p v-if="editing" class="panel__hint">
-            创建后不可改：region 决定与 market 的兼容性，改动会让既有渠道实例集体失配。
+            创建后不可改：发行市场决定与 market 的兼容性，改动会让既有渠道实例集体失配。
           </p>
         </el-form-item>
         <el-form-item label="登录模式">
@@ -159,8 +163,12 @@ import {
   type PaymentMode,
   type PlatformChannel
 } from "@/api/modules/platformChannels";
-import { regionLabel } from "../../constants";
+import { regionFullLabel } from "../../constants";
 import { channelTypeLabel, loginModeLabel, paymentModeLabel } from "./labels";
+
+const emit = defineEmits<{
+  (e: "view-templates", channelId: string): void;
+}>();
 
 const rows = ref<PlatformChannel[]>([]);
 const total = ref(0);
@@ -182,7 +190,7 @@ const form = reactive({
   channelId: "",
   channelName: "",
   channelType: "store" as ChannelType,
-  region: "overseas" as ChannelRegion,
+  region: "GLOBAL" as ChannelRegion,
   loginMode: "channel_only" as LoginMode,
   paymentMode: "channel_only" as PaymentMode,
   sort: 0,
@@ -233,7 +241,7 @@ function openCreate() {
     channelId: "",
     channelName: "",
     channelType: "store" as ChannelType,
-    region: "overseas" as ChannelRegion,
+    region: "GLOBAL" as ChannelRegion,
     loginMode: "channel_only" as LoginMode,
     paymentMode: "channel_only" as PaymentMode,
     sort: 0,
@@ -335,6 +343,10 @@ onMounted(() => {
 
 .filter-select {
   width: 140px;
+}
+
+.filter-select--region {
+  width: 170px;
 }
 
 .form-control {

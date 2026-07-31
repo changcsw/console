@@ -272,9 +272,9 @@ CREATE TABLE game_legal_links (
 
 ### 4.2 Market 语义补充（继承 00 §3.2）
 
-- `GLOBAL`：默认兜底海外市场；**不匹配 `CN`**；仅显示 overseas 渠道（下游 12 用）。
-- `CN`：仅中国大陆，仅允许 domestic 渠道。
-- `JP / KR / SEA / HMT`：具体海外大区，仅允许 overseas 渠道；与 `GLOBAL` 并存时**整体覆盖** `GLOBAL`（实例级，`snapshot` 合并）。
+- `GLOBAL`：默认兜底海外市场；**不匹配 `CN`**；显示发行市场为 `GLOBAL` 的渠道（下游 12 用）。
+- `CN`：仅中国大陆，仅允许发行市场为 `CN` 的渠道。
+- `JP / KR / SEA / HMT`：具体海外大区，允许发行市场为 `GLOBAL` 或与该 market 相同的渠道；与 `GLOBAL` 并存时**整体覆盖** `GLOBAL`（实例级，`snapshot` 合并）。
 - 本模块只负责「启用哪些 market」，不负责渠道可见性过滤（属 `channel`）。
 
 ### 4.3 GameStatus 语义与建议状态机

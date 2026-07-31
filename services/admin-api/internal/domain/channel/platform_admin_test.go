@@ -22,16 +22,16 @@ func TestValidateChannelID(t *testing.T) {
 }
 
 func TestValidateChannelMaster(t *testing.T) {
-	ok := Channel{ChannelID: "google", ChannelName: "Google Play", ChannelType: ChannelTypeStore, Region: ChannelRegionOverseas, Sort: 10}
+	ok := Channel{ChannelID: "google", ChannelName: "Google Play", ChannelType: ChannelTypeStore, Region: ChannelRegionGlobal, Sort: 10}
 	if issues := ValidateChannelMaster(ok); len(issues) != 0 {
 		t.Fatalf("expected valid, got %v", issues)
 	}
 
 	cases := map[string]Channel{
-		"空渠道名":      {ChannelName: "  ", ChannelType: ChannelTypeStore, Region: ChannelRegionOverseas},
-		"非法类型":      {ChannelName: "X", ChannelType: "unknown", Region: ChannelRegionOverseas},
-		"非法 region": {ChannelName: "X", ChannelType: ChannelTypeStore, Region: ChannelRegion("cn")},
-		"排序越界":      {ChannelName: "X", ChannelType: ChannelTypeStore, Region: ChannelRegionOverseas, Sort: -1},
+		"空渠道名":      {ChannelName: "  ", ChannelType: ChannelTypeStore, Region: ChannelRegionGlobal},
+		"非法类型":      {ChannelName: "X", ChannelType: "unknown", Region: ChannelRegionGlobal},
+		"非法 region": {ChannelName: "X", ChannelType: ChannelTypeStore, Region: ChannelRegion("domestic")},
+		"排序越界":      {ChannelName: "X", ChannelType: ChannelTypeStore, Region: ChannelRegionGlobal, Sort: -1},
 	}
 	for name, ch := range cases {
 		if issues := ValidateChannelMaster(ch); len(issues) == 0 {

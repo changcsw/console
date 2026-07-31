@@ -1,15 +1,12 @@
 <template>
   <div class="page-shell">
-    <PageCard
-      title="渠道管理"
-      description="系统管理员维护的平台级渠道主数据与渠道模版，与具体游戏无关，且跨运行环境共享。此处新增渠道并维护其登录 / IAP 模版后，游戏在自己的渠道实例上引用模版填写参数（游戏详情页「渠道」页签）。"
-    >
+    <PageCard title="渠道管理">
       <el-tabs v-model="activeTab">
         <el-tab-pane label="渠道" name="channels" lazy>
-          <PlatformChannelsPanel />
+          <PlatformChannelsPanel @view-templates="onViewTemplates" />
         </el-tab-pane>
         <el-tab-pane label="渠道模版" name="templates" lazy>
-          <ChannelTemplatesPanel />
+          <ChannelTemplatesPanel :focus-channel="templateFocus" />
         </el-tab-pane>
       </el-tabs>
     </PageCard>
@@ -23,4 +20,11 @@ import PlatformChannelsPanel from "./components/platform/PlatformChannelsPanel.v
 import ChannelTemplatesPanel from "./components/platform/ChannelTemplatesPanel.vue";
 
 const activeTab = ref<"channels" | "templates">("channels");
+const templateFocus = ref<{ channelId: string }>({ channelId: "" });
+
+function onViewTemplates(channelId: string) {
+  // 每次点击都生成新对象：即使同一渠道重复点击，模版面板的 watch 也会触发重选
+  templateFocus.value = { channelId };
+  activeTab.value = "templates";
+}
 </script>

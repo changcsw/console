@@ -33,7 +33,7 @@ func newFakeRepo() *fakeRepo {
 			Channels: []domainsnapshot.ChannelInput{
 				{
 					ChannelID:    "google",
-					Region:       "overseas",
+					Region:       "GLOBAL",
 					Market:       common.MarketGlobal,
 					Enabled:      true,
 					ConfigStatus: common.ConfigStatusValid,

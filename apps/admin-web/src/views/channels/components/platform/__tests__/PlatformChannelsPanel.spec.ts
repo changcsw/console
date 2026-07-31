@@ -27,8 +27,8 @@ function channel(overrides: Partial<PlatformChannel> = {}): PlatformChannel {
   return {
     channelId: "huawei_cn",
     channelName: "华为",
-    channelType: "oem",
-    region: "domestic",
+    channelType: "domestic",
+    region: "CN",
     enabled: true,
     sort: 2,
     loginMode: "channel_only",
@@ -82,9 +82,9 @@ describe("PlatformChannelsPanel", () => {
     const text = wrapper.text();
     expect(text).toContain("huawei_cn");
     expect(text).toContain("华为");
-    // 枚举以中文标签展示，region 复用渠道页的 regionLabel
-    expect(text).toContain("手机厂商");
-    expect(text).toContain("国内");
+    // 枚举以中文标签展示，发行市场用「中文（代码）」完整标签
+    expect(text).toContain("国内渠道");
+    expect(text).toContain("中国大陆（CN）");
     expect(text).toContain("仅渠道登录");
     expect(text).toContain("登录 2 / IAP 0");
   });
@@ -94,8 +94,8 @@ describe("PlatformChannelsPanel", () => {
     const vm = wrapper.vm as unknown as PanelVm;
 
     vm.keyword = "huawei";
-    vm.filterRegion = "domestic";
-    vm.filterChannelType = "oem";
+    vm.filterRegion = "CN";
+    vm.filterChannelType = "domestic";
     vm.filterEnabled = "false";
     await vm.reload(1);
 
@@ -103,8 +103,8 @@ describe("PlatformChannelsPanel", () => {
       page: 1,
       pageSize: 20,
       keyword: "huawei",
-      region: "domestic",
-      channelType: "oem",
+      region: "CN",
+      channelType: "domestic",
       enabled: false
     });
 
@@ -133,8 +133,8 @@ describe("PlatformChannelsPanel", () => {
     Object.assign(vm.form, {
       channelId: "vivo_cn",
       channelName: "vivo",
-      channelType: "oem",
-      region: "domestic",
+      channelType: "domestic",
+      region: "CN",
       loginMode: "account_system",
       paymentMode: "hybrid",
       sort: 5,
@@ -147,8 +147,8 @@ describe("PlatformChannelsPanel", () => {
     expect(createPlatformChannelApi).toHaveBeenCalledWith({
       channelId: "vivo_cn",
       channelName: "vivo",
-      channelType: "oem",
-      region: "domestic",
+      channelType: "domestic",
+      region: "CN",
       enabled: true,
       sort: 5,
       loginMode: "account_system",
@@ -193,7 +193,7 @@ describe("PlatformChannelsPanel", () => {
 
     const hints = wrapper.findAll(".panel__hint").map((node) => node.text());
     expect(hints.join(" ")).toContain("渠道 ID 是渠道实例的引用键");
-    expect(hints.join(" ")).toContain("region 决定与 market 的兼容性");
+    expect(hints.join(" ")).toContain("发行市场决定与 market 的兼容性");
   });
 
   test("VALIDATION_FAILED / CONFLICT 走抽屉内联报错且不关闭抽屉", async () => {
@@ -219,6 +219,21 @@ describe("PlatformChannelsPanel", () => {
   test("写权限缺失时写操作按钮被 v-perm 置灰", async () => {
     const wrapper = await mountPanel(["platform_channel.read"]);
     const buttons = wrapper.findAll("button").filter((btn) => btn.text().includes("新建渠道"));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].attributes("disabled")).toBeDefined();
+  });
+
+  test("操作列「渠道模版」发出 view-templates 事件直达模版页", async () => {
+    const wrapper = await mountPanel(["platform_channel.read", "platform_channel.write", "channel_template.read"]);
+    const buttons = wrapper.findAll("button").filter((btn) => btn.text().includes("渠道模版"));
+    expect(buttons).toHaveLength(1);
+    await buttons[0].trigger("click");
+    expect(wrapper.emitted("view-templates")).toEqual([["huawei_cn"]]);
+  });
+
+  test("无 channel_template.read 权限时「渠道模版」按钮置灰", async () => {
+    const wrapper = await mountPanel(["platform_channel.read", "platform_channel.write"]);
+    const buttons = wrapper.findAll("button").filter((btn) => btn.text().includes("渠道模版"));
     expect(buttons).toHaveLength(1);
     expect(buttons[0].attributes("disabled")).toBeDefined();
   });

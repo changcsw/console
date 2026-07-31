@@ -14,14 +14,14 @@ func TestBuildRuntimeConfigMergeByInstance(t *testing.T) {
 		Channels: []ChannelInput{
 			{
 				ChannelID:    "google",
-				Region:       "overseas",
+				Region:       "GLOBAL",
 				Market:       common.MarketGlobal,
 				Enabled:      true,
 				ConfigStatus: common.ConfigStatusValid,
 			},
 			{
 				ChannelID:    "google",
-				Region:       "overseas",
+				Region:       "GLOBAL",
 				Market:       common.MarketJP,
 				Enabled:      true,
 				ConfigStatus: common.ConfigStatusValid,
@@ -46,7 +46,7 @@ func TestBuildRuntimeConfigCNNoGlobalFallback(t *testing.T) {
 		Channels: []ChannelInput{
 			{
 				ChannelID:    "google",
-				Region:       "overseas",
+				Region:       "GLOBAL",
 				Market:       common.MarketGlobal,
 				Enabled:      true,
 				ConfigStatus: common.ConfigStatusValid,
@@ -67,7 +67,7 @@ func TestBuildRuntimeConfigScopeAndRequiredPlugin(t *testing.T) {
 		Channels: []ChannelInput{
 			{
 				ChannelID:    "huawei_cn",
-				Region:       "domestic",
+				Region:       "CN",
 				Market:       common.MarketCN,
 				Enabled:      true,
 				ConfigStatus: common.ConfigStatusValid,

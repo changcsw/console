@@ -21,7 +21,7 @@
         </div>
       </template>
     </el-table-column>
-    <el-table-column label="区域" width="100">
+    <el-table-column label="发行市场" width="110">
       <template #default="{ row }">{{ regionLabel(row.region) }}</template>
     </el-table-column>
     <el-table-column label="状态" min-width="180">

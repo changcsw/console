@@ -15,27 +15,42 @@ export function configStatusMeta(status: string): { label: string; tone: Tone } 
   return found ? { label: found.label, tone: found.tone } : { label: status, tone: "neutral" };
 }
 
+/** 发行市场中文标签（下拉/表格展示用，值为英文代码，如 "全球（GLOBAL）" 场景自行拼接） */
 export function regionLabel(region: ChannelRegion | string): string {
   switch (region) {
-    case "domestic":
-      return "国内";
-    case "overseas":
-      return "非国内";
+    case "GLOBAL":
+      return "全球";
+    case "CN":
+      return "中国大陆";
+    case "JP":
+      return "日本";
+    case "KR":
+      return "韩国";
+    case "SEA":
+      return "东南亚";
+    case "HMT":
+      return "港澳台";
     default:
       return region;
   }
 }
 
+/** 发行市场带代码的完整展示：全球（GLOBAL） */
+export function regionFullLabel(region: ChannelRegion | string): string {
+  const label = regionLabel(region);
+  return label === region ? region : `${label}（${region}）`;
+}
+
 /**
  * 前端候选过滤用，与后端 domain/channel.ValidateMarketChannelCompatibility 同口径：
- * CN 仅 domestic 兼容；非 CN 仅 overseas 兼容（GLOBAL 仅显示 overseas）。
+ * CN 市场仅允许发行市场为 CN 的渠道；非 CN 市场允许 GLOBAL（全球发行）或与该市场相同的渠道。
  * 服务端会二次强制校验，前端仅用于收窄候选与列表标红。
  */
 export function isMarketChannelCompatible(market: Market, region: ChannelRegion): boolean {
   if (market === "CN") {
-    return region === "domestic";
+    return region === "CN";
   }
-  return region === "overseas";
+  return region === "GLOBAL" || region === market;
 }
 
 /** 运行态不生效原因（compact §运行态标识：hidden / incompatible / invalid_config） */

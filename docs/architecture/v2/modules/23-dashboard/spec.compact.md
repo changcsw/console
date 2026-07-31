@@ -61,12 +61,12 @@ DashboardSummary
 | 最近同步任务 | `sync_jobs`（platform） | `target_env=E AND created_at >= now()-window` | 平台表，按 `target_env` 过滤 |
 | 待发布快照 | `game_config_snapshots` | `status='draft'` | 当前 env |
 | 隐藏/不兼容渠道实例 | `game_channels` | `hidden=TRUE OR 与 market 不兼容` | 当前 env |
-| 兼容性判定辅助 | `channels`（platform） | 关联 `game_channels.channel_id_ref → platform.channels`，取 `region`(domestic/overseas) | 平台级（关联用） |
+| 兼容性判定辅助 | `channels`（platform） | 关联 `game_channels.channel_id_ref → platform.channels`，取 `region`（发行市场，GLOBAL/CN/JP/KR/SEA/HMT） | 平台级（关联用） |
 | 游戏名展示辅助 | `games` | 按 `game_id_ref` 关联取 `name` | 当前 env |
 
 关键口径补充：
 - **配置异常只计 `invalid`，不计 `empty`**：`empty`=未开始配置（正常初始态）；`invalid`=已动手但缺必填/敏感/文件字段或校验未过（含复制创建后 secret/file 被清空，`00` §3.4），是真正待办。
-- **渠道兼容性判定**（同 `00` §3.2）：`market_code='CN'` 仅允许 `region='domestic'`；`market_code!='CN'`（含 `GLOBAL/JP/KR/SEA/HMT`）仅允许 `region='overseas'`。违反即"不兼容"。
+- **渠道兼容性判定**（同 `00` §3.2）：`market_code='CN'` 仅允许 `region='CN'`；`market_code!='CN'`（含 `GLOBAL/JP/KR/SEA/HMT`）允许 `region IN ('GLOBAL', market_code)`。违反即"不兼容"。
 - **同步任务按 `target_env`**：`sync_jobs` 无 `env` 列，站在"当前环境视角"统计以当前 env 为目标的同步记录。
 - 隐藏/不兼容实例"不进快照、不参与同步"由 `channel`/`snapshot`/`sync` 保证（`00` §9）；Dashboard 只读统计数量。
 
@@ -77,7 +77,7 @@ DashboardSummary
 - `ConfigStatus`: empty/invalid/valid（配置异常仅取 invalid）。
 - `SyncJobStatus`: previewed/succeeded/failed（最近同步分桶）。
 - `SnapshotStatus`: draft/published（待发布仅取 draft）。
-- `Market`: GLOBAL/JP/KR/SEA/HMT/CN；`ChannelRegion`: domestic/overseas（兼容性判定）。
+- `Market`: GLOBAL/JP/KR/SEA/HMT/CN；`ChannelRegion`: GLOBAL/CN/JP/KR/SEA/HMT（取值同 Market，兼容性判定）。
 
 本模块私有展示常量（不落库）：
 - `ChannelIssueType`: hidden/incompatible（仅 `channelInstanceIssues.topItems[].issue` 标注）。
@@ -134,8 +134,8 @@ SELECT COUNT(*) AS hidden_count FROM game_channels WHERE hidden = TRUE;
 SELECT COUNT(*) AS incompatible_count
 FROM game_channels gc
 JOIN platform.channels c ON c.id = gc.channel_id_ref
-WHERE (gc.market_code='CN'  AND c.region <> 'domestic')
-   OR (gc.market_code<>'CN' AND c.region <> 'overseas');
+WHERE (gc.market_code='CN'  AND c.region <> 'CN')
+   OR (gc.market_code<>'CN' AND c.region NOT IN ('GLOBAL', gc.market_code));
 ```
 `hidden` 与 `incompatible` **各自独立计数**（单实例可同时命中两类）；后端不去重，明细 `topItems[].issue` 标注命中类型。跳转 `/games` + `{tab:"channels", issue:"hidden|incompatible"}`。明细按 `updated_at DESC` 取前 N。
 

@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	domainchannel "github.com/csw/console/services/admin-api/internal/domain/channel"
 	"github.com/csw/console/services/admin-api/internal/domain/common"
 	"github.com/csw/console/services/admin-api/internal/domain/plugin"
 )
@@ -143,7 +144,7 @@ func isChannelValid(channel ChannelInput) bool {
 	if channel.Hidden || !channel.Enabled || channel.ConfigStatus != common.ConfigStatusValid {
 		return false
 	}
-	if !isMarketRegionCompatible(channel.Market, channel.Region) {
+	if !isChannelRegionCompatible(channel.Market, channel.Region) {
 		return false
 	}
 	if channel.Login != nil && (channel.Login.ConfigStatus != common.ConfigStatusValid || !channel.Login.Enabled) {
@@ -245,12 +246,16 @@ func filterTemplateConfig(config map[string]any, fields []ScopeField, secretFiel
 	return filtered
 }
 
+// isChannelRegionCompatible 渠道发行市场与 market 兼容性（与 domain/channel.IsCompatible 同口径）：
+// CN 市场仅 CN 渠道；非 CN 市场允许 GLOBAL（全球发行）或与该市场相同的渠道。
+func isChannelRegionCompatible(market common.Market, region string) bool {
+	r := domainchannel.ChannelRegion(strings.ToUpper(strings.TrimSpace(region)))
+	return domainchannel.IsCompatible(market, r)
+}
+
+// isMarketRegionCompatible 插件 region（domestic/overseas）与 market 兼容性：CN 仅 domestic，非 CN 仅 overseas。
 func isMarketRegionCompatible(market common.Market, region string) bool {
-	region = strings.ToLower(strings.TrimSpace(region))
-	if market == common.MarketCN {
-		return region == "domestic"
-	}
-	return region == "overseas"
+	return plugin.ValidatePluginRegionCompatibility(string(market), strings.ToLower(strings.TrimSpace(region)))
 }
 
 func asString(v any) string {

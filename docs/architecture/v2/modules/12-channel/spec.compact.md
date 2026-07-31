@@ -30,7 +30,7 @@ code_paths:
 - 实例身份：`(gameId, market, channelId)`；隐藏态 `hidden/hiddenBy/hiddenAt`；配置状态 `config_status`。
 - 兼容性**派生不落库**：由 `market` 与 `channels.region` 经可见性规则实时判定（规则变更不留脏数据）。
 - 不变量：同 `(gameId, market, channelId)` 在所属 schema 内唯一；创建/迁移须满足可见性；`hidden=true ⇒ IncludedInSnapshot/Sync/RuntimeConfig 全 false`。
-- 值对象/纯规则：`Market`(00 §3)、`ChannelRegion`(domestic/overseas)、`ValidateMarketChannelCompatibility(market, region) error`、`ResolveRuntimeFlags(instance) RuntimeFlags`（三态只读标识）。
+- 值对象/纯规则：`Market`(00 §3)、`ChannelRegion`(发行市场，取值同 Market：GLOBAL/CN/JP/KR/SEA/HMT)、`ValidateMarketChannelCompatibility(market, region) error`、`ResolveRuntimeFlags(instance) RuntimeFlags`（三态只读标识）。
 
 ## 数据模型
 平台级表（schema `platform`）2 张：`channels`、`channel_policies`；游戏维度业务表 2 张（每环境 schema 各一份、**不带 env 列**，env 由 search_path 决定）：`game_channels`、`channel_packages`。
@@ -41,12 +41,12 @@ code_paths:
 | --- | --- | --- |
 | channel_id | VARCHAR(64) | UNIQUE, NOT NULL 业务键 |
 | channel_name | VARCHAR(64) | NOT NULL |
-| channel_type | VARCHAR(32) | CHECK in store/oem/web/direct/mini_game |
-| region | VARCHAR(16) | **新增** CHECK in domestic/overseas（D3） |
+| channel_type | VARCHAR(32) | CHECK in store/domestic/mini_game |
+| region | VARCHAR(16) | **新增** CHECK in GLOBAL/CN/JP/KR/SEA/HMT，DEFAULT 'GLOBAL'（D3，取值同 Market） |
 
 UNIQUE(channel_id)。索引建议 (region)、(enabled, sort)。
-迁移：`ALTER TABLE channels ADD COLUMN region VARCHAR(16) NOT NULL DEFAULT 'overseas' CHECK (region IN ('domestic','overseas'));` 回填后可去 DEFAULT。
-seed region：google/apple=overseas；huawei_cn/xiaomi_cn/oppo_cn/vivo_cn/wechat_mini_game/douyin_mini_game=domestic。
+迁移：region 最初以 domestic/overseas 引入；迁移 000019 起收敛为发行市场六枚举（数据映射 domestic→CN、overseas→GLOBAL、oem→domestic、web/direct→store）。
+seed region：google/apple=GLOBAL；huawei_cn/xiaomi_cn/oppo_cn/vivo_cn/wechat_mini_game/douyin_mini_game=CN。
 
 ### channel_policies（平台级）
 | 列 | 类型 | 约束 |
@@ -99,8 +99,8 @@ seed：huawei_cn/xiaomi_cn/oppo_cn/vivo_cn ⇒ login_mode=channel_only, payment_
 | 项 | 取值 / 默认 |
 | --- | --- |
 | Market | GLOBAL/JP/KR/SEA/HMT/CN，默认 GLOBAL |
-| ChannelRegion | domestic/overseas（seed 固定，无默认） |
-| ChannelType | store/oem/web/direct/mini_game（无默认） |
+| ChannelRegion | GLOBAL/CN/JP/KR/SEA/HMT（取值同 Market），默认 GLOBAL |
+| ChannelType | store/domestic/mini_game（无默认） |
 | LoginMode | channel_only/account_system，默认 account_system |
 | PaymentMode | channel_only/hybrid/cashier_only，默认 hybrid |
 | ConfigStatus | empty/invalid/valid，新建默认 empty；**复制创建后强制 invalid** |
@@ -121,11 +121,11 @@ seed：huawei_cn/xiaomi_cn/oppo_cn/vivo_cn ⇒ login_mode=channel_only, payment_
 ### 可见性 / 兼容性（纯函数，服务端强制）
 ```text
 ValidateMarketChannelCompatibility(market, region):
-  if market == CN and region != domestic -> error MARKET_CHANNEL_INCOMPATIBLE
-  if market != CN and region != overseas -> error MARKET_CHANNEL_INCOMPATIBLE
+  if market == CN and region != CN -> error MARKET_CHANNEL_INCOMPATIBLE
+  if market != CN and region not in (GLOBAL, market) -> error MARKET_CHANNEL_INCOMPATIBLE
   return ok
 ```
-- 新增时按目标 market 过滤候选渠道（前端），服务端必须二次校验。GLOBAL 仅显示 overseas。
+- 新增时按目标 market 过滤候选渠道（前端），服务端必须二次校验。非 CN market 显示 GLOBAL（全球发行）及该 market 专属渠道。
 - 已存在实例用同一函数派生兼容性；不兼容 ⇒ 列表标红、提示"不兼容当前 market"，**不自动删除、保留配置**。
 
 ### 创建（空白 / 复制）

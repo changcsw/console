@@ -10,16 +10,14 @@ import type {
 // 这里只负责展示层文案。
 
 const CHANNEL_TYPE_LABELS: Record<ChannelType, string> = {
-  store: "应用商店",
-  oem: "手机厂商",
-  web: "网页",
-  direct: "直充",
+  store: "海外商店",
+  domestic: "国内渠道",
   mini_game: "小游戏"
 };
 
 const LOGIN_MODE_LABELS: Record<LoginMode, string> = {
   channel_only: "仅渠道登录",
-  account_system: "自有账号体系"
+  account_system: "自有账号"
 };
 
 const PAYMENT_MODE_LABELS: Record<PaymentMode, string> = {

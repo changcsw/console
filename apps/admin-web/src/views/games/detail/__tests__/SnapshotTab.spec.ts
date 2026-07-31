@@ -65,7 +65,7 @@ function previewPayload(): DownloadSnapshotResponse {
           channels: [
             {
               channelId: "google",
-              region: "overseas",
+              region: "GLOBAL",
               sourceMarket: "GLOBAL",
               login: { appId: "app-global", appSecret: "PLAINTEXT_GLOBAL_SECRET" }
             }
@@ -77,7 +77,7 @@ function previewPayload(): DownloadSnapshotResponse {
           channels: [
             {
               channelId: "google",
-              region: "overseas",
+              region: "GLOBAL",
               sourceMarket: "JP",
               iap: { issuerId: "iss-jp", privateKey: "PLAINTEXT_JP_KEY" }
             }

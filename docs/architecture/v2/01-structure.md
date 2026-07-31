@@ -224,9 +224,9 @@ apps/admin-web/src/
   - 业务表唯一键**不含 `env`**（D1）；`game_channels` 唯一键 `(game_id_ref, market_code, channel_id_ref)` 并加 `market_code`（D2）。
   - `channels` 加 `region` 并回填 seed（D3，平台表，建在 `platform`）。
   - 业务表→平台表的跨 schema 外键指向 `platform.<表>`；业务表→业务表外键在本环境 schema 内（§4.3）。
-- seed（基础数据）固定写入 `platform` schema，见 `00` 各表 seed 值。`region` 回填：
-  - `domestic`：`huawei_cn` / `xiaomi_cn` / `oppo_cn` / `vivo_cn` / `wechat_mini_game` / `douyin_mini_game`
-  - `overseas`：`google` / `apple`
+- seed（基础数据）固定写入 `platform` schema，见 `00` 各表 seed 值。`region`（发行市场）回填：
+  - `CN`：`huawei_cn` / `xiaomi_cn` / `oppo_cn` / `vivo_cn` / `wechat_mini_game` / `douyin_mini_game`
+  - `GLOBAL`：`google` / `apple`
 - seed 必须幂等（`ON CONFLICT DO NOTHING`）。
 
 ---

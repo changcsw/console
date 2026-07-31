@@ -65,8 +65,8 @@ func ValidateChannelMaster(c Channel) []ValidationIssue {
 	if !IsValidChannelType(c.ChannelType) {
 		issues = append(issues, ValidationIssue{Field: "channelType", Rule: "enum", Message: "渠道类型非法"})
 	}
-	if c.Region != ChannelRegionDomestic && c.Region != ChannelRegionOverseas {
-		issues = append(issues, ValidationIssue{Field: "region", Rule: "enum", Message: "region 只能为 domestic/overseas"})
+	if !c.Region.IsKnown() {
+		issues = append(issues, ValidationIssue{Field: "region", Rule: "enum", Message: "发行市场只能为 GLOBAL/CN/JP/KR/SEA/HMT"})
 	}
 	if c.Sort < 0 || c.Sort > 9999 {
 		issues = append(issues, ValidationIssue{Field: "sort", Rule: "range", Message: "排序值需在 0-9999 之间"})

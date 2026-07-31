@@ -141,14 +141,14 @@ ChannelInstanceIssuesMetric
 | 最近同步任务状态 | `sync_jobs`（platform） | `status`, `target_env`, `game_id_ref`, `executed_at`, `created_at` | `target_env = E AND created_at >= now()-window` | 平台表，按 `target_env` 过滤 |
 | 待发布快照 | `game_config_snapshots` | `status`, `game_id_ref`, `config_version`, `generated_at` | `status = 'draft'` | 当前环境 schema |
 | 不兼容/隐藏渠道实例 | `game_channels` | `hidden`, `market_code`, `game_id_ref`, `channel_id_ref` | `hidden = TRUE OR 与 market 不兼容` | 当前环境 schema |
-| 渠道兼容性判定辅助 | `channels`（platform） | `region`（`domestic`/`overseas`） | 关联 `game_channels.channel_id_ref` → `platform.channels` | 平台级（关联用） |
+| 渠道兼容性判定辅助 | `channels`（platform） | `region`（发行市场，取值同 `Market`） | 关联 `game_channels.channel_id_ref` → `platform.channels` | 平台级（关联用） |
 | 游戏名展示辅助 | `games` | `id`, `name` | 按 `game_id_ref` 关联取名 | 当前环境 schema |
 
 ### 3.3 关键过滤口径补充
 
 - **配置异常只统计 `invalid`，不统计 `empty`**：`empty` 表示尚未开始配置（正常初始态），`invalid` 表示"已动手但缺必填/敏感/文件字段或校验未过"（含复制创建后 secret/file 被清空，见 `00` §3.4），是真正需要人工修复的待办。
 - **被隐藏/不兼容实例的"不进快照、不参与同步"** 已由 `channel` / `snapshot` / `sync` 保证（`00` §9 红线）。Dashboard 在此**只读统计其数量**，提醒运营这些实例游离在最终配置之外。
-- **渠道兼容性判定**（与 `00` §3.2 一致）：`market_code = 'CN'` 仅允许 `region = 'domestic'`；`market_code != 'CN'`（含 `GLOBAL/JP/KR/SEA/HMT`）仅允许 `region = 'overseas'`。违反即"不兼容"。
+- **渠道兼容性判定**（与 `00` §3.2 一致）：`market_code = 'CN'` 仅允许 `region = 'CN'`；`market_code != 'CN'`（含 `GLOBAL/JP/KR/SEA/HMT`）允许 `region IN ('GLOBAL', market_code)`。违反即"不兼容"。
 - **同步任务按 `target_env` 而非 `env`**：`sync_jobs` 无 `env` 列，但有 `source_env`/`target_env`。Dashboard 站在"当前环境视角"统计**以当前 env 为目标**的同步记录（例如运行在 production 时看流入 production 的同步结果）。
 
 ### 3.4 索引与性能（不新增，仅利用既有）
@@ -169,7 +169,7 @@ Dashboard 仅依赖来源表既有索引（如 `idx_game_config_snapshots_game_i
 | `SyncJobStatus` | `previewed` / `succeeded` / `failed` | 最近同步任务按此分桶 |
 | `SnapshotStatus` | `draft` / `published` | 待发布快照仅取 `draft` |
 | `Market` | `GLOBAL` / `JP` / `KR` / `SEA` / `HMT` / `CN` | 渠道兼容性判定 |
-| `ChannelRegion` | `domestic` / `overseas` | 渠道兼容性判定 |
+| `ChannelRegion` | `GLOBAL` / `CN` / `JP` / `KR` / `SEA` / `HMT` | 渠道兼容性判定 |
 
 > 注意：DDL 草案里 `game_config_snapshots.status` 为 `VARCHAR(32) DEFAULT 'draft'`，v2 取值对齐 `00` §3 的 `SnapshotStatus`（`draft`/`published`）。Dashboard 的"待发布"= `status='draft'`。
 
@@ -310,12 +310,12 @@ SELECT COUNT(*) AS hidden_count
 FROM game_channels
 WHERE hidden = TRUE;
 
--- 不兼容实例（CN 仅允许 domestic；非 CN 仅允许 overseas）
+-- 不兼容实例（CN 仅允许 region=CN；非 CN 允许 region ∈ {GLOBAL, market}）
 SELECT COUNT(*) AS incompatible_count
 FROM game_channels gc
 JOIN platform.channels c ON c.id = gc.channel_id_ref
-WHERE (gc.market_code = 'CN'  AND c.region <> 'domestic')
-   OR (gc.market_code <> 'CN' AND c.region <> 'overseas');
+WHERE (gc.market_code = 'CN'  AND c.region <> 'CN')
+   OR (gc.market_code <> 'CN' AND c.region NOT IN ('GLOBAL', gc.market_code));
 ```
 
 - **是否相交**：`hidden` 与 `incompatible` 在统计上**各自独立计数**（一个实例可能同时既隐藏又不兼容）。卡片分别展示两个数字；若需"去重总数"，由前端用并集说明文案处理，后端不强行去重（明细 `topItems[].issue` 会标注命中哪类，单实例命中两类时列两条标注或合并标注，见前端）。
@@ -610,7 +610,7 @@ Authorization: Bearer <accessToken>
         "gameId": "g_swordman",
         "gameName": "剑客世界",
         "channelId": "google",
-        "channelRegion": "overseas",
+        "channelRegion": "GLOBAL",
         "marketCode": "CN",
         "hidden": false,
         "issues": ["incompatible"]
@@ -782,7 +782,7 @@ ChannelInstanceIssues(ctx, issue?, page) -> Page[ChannelIssueItem]
 - **配置异常口径**：构造 `empty/invalid/valid` 三态，断言只计 `invalid`；六来源分桶数正确、`invalidTotal`=分桶之和。
 - **同步任务窗口**：构造不同 `created_at`，断言 `range` 边界（含/不含 `now()-window`）；`byStatus` 缺桶补 0；`lastFailedAt` 取最近失败。
 - **快照口径**：只计 `draft`，`published` 不计。
-- **渠道兼容性判定**：覆盖 `CN+domestic`(兼容)、`CN+overseas`(不兼容)、`GLOBAL+overseas`(兼容)、`JP+domestic`(不兼容)；`hidden` 与 `incompatible` 各自独立计数。
+- **渠道兼容性判定**：覆盖 `CN+CN`(兼容)、`CN+GLOBAL`(不兼容)、`GLOBAL+GLOBAL`(兼容)、`JP+GLOBAL`/`JP+JP`(兼容)、`JP+KR`(不兼容)；`hidden` 与 `incompatible` 各自独立计数。
 - **权限裁剪**：缺某来源读权限时该指标 `permitted=false`、计数 0、明细空，不抛错。
 - **零写入**：用 mock 仓储断言无任何写方法被调用、无 `audit_logs` 写入。
 - **topItems**：`withTopItems=false` 时恒为空数组；`true` 时按约定排序、按 `topN`（上限 20）截断；`gameName` 批量回查无 N+1。

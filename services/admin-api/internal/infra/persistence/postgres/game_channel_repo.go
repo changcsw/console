@@ -86,7 +86,8 @@ func (r *GameChannelRepo) GetByID(ctx context.Context, id int64) (domainchannel.
 	return inst, nil
 }
 
-// List 分页/过滤实例列表。compatible 在 SQL 内按 (market=='CN') == (region=='domestic') 派生过滤。
+// List 分页/过滤实例列表。compatible 在 SQL 内按发行市场口径派生过滤（与 domain/channel.IsCompatible 同规则）：
+// market=='CN' ⇔ region=='CN'；market!='CN' ⇔ region IN ('GLOBAL', market)。
 func (r *GameChannelRepo) List(ctx context.Context, q dto.ListMarketChannelsQuery) ([]domainchannel.GameMarketChannel, int, error) {
 	where := []string{"g.game_id = $1"}
 	args := []any{q.GameID}
@@ -110,11 +111,12 @@ func (r *GameChannelRepo) List(ctx context.Context, q dto.ListMarketChannelsQuer
 		where = append(where, "gc.hidden = FALSE")
 	}
 	if q.Compatible != nil {
-		// compatible 派生：market=CN ⇔ region=domestic。
+		compatibleCond := `((gc.market_code = 'CN' AND c.region = 'CN')
+		   OR (gc.market_code <> 'CN' AND c.region IN ('GLOBAL', gc.market_code)))`
 		if *q.Compatible {
-			where = append(where, "((gc.market_code = 'CN') = (c.region = 'domestic'))")
+			where = append(where, compatibleCond)
 		} else {
-			where = append(where, "((gc.market_code = 'CN') <> (c.region = 'domestic'))")
+			where = append(where, "(NOT "+compatibleCond+")")
 		}
 	}
 	cond := strings.Join(where, " AND ")

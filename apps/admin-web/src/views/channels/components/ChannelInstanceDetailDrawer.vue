@@ -34,7 +34,7 @@
           />
 
           <el-descriptions :column="1" border size="small" class="block__desc">
-            <el-descriptions-item label="区域">{{ regionLabel(detail.region) }}</el-descriptions-item>
+            <el-descriptions-item label="发行市场">{{ regionLabel(detail.region) }}</el-descriptions-item>
             <el-descriptions-item label="复制来源">{{ detail.copiedFromMarket || "—" }}</el-descriptions-item>
             <el-descriptions-item label="最近校验">{{ detail.lastCheckMessage || "—" }}</el-descriptions-item>
             <el-descriptions-item label="登录模式">{{ detail.loginMode || "—" }}</el-descriptions-item>

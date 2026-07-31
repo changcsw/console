@@ -34,7 +34,7 @@ const MARKET_CHANNELS = {
       gameId: "100001",
       market: "GLOBAL",
       channelId: "google",
-      region: "overseas",
+      region: "GLOBAL",
       compatible: true,
       hidden: false,
       configStatus: "valid",

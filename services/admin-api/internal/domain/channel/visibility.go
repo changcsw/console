@@ -6,12 +6,17 @@ import (
 	"github.com/csw/console/services/admin-api/internal/domain/common"
 )
 
-// ChannelRegion 渠道国内/非国内属性（00 §3.1 ChannelRegion，D3）。
+// ChannelRegion 渠道发行市场属性（00 §3.1 ChannelRegion，D3）。取值与 common.Market 同集：
+// GLOBAL=全球发行（不含中国大陆），CN=中国大陆，JP/KR/SEA/HMT=对应市场专属。
 type ChannelRegion string
 
 const (
-	ChannelRegionDomestic ChannelRegion = "domestic"
-	ChannelRegionOverseas ChannelRegion = "overseas"
+	ChannelRegionGlobal ChannelRegion = "GLOBAL"
+	ChannelRegionCN     ChannelRegion = "CN"
+	ChannelRegionJP     ChannelRegion = "JP"
+	ChannelRegionKR     ChannelRegion = "KR"
+	ChannelRegionSEA    ChannelRegion = "SEA"
+	ChannelRegionHMT    ChannelRegion = "HMT"
 )
 
 // 纯规则错误（app 层据此包装为统一错误码）。
@@ -27,7 +32,7 @@ var (
 // IsKnown 校验 region 枚举。
 func (r ChannelRegion) IsKnown() bool {
 	switch r {
-	case ChannelRegionDomestic, ChannelRegionOverseas:
+	case ChannelRegionGlobal, ChannelRegionCN, ChannelRegionJP, ChannelRegionKR, ChannelRegionSEA, ChannelRegionHMT:
 		return true
 	default:
 		return false
@@ -35,8 +40,8 @@ func (r ChannelRegion) IsKnown() bool {
 }
 
 // ValidateMarketChannelCompatibility 可见性/兼容性纯规则（compact §业务规则，服务端强制二次校验）：
-//   - market==CN  ⇒ 仅允许 domestic；
-//   - market!=CN  ⇒ 仅允许 overseas（含 GLOBAL/JP/KR/SEA/HMT）。
+//   - market==CN  ⇒ 仅允许发行市场 CN 的渠道（中国大陆渠道体系独立）；
+//   - market!=CN  ⇒ 允许发行市场 GLOBAL（全球发行）或与该 market 相同的渠道。
 func ValidateMarketChannelCompatibility(market common.Market, region ChannelRegion) error {
 	if !market.IsKnown() {
 		return ErrUnknownMarket
@@ -44,10 +49,13 @@ func ValidateMarketChannelCompatibility(market common.Market, region ChannelRegi
 	if !region.IsKnown() {
 		return ErrUnknownRegion
 	}
-	if market.IsCN() && region != ChannelRegionDomestic {
-		return ErrMarketChannelIncompatible
+	if market.IsCN() {
+		if region != ChannelRegionCN {
+			return ErrMarketChannelIncompatible
+		}
+		return nil
 	}
-	if !market.IsCN() && region != ChannelRegionOverseas {
+	if region != ChannelRegionGlobal && region != ChannelRegion(market) {
 		return ErrMarketChannelIncompatible
 	}
 	return nil

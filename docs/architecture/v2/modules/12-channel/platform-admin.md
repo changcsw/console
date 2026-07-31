@@ -88,8 +88,8 @@ impacts: [channel-login, product]
 | 字段 | 不可改的原因 |
 | --- | --- |
 | `channelId` | 它是**渠道实例的引用键**：`game_channels.channel_id_ref → platform.channels(id)` 的业务语义、模版归属、支付路由选择器、快照与同步的 diff key 都以 `channelId` 表达。改它等于悄悄改写所有游戏的渠道身份。 |
-| `region` | 它决定**与 market 的兼容性**（父文档 §5.1：`market=CN ⇒ domestic`、`market!=CN ⇒ overseas`）。兼容性是**实时派生、不落库**的，改 `region` 会让既有渠道实例**集体失配**（整片标红、退出快照/同步），且没有任何"迁移"语义可言。 |
-| `channelType` | 渠道类型是分类事实（`store/oem/web/direct/mini_game`），下游按类型做展示与分组；改类型属于"换了一个渠道"，语义上应另建。 |
+| `region` | 它决定**与 market 的兼容性**（父文档 §5.1：`market=CN ⇒ region=CN`、`market!=CN ⇒ region ∈ {GLOBAL, market}`）。兼容性是**实时派生、不落库**的，改 `region` 会让既有渠道实例**集体失配**（整片标红、退出快照/同步），且没有任何"迁移"语义可言。 |
+| `channelType` | 渠道类型是分类事实（`store/domestic/mini_game`），下游按类型做展示与分组；改类型属于"换了一个渠道"，语义上应另建。 |
 
 需要换身份 ⇒ **另建渠道**，把旧渠道 `enabled=false` 下线。可改的只有：`channelName`、`enabled`、`sort`、`loginMode`、`paymentMode`、`loginLocked`、`paymentLocked`。
 
@@ -121,7 +121,7 @@ platform.channel_iap_templates(四件套) ──────┘        └─►
 
 - 入口：顶部菜单「渠道管理」（路由 `channels`，`meta.perm = platform_channel.read`）→ `views/channels/ChannelsView.vue`。**不需要先选游戏**，页面标题即「渠道管理」（不再是"渠道实例管理"）。
 - 结构：`PageCard` + 两个页签
-  - 「渠道」`components/platform/PlatformChannelsPanel.vue`：关键字 / `region` / 渠道类型 / 启用状态过滤 + 分页表格（列含类型、region、登录/支付模式、锁定位、`登录 N / IAP M` 模版数、启用状态）；抽屉承载新建/编辑，编辑态把 `channelId` / `channelType` / `region` 置灰并写明原因（§4）。
+  - 「渠道」`components/platform/PlatformChannelsPanel.vue`：关键字 / `region` / 渠道类型 / 启用状态过滤 + 分页表格（列含类型、region、登录/支付模式、锁定位、`登录 N / IAP M` 模版数、启用状态）；行操作除「编辑」外还有「渠道模版」，点击直接切到「渠道模版」页签并定位到该渠道；抽屉承载新建/编辑，编辑态把 `channelId` / `channelType` / `region` 置灰并写明原因（§4）。
   - 「渠道模版」`components/platform/ChannelTemplatesPanel.vue`：先选渠道（模版隶属渠道，未选时给空态引导），再按 `kind` 过滤版本列表（列含版本、种类、字段数、敏感/文件字段数、启用、**是否生效**、更新时间）；抽屉内 `components/platform/TemplateQuartetEditor.vue` 编辑四件套，草稿状态与前端预校验在 `components/platform/templateDraft.ts`。
 - 写操作按钮统一挂 `v-perm`（`platform_channel.write` / `channel_template.write`），无权限置灰（`01 §5`）。
 - **不显示 `EnvironmentBadge`**：`platform.*` 跨环境共享（§2.1），与 `views/system/SystemView.vue` 同口径。

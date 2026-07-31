@@ -66,7 +66,7 @@ const GOOGLE = {
   channelId: "google",
   channelName: "Google Play",
   channelType: "store",
-  region: "overseas",
+  region: "GLOBAL",
   enabled: true,
   sort: 1,
   loginMode: "channel_only",
@@ -81,8 +81,8 @@ const GOOGLE = {
 const HUAWEI = {
   channelId: "huawei_cn",
   channelName: "华为应用市场",
-  channelType: "oem",
-  region: "domestic",
+  channelType: "domestic",
+  region: "CN",
   enabled: true,
   sort: 2,
   loginMode: "channel_only",
@@ -181,20 +181,18 @@ async function gotoTemplatesTab(page: Page) {
   await page.getByRole("option", { name: "华为应用市场（huawei_cn）" }).click();
 }
 
-test("渠道管理页说明其为平台级主数据，并展示渠道列表与模版计数", async ({ page }) => {
+test("渠道管理页直接展示渠道列表与模版计数（无冗余简介）", async ({ page }) => {
   await setup(page);
   await gotoPlatformChannels(page);
-
-  // 页面定位说明：系统管理员维护、与游戏无关
-  await expect(page.getByText(/系统管理员维护的平台级渠道主数据/)).toBeVisible();
-  await expect(page.getByText(/与具体游戏无关/)).toBeVisible();
 
   // exact 避免与「Google Play」渠道名单元格撞名（严格模式会报多元素）。
   await expect(page.getByRole("cell", { name: "google", exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "huawei_cn", exact: true })).toBeVisible();
-  // 枚举中文标签 + 锁定位 + 模版计数
-  await expect(page.getByText("应用商店").first()).toBeVisible();
-  await expect(page.getByText("手机厂商").first()).toBeVisible();
+  // 枚举中文标签 + 发行市场 + 锁定位 + 模版计数
+  await expect(page.getByText("海外商店").first()).toBeVisible();
+  await expect(page.getByText("国内渠道").first()).toBeVisible();
+  await expect(page.getByText("全球（GLOBAL）").first()).toBeVisible();
+  await expect(page.getByText("中国大陆（CN）").first()).toBeVisible();
   await expect(page.getByText("登录锁定")).toBeVisible();
   await expect(page.getByText("登录 2 / IAP 0")).toBeVisible();
 
@@ -206,15 +204,14 @@ test("筛选条件下发到平台渠道查询", async ({ page }) => {
   await gotoPlatformChannels(page);
 
   const queryPromise = page.waitForRequest(
-    (req) => req.url().includes("/api/admin/platform/channels?") && req.url().includes("region=domestic")
+    (req) => req.url().includes("/api/admin/platform/channels?") && req.url().includes("region=CN")
   );
   await page.getByPlaceholder("渠道 ID / 渠道名").fill("huawei");
   await page.locator(".filter-select").first().click();
-  // exact 避免匹配到 overseas 的「非国内」选项。
-  await page.getByRole("option", { name: "国内", exact: true }).click();
+  await page.getByRole("option", { name: "中国大陆（CN）" }).click();
   const req = await queryPromise;
   expect(req.url()).toContain("keyword=huawei");
-  expect(req.url()).toContain("region=domestic");
+  expect(req.url()).toContain("region=CN");
 });
 
 test("新建渠道抽屉提交全字段", async ({ page }) => {
@@ -234,7 +231,43 @@ test("新建渠道抽屉提交全字段", async ({ page }) => {
   expect(body).toContain("vivo_cn");
   expect(body).toContain("\"channelType\"");
   expect(body).toContain("\"region\"");
+  // 未改动时下发的默认值：类型=海外商店、发行市场=全球（GLOBAL）
+  expect(body).toContain("\"channelType\":\"store\"");
+  expect(body).toContain("\"region\":\"GLOBAL\"");
   await expect(page.locator(".el-message").getByText("已创建渠道")).toBeVisible();
+});
+
+test("新建渠道抽屉：渠道类型仅三类，发行市场六项且默认全球（GLOBAL）", async ({ page }) => {
+  await setup(page);
+  await gotoPlatformChannels(page);
+
+  await page.getByRole("button", { name: "新建渠道" }).click();
+  const drawer = page.locator(".el-drawer");
+
+  // 渠道类型：仅 海外商店 / 国内渠道 / 小游戏（下拉 teleport 有出场动画，先等首选项可见再取文本）
+  await drawer.locator(".el-form-item").filter({ hasText: "渠道类型" }).locator(".el-select").click();
+  const typeDropdown = page.locator(".el-select-dropdown:visible");
+  await expect(typeDropdown.getByRole("option").first()).toBeVisible();
+  expect(await typeDropdown.getByRole("option").allTextContents()).toEqual(["海外商店", "国内渠道", "小游戏"]);
+  await page.keyboard.press("Escape");
+  await expect(typeDropdown).toBeHidden();
+
+  // 发行市场：固定顺序 全球→中国大陆→日本→韩国→东南亚→港澳台，默认选中 全球（GLOBAL）
+  await drawer.locator(".el-form-item").filter({ hasText: "发行市场" }).locator(".el-select").click();
+  const regionDropdown = page.locator(".el-select-dropdown:visible");
+  await expect(regionDropdown.getByRole("option").first()).toBeVisible();
+  expect(await regionDropdown.getByRole("option").allTextContents()).toEqual([
+    "全球（GLOBAL）",
+    "中国大陆（CN）",
+    "日本（JP）",
+    "韩国（KR）",
+    "东南亚（SEA）",
+    "港澳台（HMT）"
+  ]);
+  await expect(
+    drawer.locator(".el-form-item").filter({ hasText: "发行市场" }).getByText("全球（GLOBAL）", { exact: true })
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
 });
 
 test("编辑渠道时 channelId / 类型 / region 只读并给出不可改说明", async ({ page }) => {
@@ -244,7 +277,7 @@ test("编辑渠道时 channelId / 类型 / region 只读并给出不可改说明
   await page.getByRole("button", { name: "编辑" }).first().click();
   const drawer = page.locator(".el-drawer");
   await expect(drawer.getByText(/渠道 ID 是渠道实例的引用键/)).toBeVisible();
-  await expect(drawer.getByText(/region 决定与 market 的兼容性/)).toBeVisible();
+  await expect(drawer.getByText(/发行市场决定与 market 的兼容性/)).toBeVisible();
   // 身份字段被禁用
   await expect(drawer.locator("input[disabled]").first()).toBeVisible();
 
@@ -256,6 +289,19 @@ test("编辑渠道时 channelId / 类型 / region 只读并给出不可改说明
   expect(body).not.toContain("\"channelType\"");
   expect(body).not.toContain("\"region\"");
   expect(body).toContain("\"channelName\"");
+});
+
+test("渠道行操作「渠道模版」直达该渠道的模版列表", async ({ page }) => {
+  await setup(page);
+  await gotoPlatformChannels(page);
+
+  await page.getByRole("row", { name: /huawei_cn/ }).getByRole("button", { name: "渠道模版" }).click();
+
+  // 已切到模版页签，渠道选择器定位到 huawei_cn 并自动拉取其模版版本
+  const pane = page.locator("#pane-templates");
+  await expect(pane.locator(".filter-channel")).toContainText("华为应用市场", { timeout: 60_000 });
+  await expect(pane.getByRole("cell", { name: "v1" })).toBeVisible();
+  await expect(pane.getByRole("cell", { name: "v2" })).toBeVisible();
 });
 
 test("渠道模版页签标记生效版本，停用版本不生效", async ({ page }) => {

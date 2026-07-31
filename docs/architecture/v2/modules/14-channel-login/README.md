@@ -28,7 +28,7 @@ children: []
 
 | 维度 | `account-auth` 自有账号认证 | `channel-login` 渠道强制登录（本模块） |
 | --- | --- | --- |
-| 触发场景 | 渠道 `login_mode=account_system`（如 `google` / `apple` / web / direct） | 渠道 `login_mode=channel_only`（如 `huawei_cn` / `xiaomi_cn` / `oppo_cn` / `vivo_cn`） |
+| 触发场景 | 渠道 `login_mode=account_system`（如 `google` / `apple`） | 渠道 `login_mode=channel_only`（如 `huawei_cn` / `xiaomi_cn` / `oppo_cn` / `vivo_cn`） |
 | 登录主体 | 游戏自有账号体系（游客 / 手机号 / 邮箱 / Google / Apple 第三方登录） | 渠道自身的账号体系（华为账号、小米账号…），玩家被强制走渠道登录 |
 | 字典主数据 | `account_auth_types`、`channel_account_auth_types` | 复用 `channels` + `channel_policies`（无独立"登录类型字典"） |
 | 模板表 | `account_auth_templates`（按 `auth_type` 维度） | `channel_login_templates`（按 `channel` 维度） |
@@ -209,7 +209,7 @@ CREATE TABLE game_channel_login_configs (
 
 > 本模块消费的 `channel_login_templates` 为**简单模板表**（`00` §4.4.1），不涉及 `VersionStatus` 三态机；版本控制仅用 `enabled` + `template_version`。
 
-> `channel_only` 渠道当前 seed 为国内联运渠道（`00`/`01` §6 中 `region=domestic`）：`huawei_cn` / `xiaomi_cn` / `oppo_cn` / `vivo_cn`（小游戏 `wechat_mini_game` / `douyin_mini_game` 的 `login_mode` 以 `channel_policies` seed 为准）。判断是否需要本模块的唯一依据是 `channel_policies.login_mode == 'channel_only'`，而非渠道名硬编码。
+> `channel_only` 渠道当前 seed 为国内联运渠道（`00`/`01` §6 中 `region=CN`）：`huawei_cn` / `xiaomi_cn` / `oppo_cn` / `vivo_cn`（小游戏 `wechat_mini_game` / `douyin_mini_game` 的 `login_mode` 以 `channel_policies` seed 为准）。判断是否需要本模块的唯一依据是 `channel_policies.login_mode == 'channel_only'`，而非渠道名硬编码。
 
 ### 4.2 本模块字段默认值（穷尽）
 
@@ -275,7 +275,7 @@ CREATE TABLE game_channel_login_configs (
 - 新增某 market 渠道实例时（`channel` 的"新增渠道"流程）允许"从其它 market 同渠道复制初始值"：仅复制普通字段；**secret/file 必须清空**；复制后两实例不再联动；新实例初始 `config_status=invalid`（§5.3）。本模块在被复制写入时按 §5.2 重新校验。
 - 客户端最终配置合并（`snapshot`）按 market 进行：具体海外 market 与 `GLOBAL` 存在同一登录配置实例时，**具体 market 实例整体覆盖 GLOBAL 实例**（实例级覆盖，非字段级，见 spec / `00` §3.2）。被隐藏/不兼容/`config_status != valid` 或 `enabled=false` 的实例不进入合并。
 
-> 实务说明：`channel_only` 渠道当前均为国内渠道（`region=domestic`），按 `00` §3.2 可见性规则只在 `market=CN` 出现，因此跨 market 覆盖在本模块多数情况下不发生；但模型层面仍遵循实例级覆盖规则，不做特例。
+> 实务说明：`channel_only` 渠道当前均为国内渠道（`region=CN`），按 `00` §3.2 可见性规则只在 `market=CN` 出现，因此跨 market 覆盖在本模块多数情况下不发生；但模型层面仍遵循实例级覆盖规则，不做特例。
 
 ### 5.5 登录锁定（`login_locked`）语义
 

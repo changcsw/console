@@ -44,7 +44,7 @@ children: []
 - `GameChannelPluginConfig`（游戏维度业务表，每环境独立 schema）：挂在 `game_channels` 行上的某插件配置；一个渠道实例可挂**多个**插件。
 - `ChannelPackagePluginOverride`（游戏维度业务表，每环境独立 schema）：渠道包级覆盖；默认 `inherit_channel_config=true` 沿用渠道实例的插件集合与配置。
 - 纯规则：
-  - `ValidatePluginRegionCompatibility(market, region)`：与 `12-channel` 的渠道可见性同源（`market=CN ⇒ domestic`；`market!=CN ⇒ overseas`），服务端强制。
+  - `ValidatePluginRegionCompatibility(market, region)`：插件 region 为**国内/海外二分**（与渠道的发行市场枚举是两个维度，勿混用）：`market=CN ⇒ domestic`；`market!=CN ⇒ overseas`，服务端强制。
   - `ResolvePluginConfigStatus(enabled, template, config)`：勾选但缺必填/敏感/文件字段 ⇒ `invalid`（遵循 `00 §3.4`）。
 
 ---
@@ -158,7 +158,7 @@ children: []
 ## 5. 业务规则
 
 ### 5.1 国内/海外可见性
-- 与 `12-channel §5.1` 同源：`market=CN ⇒ plugin.region=domestic`；`market!=CN ⇒ overseas`。前端按 market 过滤候选插件，服务端二次校验，不兼容 ⇒ `MARKET_CHANNEL_INCOMPATIBLE`（复用错误码语义）。
+- 插件 region 兼容性（插件国内/海外二分，独立于渠道发行市场）：`market=CN ⇒ plugin.region=domestic`；`market!=CN ⇒ overseas`。前端按 market 过滤候选插件，服务端二次校验，不兼容 ⇒ `MARKET_CHANNEL_INCOMPATIBLE`（复用错误码语义）。
 
 ### 5.2 必接 / 可勾选
 - `required=true`：该渠道下此插件必须接入；前端引导补齐，未达 `valid` 时所属渠道实例异常。

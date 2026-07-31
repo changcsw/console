@@ -1,7 +1,8 @@
 import { request } from "@/api/http";
 
 export type ChannelConfigStatus = "empty" | "invalid" | "valid";
-export type ChannelRegion = "domestic" | "overseas";
+/** 渠道发行市场：取值与 Market 同集 */
+export type ChannelRegion = "GLOBAL" | "CN" | "JP" | "KR" | "SEA" | "HMT";
 
 export interface GameMarketChannelListItem {
   id: string;

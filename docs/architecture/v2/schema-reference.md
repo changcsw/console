@@ -59,7 +59,7 @@ children: []
 
 | 表 | schema | 关键字段 |
 | --- | --- | --- |
-| `channels` | platform | `channel_id`(UNIQUE) · `channel_name` · `channel_type`(store/oem/web/direct/mini_game) · **`region`(domestic/overseas, D3)** · `enabled` · `sort` |
+| `channels` | platform | `channel_id`(UNIQUE) · `channel_name` · `channel_type`(store/domestic/mini_game) · **`region`(GLOBAL/CN/JP/KR/SEA/HMT, D3)** · `enabled` · `sort` |
 | `channel_policies` | platform | `channel_id_ref`(UNIQUE) · `login_mode`(channel_only/account_system) · `payment_mode`(channel_only/hybrid/cashier_only) · `login_locked` · `payment_locked` |
 | `game_channels` | env | `game_id_ref` · **`market_code`(D2)** · `channel_id_ref`(→platform.channels) · `enabled` · `hidden`/`hidden_by`/`hidden_at` · `config_status`(empty/invalid/valid) · `last_check_at`/`last_check_message` · `copied_from_market` · `remark` · UNIQUE(game_id_ref, market_code, channel_id_ref) |
 | `channel_packages` | env | `game_channel_id_ref` · `package_code` · `package_name` · `market_code` · `bundle_id` · `inherit_channel_config`(默认TRUE) · `enabled` · `override_json` · UNIQUE(game_channel_id_ref, package_code) |

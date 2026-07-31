@@ -90,12 +90,14 @@ func TestChannelCompatibilityMatrix(t *testing.T) {
 		region channeldomain.ChannelRegion
 		want   bool
 	}{
-		{name: "CN + domestic compatible", market: common.MarketCN, region: channeldomain.ChannelRegionDomestic, want: true},
-		{name: "CN + overseas incompatible", market: common.MarketCN, region: channeldomain.ChannelRegionOverseas, want: false},
-		{name: "JP + overseas compatible", market: common.MarketJP, region: channeldomain.ChannelRegionOverseas, want: true},
-		{name: "JP + domestic incompatible", market: common.MarketJP, region: channeldomain.ChannelRegionDomestic, want: false},
-		{name: "GLOBAL + overseas compatible", market: common.MarketGlobal, region: channeldomain.ChannelRegionOverseas, want: true},
-		{name: "GLOBAL + domestic incompatible", market: common.MarketGlobal, region: channeldomain.ChannelRegionDomestic, want: false},
+		{name: "CN + CN compatible", market: common.MarketCN, region: channeldomain.ChannelRegionCN, want: true},
+		{name: "CN + GLOBAL incompatible", market: common.MarketCN, region: channeldomain.ChannelRegionGlobal, want: false},
+		{name: "JP + GLOBAL compatible", market: common.MarketJP, region: channeldomain.ChannelRegionGlobal, want: true},
+		{name: "JP + JP compatible", market: common.MarketJP, region: channeldomain.ChannelRegionJP, want: true},
+		{name: "JP + CN incompatible", market: common.MarketJP, region: channeldomain.ChannelRegionCN, want: false},
+		{name: "JP + KR incompatible", market: common.MarketJP, region: channeldomain.ChannelRegionKR, want: false},
+		{name: "GLOBAL + GLOBAL compatible", market: common.MarketGlobal, region: channeldomain.ChannelRegionGlobal, want: true},
+		{name: "GLOBAL + CN incompatible", market: common.MarketGlobal, region: channeldomain.ChannelRegionCN, want: false},
 	}
 
 	for _, tc := range cases {

@@ -26,7 +26,7 @@ children: []
 | --- | --- | --- |
 | D1 | 多环境数据模型 | **单库 + 每环境独立 schema**。三个环境各有一个 PostgreSQL schema（`develop` / `sandbox` / `production`），其中放置**同名、同结构**的"游戏维度业务表"；同一逻辑对象在不同 env 下是**不同 schema 下同名表的不同物理行**。平台级共享数据放在共享 schema `platform`。运行时由 `search_path = <当前env>, platform` 路由。业务表**不带 `env` 列**。`sandbox -> production` 同步在**同库内跨 schema**（读 `sandbox.*` 与 `production.*`）做 diff / upsert。 |
 | D2 | 渠道实例的 market 维度 | `game_channels` 增加 `market_code`，唯一键为 `(game_id_ref, market_code, channel_id_ref)`，**该表本身即 `GameMarketChannel` 落地表**，不再分两层。 |
-| D3 | 渠道国内/非国内属性 | `channels` 增加 `region`（`domestic` / `overseas`），并在 seed 中固化。 |
+| D3 | 渠道发行市场属性 | `channels` 增加 `region`（发行市场，取值与 `Market` 同集：`GLOBAL` / `CN` / `JP` / `KR` / `SEA` / `HMT`；`GLOBAL`=全球发行不含中国大陆），并在 seed 中固化。历史版本曾为 `domestic` / `overseas` 二分，迁移 000019 起收敛为六市场枚举。 |
 | D4 | 配置快照粒度 | 快照 **per-game 一份**，`config_json` 内部按 `market` 分区，每个 market 存放"已按合并规则解析后的最终配置"。 |
 | D5 | 鉴权 | JWT（access + refresh）+ RBAC，权限码格式 `resource.action`；支持密码登录与飞书回调；本地 dev 允许 mock。 |
 | D6 | 同步基线一致性 | `sync/execute` 必须携带 `sync/preview` 返回的 `baseline_token`（含 `target_hash_before`）；执行前服务端复核目标 schema hash，不一致则拒绝并要求重新预览。 |
@@ -98,8 +98,8 @@ develop.game_channels   sandbox.game_channels   production.game_channels
 | `FXSyncMode` | `manual_confirm` / `auto_apply` | `manual_confirm` | 汇率同步模式 |
 | `FXSyncSchedule` | `monthly` / `quarterly` | `monthly` | 汇率同步周期 |
 | `VersionStatus` | `draft` / `published` / `archived` | `draft` | 模板版本生命周期 |
-| `ChannelRegion` | `domestic` / `overseas` | （seed 固定） | 渠道国内/非国内（D3） |
-| `ChannelType` | `store` / `oem` / `web` / `direct` / `mini_game` | 无默认 | 渠道类型 |
+| `ChannelRegion` | `GLOBAL` / `CN` / `JP` / `KR` / `SEA` / `HMT` | `GLOBAL` | 渠道发行市场（D3，取值同 `Market`） |
+| `ChannelType` | `store` / `domestic` / `mini_game` | 无默认 | 渠道类型（海外商店/国内渠道/小游戏） |
 | `PayWayType` | `card` / `wallet` / `platform` / `local` | 无默认 | 支付方式类型 |
 | `ProviderKind` | `aggregator` / `gateway` / `wallet_direct` | 无默认 | 支付提供商类型 |
 | `RoundingMode` | `half_up` / `floor` / `ceil` / `truncate` | `half_up` | 金额舍入 |
@@ -116,10 +116,10 @@ develop.game_channels   sandbox.game_channels   production.game_channels
 ### 3.2 Market 语义补充
 
 - `GLOBAL`：默认兜底海外市场；**不匹配 `CN`**。
-- `CN`：仅中国大陆，仅允许 `domestic` 渠道。
-- `JP / KR / SEA / HMT`：具体海外大区，仅允许 `overseas` 渠道。
+- `CN`：仅中国大陆，仅允许发行市场为 `CN` 的渠道。
+- `JP / KR / SEA / HMT`：具体海外大区，允许发行市场为 `GLOBAL`（全球发行）或与该 market 相同的渠道。
 - 具体海外 market 与 `GLOBAL` 同时存在时：**具体 market 整体覆盖 `GLOBAL`**（实例级覆盖，非字段级）。
-- 渠道可见性：`market=CN` ⇒ 只显示 `domestic`；`market!=CN` ⇒ 只显示 `overseas`。
+- 渠道可见性：`market=CN` ⇒ 只显示 `region=CN`；`market!=CN` ⇒ 显示 `region ∈ {GLOBAL, market}`。
 
 ### 3.3 状态机：模板版本生命周期（VersionStatus）
 

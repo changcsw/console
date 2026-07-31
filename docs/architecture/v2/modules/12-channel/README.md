@@ -66,11 +66,11 @@ children: [channel/platform-admin]
 
 不变量：
 - 同一 `(gameId, market, channelId)` 在所属环境 schema 内唯一（每环境 schema 各一份，唯一性天然按 schema 隔离）。
-- 创建/迁移到某 market 时必须满足可见性：`market=CN ⇒ channel.region=domestic`；`market!=CN ⇒ channel.region=overseas`。
+- 创建/迁移到某 market 时必须满足可见性：`market=CN ⇒ channel.region=CN`；`market!=CN ⇒ channel.region ∈ {GLOBAL, market}`。
 - `hidden=true` ⇒ `IncludedInSnapshot/Sync/RuntimeConfig` 全为 `false`。
 
 ### 2.2 值对象与纯规则
-- `Market`（`00 §3`）、`ChannelRegion`（`domestic/overseas`）。
+- `Market`（`00 §3`）、`ChannelRegion`（发行市场，取值同 `Market`：`GLOBAL/CN/JP/KR/SEA/HMT`）。
 - `ValidateMarketChannelCompatibility(market, region) error`：可见性纯函数（无 IO），服务端强制调用。
 - `ResolveRuntimeFlags(instance) RuntimeFlags`：根据 `hidden`、兼容性、`config_status` 推导三个只读运行态标识。
 
@@ -91,8 +91,8 @@ children: [channel/platform-admin]
 | `id` | BIGSERIAL | 否 | — | PK |
 | `channel_id` | VARCHAR(64) | 否 | — | 业务键，UNIQUE |
 | `channel_name` | VARCHAR(64) | 否 | — | |
-| `channel_type` | VARCHAR(32) | 否 | — | CHECK in `store/oem/web/direct/mini_game` |
-| **`region`** | VARCHAR(16) | 否 | — | **新增**，CHECK in `domestic/overseas`（D3） |
+| `channel_type` | VARCHAR(32) | 否 | — | CHECK in `store/domestic/mini_game` |
+| **`region`** | VARCHAR(16) | 否 | `GLOBAL` | **新增**，CHECK in `GLOBAL/CN/JP/KR/SEA/HMT`（D3，取值同 Market） |
 | `enabled` | BOOLEAN | 否 | `TRUE` | |
 | `sort` | INT | 否 | `0` | |
 | `created_at` | TIMESTAMPTZ | 否 | `NOW()` | |
@@ -100,29 +100,31 @@ children: [channel/platform-admin]
 
 唯一键：`UNIQUE(channel_id)`。索引建议：`(region)`、`(enabled, sort)`。
 
-**迁移（追加，不改历史）**：
+**迁移（追加，不改历史）**：region 最初以 `domestic/overseas` 引入；迁移 `000019` 起收敛为发行市场六枚举并同步收敛 `channel_type`，数据映射为 `domestic→CN`、`overseas→GLOBAL`、`oem→domestic`、`web/direct→store`：
 ```sql
-ALTER TABLE channels ADD COLUMN region VARCHAR(16) NOT NULL DEFAULT 'overseas'
-  CHECK (region IN ('domestic','overseas'));
-UPDATE channels SET region = 'domestic'
-  WHERE channel_id IN ('huawei_cn','xiaomi_cn','oppo_cn','vivo_cn','wechat_mini_game','douyin_mini_game');
-UPDATE channels SET region = 'overseas'
-  WHERE channel_id IN ('google','apple');
--- 回填完成后可去掉 DEFAULT（可选）
+UPDATE channels SET region = 'CN'     WHERE region = 'domestic';
+UPDATE channels SET region = 'GLOBAL' WHERE region = 'overseas';
+UPDATE channels SET channel_type = 'domestic' WHERE channel_type = 'oem';
+UPDATE channels SET channel_type = 'store'    WHERE channel_type IN ('web','direct');
+ALTER TABLE channels ALTER COLUMN region SET DEFAULT 'GLOBAL';
+ALTER TABLE channels ADD CONSTRAINT channels_region_check
+  CHECK (region IN ('GLOBAL','CN','JP','KR','SEA','HMT'));
+ALTER TABLE channels ADD CONSTRAINT channels_channel_type_check
+  CHECK (channel_type IN ('store','domestic','mini_game'));
 ```
 
 seed region 固定值：
 
 | channel_id | channel_type | region |
 | --- | --- | --- |
-| google | store | overseas |
-| apple | store | overseas |
-| huawei_cn | oem | domestic |
-| xiaomi_cn | oem | domestic |
-| oppo_cn | oem | domestic |
-| vivo_cn | oem | domestic |
-| wechat_mini_game | mini_game | domestic |
-| douyin_mini_game | mini_game | domestic |
+| google | store | GLOBAL |
+| apple | store | GLOBAL |
+| huawei_cn | domestic | CN |
+| xiaomi_cn | domestic | CN |
+| oppo_cn | domestic | CN |
+| vivo_cn | domestic | CN |
+| wechat_mini_game | mini_game | CN |
+| douyin_mini_game | mini_game | CN |
 
 ### 3.2 `channel_policies`（平台级）
 
@@ -220,8 +222,8 @@ ALTER TABLE channel_packages ADD CONSTRAINT channel_packages_gc_code_key
 | 项 | 取值 / 默认 |
 | --- | --- |
 | `Market` | `GLOBAL`/`JP`/`KR`/`SEA`/`HMT`/`CN`，默认 `GLOBAL` |
-| `ChannelRegion` | `domestic`/`overseas`（seed 固定，无默认） |
-| `ChannelType` | `store`/`oem`/`web`/`direct`/`mini_game`（无默认） |
+| `ChannelRegion` | `GLOBAL`/`CN`/`JP`/`KR`/`SEA`/`HMT`（取值同 `Market`），默认 `GLOBAL` |
+| `ChannelType` | `store`/`domestic`/`mini_game`（无默认） |
 | `LoginMode` | `channel_only`/`account_system`，默认 `account_system` |
 | `PaymentMode` | `channel_only`/`hybrid`/`cashier_only`，默认 `hybrid` |
 | `ConfigStatus` | `empty`/`invalid`/`valid`，新建默认 `empty`；**复制创建后强制 `invalid`** |
@@ -245,12 +247,12 @@ ALTER TABLE channel_packages ADD CONSTRAINT channel_packages_gc_code_key
 ### 5.1 可见性 / 兼容性
 ```text
 ValidateMarketChannelCompatibility(market, region):
-  if market == CN and region != domestic -> error MARKET_CHANNEL_INCOMPATIBLE
-  if market != CN and region != overseas -> error MARKET_CHANNEL_INCOMPATIBLE
+  if market == CN and region != CN -> error MARKET_CHANNEL_INCOMPATIBLE
+  if market != CN and region not in (GLOBAL, market) -> error MARKET_CHANNEL_INCOMPATIBLE
   return ok
 ```
 - 新增渠道时按目标 market 过滤候选渠道（前端），**服务端必须二次校验**（不能只信前端）。
-- GLOBAL 仅显示 overseas。
+- 非 CN market 显示发行市场为 `GLOBAL`（全球发行）及该 market 专属的渠道。
 - 派生兼容性：对已存在实例，用同一函数判定；不兼容 ⇒ 列表标红、提示"不兼容当前 market"，**不自动删除、保留配置**。
 
 ### 5.2 创建（空白 / 复制）
@@ -300,7 +302,7 @@ ValidateMarketChannelCompatibility(market, region):
 响应：
 ```json
 { "data": { "items": [
-  { "channelId": "google", "channelName": "Google", "channelType": "store", "region": "overseas",
+  { "channelId": "google", "channelName": "Google", "channelType": "store", "region": "GLOBAL",
     "loginMode": "account_system", "paymentMode": "hybrid", "loginLocked": false, "paymentLocked": false }
 ] } }
 ```
@@ -323,14 +325,14 @@ Query 参数（全部可选）：
   {
     "gameChannelId": 5001, "displayKey": "100001:GLOBAL:google",
     "gameId": "100001", "market": "GLOBAL", "channelId": "google",
-    "region": "overseas", "compatible": true, "hidden": false, "configStatus": "valid",
+    "region": "GLOBAL", "compatible": true, "hidden": false, "configStatus": "valid",
     "includedInSnapshot": true, "includedInSync": true, "includedInRuntimeConfig": true,
     "copiedFromMarket": "", "updatedAt": "2026-06-15T10:00:00Z"
   },
   {
     "gameChannelId": 5002, "displayKey": "100001:JP:google",
     "gameId": "100001", "market": "JP", "channelId": "google",
-    "region": "overseas", "compatible": true, "hidden": false, "configStatus": "invalid",
+    "region": "GLOBAL", "compatible": true, "hidden": false, "configStatus": "invalid",
     "includedInSnapshot": false, "includedInSync": true, "includedInRuntimeConfig": false,
     "copiedFromMarket": "GLOBAL", "updatedAt": "2026-06-15T11:00:00Z"
   }
@@ -359,7 +361,7 @@ Query 参数（全部可选）：
 ```
 失败（不兼容）`400`：
 ```json
-{ "error": { "code": "MARKET_CHANNEL_INCOMPATIBLE", "message": "market JP only accepts overseas channels" } }
+{ "error": { "code": "MARKET_CHANNEL_INCOMPATIBLE", "message": "market JP only accepts GLOBAL/JP channels" } }
 ```
 失败（重复）`409`：`{ "error": { "code": "CONFLICT", "message": "channel already exists for this market" } }`
 
@@ -411,15 +413,15 @@ Query 参数（全部可选）：
 | 参数 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `keyword` | string | `''` | 模糊匹配 `channelId` / `channelName` |
-| `region` | enum | 不限 | `domestic` / `overseas` |
-| `channelType` | enum | 不限 | `store/oem/web/direct/mini_game` |
+| `region` | enum | 不限 | `GLOBAL` / `CN` / `JP` / `KR` / `SEA` / `HMT` |
+| `channelType` | enum | 不限 | `store/domestic/mini_game` |
 | `enabled` | bool | 不限 | 启停过滤 |
 | `page`/`pageSize` | int | `1`/`20` | 见 `00 §7.3`（`pageSize` 上限 100） |
 
 响应（排序 `sort ASC, id ASC`）：
 ```json
 { "data": { "items": [
-  { "channelId": "huawei_cn", "channelName": "华为应用市场", "channelType": "oem", "region": "domestic",
+  { "channelId": "huawei_cn", "channelName": "华为应用市场", "channelType": "domestic", "region": "CN",
     "enabled": true, "sort": 10,
     "loginMode": "channel_only", "paymentMode": "channel_only", "loginLocked": true, "paymentLocked": true,
     "loginTemplateCount": 2, "iapTemplateCount": 1, "updatedAt": "2026-07-20T10:00:00Z" }
@@ -436,8 +438,8 @@ Query 参数（全部可选）：
 | --- | --- | --- | --- | --- |
 | `channelId` | string | 是 | — | `^[a-z0-9][a-z0-9_]*$` 且 ≤64；全局唯一 |
 | `channelName` | string | 是 | — | 非空、≤64 |
-| `channelType` | enum | 是 | — | `store/oem/web/direct/mini_game` |
-| `region` | enum | 是 | — | `domestic/overseas` |
+| `channelType` | enum | 是 | — | `store/domestic/mini_game` |
+| `region` | enum | 是 | `GLOBAL` | `GLOBAL/CN/JP/KR/SEA/HMT` |
 | `enabled` | bool | 否 | `true` | |
 | `sort` | int | 否 | `0` | `0..9999` |
 | `loginMode` | enum | 是 | — | `channel_only/account_system` |
@@ -615,8 +617,8 @@ Query 参数（全部可选）：
 
 | 接口 | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | S9 | S10 | 模块私有维度 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| GET /api/admin/games/{gameId}/channels | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | 可见性过滤(CN/overseas) 候选筛选 |
-| GET /api/admin/games/{gameId}/market-channels | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — | ✓ | — | 可见性过滤(CN/overseas)、隐藏过滤、config_status 综合判定、运行态标识推导 |
+| GET /api/admin/games/{gameId}/channels | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | 可见性过滤(CN⇔CN，非CN⇔GLOBAL/market) 候选筛选 |
+| GET /api/admin/games/{gameId}/market-channels | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — | ✓ | — | 可见性过滤(CN⇔CN，非CN⇔GLOBAL/market)、隐藏过滤、config_status 综合判定、运行态标识推导 |
 | POST /api/admin/games/{gameId}/markets/{market}/channels | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ | market-channel 兼容性(MARKET_CHANNEL_INCOMPATIBLE)、复制(secret/file 清空)、config_status=invalid |
 | POST /api/admin/game-channels/{gameChannelId}/hide | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — | — | ✓ | 隐藏/取消隐藏（禁隐藏 invalid/empty）、运行态全 false |
 | POST /api/admin/game-channels/{gameChannelId}/unhide | ✓ | ✓ | ✓ | — | — | ✓ | ✓ | — | — | ✓ | 隐藏/取消隐藏、运行态按 §4 重新推导 |
@@ -628,10 +630,10 @@ Query 参数（全部可选）：
 
 > system 侧 8 个接口（§6.7）的场景矩阵与用例见子文档 [`channel/platform-admin`](./platform-admin.md) §7。
 
-前端：Playwright e2e（`channels.spec.ts`）覆盖渠道实例列表全 market 展示、可见性过滤(CN/overseas)、隐藏/恢复二次确认、新增/复制抽屉（`secret/file` 清空且高亮需补填）、不兼容标红与运行态徽标灰显态 / vitest 组件（`ChannelInstanceStatusTag.vue`、`ChannelInstanceRuntimeFlags.vue`、`ChannelInstanceTable.vue`、`CreateMarketChannelDrawer.vue`）。
+前端：Playwright e2e（`channels.spec.ts`）覆盖渠道实例列表全 market 展示、可见性过滤（CN⇔CN，非CN⇔GLOBAL/market）、隐藏/恢复二次确认、新增/复制抽屉（`secret/file` 清空且高亮需补填）、不兼容标红与运行态徽标灰显态 / vitest 组件（`ChannelInstanceStatusTag.vue`、`ChannelInstanceRuntimeFlags.vue`、`ChannelInstanceTable.vue`、`CreateMarketChannelDrawer.vue`）。
 
 ### 补充关键用例
-- 可见性：`CN+overseas`、`JP+domestic`、`GLOBAL+domestic` 必须拒绝；`CN+domestic`、`JP+overseas` 通过。
+- 可见性：`CN+GLOBAL`、`JP+CN`、`GLOBAL+CN`、`JP+KR` 必须拒绝；`CN+CN`、`JP+GLOBAL`、`JP+JP` 通过。
 - 复制创建：secret/file 被清空、`config_status=invalid`、`copiedFromMarket` 记录、与来源不联动。
 - 隐藏：`hidden=true` ⇒ 运行态三标识全 false；默认列表不含隐藏。
 - 全 market 默认：`market=ALL` 返回多 market 多渠道。

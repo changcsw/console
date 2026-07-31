@@ -29,7 +29,7 @@ function makeDetail() {
     gameId: "100001",
     market: "CN",
     channelId: "huawei_cn",
-    region: "domestic",
+    region: "CN",
     compatible: true,
     hidden: false,
     configStatus: "invalid",

@@ -132,7 +132,7 @@ async function submit() {
 
   const created = await createGameMarketChannel(props.gameId, targetMarket.value, {
     channelId: channelId.value,
-    region: targetMarket.value === "CN" ? "domestic" : "overseas",
+    region: targetMarket.value === "CN" ? "CN" : "GLOBAL",
     copyFromMarket: mode.value === "copy" ? props.sourceInstance?.market : undefined,
     normalConfig: clientId.value ? { clientId: clientId.value } : {},
     secretConfig: clientSecret.value ? { clientSecret: clientSecret.value } : {},

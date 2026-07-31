@@ -38,9 +38,9 @@ func newMemState() *memState {
 			domainchannel.ChannelTemplateKindIAP:   {},
 		},
 	}
-	st.seedChannel("google", "Google Play", domainchannel.ChannelTypeStore, domainchannel.ChannelRegionOverseas, 1,
+	st.seedChannel("google", "Google Play", domainchannel.ChannelTypeStore, domainchannel.ChannelRegionGlobal, 1,
 		common.LoginModeChannelOnly, common.PaymentModeChannelOnly)
-	st.seedChannel("huawei_cn", "华为", domainchannel.ChannelTypeOEM, domainchannel.ChannelRegionDomestic, 2,
+	st.seedChannel("huawei_cn", "华为", domainchannel.ChannelTypeDomestic, domainchannel.ChannelRegionCN, 2,
 		common.LoginModeChannelOnly, common.PaymentModeChannelOnly)
 
 	st.seedTemplate("huawei_cn", domainchannel.ChannelTemplateKindLogin, "v1", true)
