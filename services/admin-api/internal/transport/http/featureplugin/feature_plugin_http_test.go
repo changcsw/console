@@ -2,6 +2,7 @@ package featureplugin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -801,18 +802,20 @@ func TestDeleteFeaturePlugin(t *testing.T) {
 	h := newHarness(t)
 	token := h.writeToken(t)
 
-	// realname 仍有 2 个模板版本 → 409。
-	blocked := h.do(t, http.MethodDelete, "/api/admin/feature-plugins/realname", token, nil)
-	assertStatus(t, blocked, http.StatusConflict)
-	if blocked.errCode() != "CONFLICT" {
-		t.Fatalf("want CONFLICT got %q", blocked.errCode())
+	// apple_pay 无模板但被渠道绑定策略引用 → 409（渠道侧引用仍阻断删除）。
+	h.store.state.channelRefs[2] = 2
+	channelBlocked := h.do(t, http.MethodDelete, "/api/admin/feature-plugins/apple_pay", token, nil)
+	assertStatus(t, channelBlocked, http.StatusConflict)
+	if channelBlocked.errCode() != "CONFLICT" {
+		t.Fatalf("want CONFLICT got %q", channelBlocked.errCode())
 	}
-	if !containsSubstring(blocked.errMessage(), "参数模板 2 个") {
-		t.Fatalf("message should list referencing data, got %q", blocked.errMessage())
+	if !containsSubstring(channelBlocked.errMessage(), "渠道绑定 2 条") {
+		t.Fatalf("message should list referencing data, got %q", channelBlocked.errMessage())
 	}
-	assertStatus(t, h.do(t, http.MethodGet, "/api/admin/feature-plugins/realname", token, nil), http.StatusOK)
+	assertStatus(t, h.do(t, http.MethodGet, "/api/admin/feature-plugins/apple_pay", token, nil), http.StatusOK)
+	delete(h.store.state.channelRefs, 2)
 
-	// apple_pay 无模板但被游戏侧渠道实例配置引用 → 409。
+	// apple_pay 被游戏侧渠道实例配置引用 → 409。
 	h.store.state.gameRefs[2] = 3
 	gameBlocked := h.do(t, http.MethodDelete, "/api/admin/feature-plugins/apple_pay", token, nil)
 	assertStatus(t, gameBlocked, http.StatusConflict)
@@ -822,8 +825,30 @@ func TestDeleteFeaturePlugin(t *testing.T) {
 	if _, ok := h.audit.byAction("feature_plugin.delete"); ok {
 		t.Fatalf("blocked delete should not write audit, got %+v", h.audit.entries)
 	}
+	delete(h.store.state.gameRefs, 2)
 
-	// customer_service 无任何引用 → 204。
+	// realname 有 2 个模板版本但无渠道侧引用 → 204，模板随插件级联删除，
+	// 且 409 文案不再把「参数模板」列为需要先清理的项（否则建过模板的插件永远删不掉）。
+	cascade := h.do(t, http.MethodDelete, "/api/admin/feature-plugins/realname", token, nil)
+	assertStatus(t, cascade, http.StatusNoContent)
+	assertStatus(t, h.do(t, http.MethodGet, "/api/admin/feature-plugins/realname", token, nil), http.StatusNotFound)
+	for id, tpl := range h.store.state.templates {
+		if tpl.PluginID == "realname" {
+			t.Fatalf("template %d of realname should be cascade-deleted, got %+v", id, tpl)
+		}
+	}
+	cascadeAudit, found := h.audit.byAction("feature_plugin.delete")
+	if !found {
+		t.Fatalf("missing audit entry, got %+v", h.audit.entries)
+	}
+	if cascadeAudit.ResourceID != "realname" {
+		t.Fatalf("audit resource id: got %s", cascadeAudit.ResourceID)
+	}
+	if n, _ := cascadeAudit.Detail["deletedTemplates"].(int); n != 2 {
+		t.Fatalf("audit should record cascade-deleted template count 2, got %+v", cascadeAudit.Detail)
+	}
+
+	// customer_service 无模板、无任何引用 → 204，审计 deletedTemplates=0。
 	ok := h.do(t, http.MethodDelete, "/api/admin/feature-plugins/customer_service", token, nil)
 	assertStatus(t, ok, http.StatusNoContent)
 	if ok.raw != "" {
@@ -831,16 +856,41 @@ func TestDeleteFeaturePlugin(t *testing.T) {
 	}
 	assertStatus(t, h.do(t, http.MethodGet, "/api/admin/feature-plugins/customer_service", token, nil), http.StatusNotFound)
 
-	entry, found := h.audit.byAction("feature_plugin.delete")
-	if !found {
-		t.Fatalf("missing audit entry, got %+v", h.audit.entries)
+	plainAudit := h.audit.entries[len(h.audit.entries)-1]
+	if plainAudit.Action != "feature_plugin.delete" || plainAudit.ResourceID != "customer_service" {
+		t.Fatalf("last audit entry should be the customer_service delete, got %+v", plainAudit)
 	}
-	if entry.ResourceID != "customer_service" {
-		t.Fatalf("audit resource id: got %s", entry.ResourceID)
+	if n, _ := plainAudit.Detail["deletedTemplates"].(int); n != 0 {
+		t.Fatalf("plugin without templates should record deletedTemplates=0, got %+v", plainAudit.Detail)
 	}
 
 	// 重复删除 → 404。
 	assertStatus(t, h.do(t, http.MethodDelete, "/api/admin/feature-plugins/customer_service", token, nil), http.StatusNotFound)
+}
+
+// TestDeleteFeaturePluginRollsBackCascade 校验「模板级联删除 + 插件删除」的事务边界：
+// 插件删除失败时，已删除的模板必须随事务一起回滚，不留下「模板被清空但插件还在」的半删状态。
+func TestDeleteFeaturePluginRollsBackCascade(t *testing.T) {
+	h := newHarness(t)
+
+	// 让插件删除在模板已删之后失败：直接把 realname 的主数据行从内存态摘掉，
+	// Plugins.Delete 会返回 ErrNotFound（等价于并发删除/外键挡回），触发 InTx 回滚。
+	svc := featurepluginapp.NewService(&deleteFailingStore{memStore: h.store}, h.audit)
+	if err := svc.DeletePlugin(context.Background(), "realname"); err == nil {
+		t.Fatal("want error when plugin delete fails")
+	}
+	count := 0
+	for _, tpl := range h.store.state.templates {
+		if tpl.PluginID == "realname" {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("templates must be restored by rollback, want 2 got %d", count)
+	}
+	if _, ok := h.audit.byAction("feature_plugin.delete"); ok {
+		t.Fatalf("failed delete should not write audit, got %+v", h.audit.entries)
+	}
 }
 
 // ───────────────────────── 参数模板：列表与 effective 标记 ─────────────────────────

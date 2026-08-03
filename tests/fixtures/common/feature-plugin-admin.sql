@@ -66,6 +66,9 @@ ON CONFLICT (category_code) DO NOTHING;
 --   9002 qa_template_plugin  : 无分类，挂 1 个模板版本 v1（固定 id 9001）→
 --                              模板列表/详情/重复版本冲突样本；同时用于「删除被模板引用 → 409」样本。
 --   9003 qa_deletable_plugin : 无分类/无模板/无引用 → DELETE 成功样本（一次性消耗，见 yaml 注释）。
+--   9004 qa_cascade_plugin   : 无分类，挂 1 个模板版本 v1（固定 id 9002）、无渠道侧引用 →
+--                              「删除插件时级联删除模板版本」成功样本（一次性消耗，见 yaml 注释）。
+--                              与 9002 分开是为了不破坏本文件其它模板用例依赖的 qa_template_plugin。
 INSERT INTO platform.feature_plugins (id, plugin_id, plugin_name, category_id_ref, region, enabled, sort)
 VALUES (9001, 'qa_sample_plugin', 'QA 示例插件', 9001, 'domestic', TRUE, 910)
 ON CONFLICT (plugin_id) DO NOTHING;
@@ -78,7 +81,14 @@ INSERT INTO platform.feature_plugins (id, plugin_id, plugin_name, category_id_re
 VALUES (9003, 'qa_deletable_plugin', 'QA 可删插件', NULL, 'domestic', TRUE, 930)
 ON CONFLICT (plugin_id) DO NOTHING;
 
--- ───────────────────────── 4) 插件参数模板样本（固定 id 9001，qa_template_plugin / v1，enabled=TRUE 生效）
+INSERT INTO platform.feature_plugins (id, plugin_id, plugin_name, category_id_ref, region, enabled, sort)
+VALUES (9004, 'qa_cascade_plugin', 'QA 级联删除插件', NULL, 'domestic', TRUE, 940)
+ON CONFLICT (plugin_id) DO NOTHING;
+
+-- ───────────────────────── 4) 插件参数模板样本
+--   9001（qa_template_plugin / v1，enabled=TRUE 生效）：模板列表/详情/重复版本冲突样本。
+--   9002（qa_cascade_plugin / v1）：随 9004 一起被 delete_plugin_cascade_deletes_templates 级联删掉；
+--     该 case 是一次性用例，重灌 fixture 时这两行会被上面的 INSERT 一并补回。
 INSERT INTO platform.feature_plugin_templates (
   id, plugin_id_ref, template_version, form_schema_json, secret_fields_json, file_fields_json, validation_rules_json, enabled
 )
@@ -88,6 +98,19 @@ VALUES (
   '[]'::jsonb,
   '[]'::jsonb,
   '{"appId":{"minLen":1,"maxLen":64}}'::jsonb,
+  TRUE
+)
+ON CONFLICT (plugin_id_ref, template_version) DO NOTHING;
+
+INSERT INTO platform.feature_plugin_templates (
+  id, plugin_id_ref, template_version, form_schema_json, secret_fields_json, file_fields_json, validation_rules_json, enabled
+)
+VALUES (
+  9002, 9004, 'v1',
+  '[{"key":"appId","label":"App ID","component":"input","required":true,"order":10,"group":"basic","scope":"both"}]'::jsonb,
+  '[]'::jsonb,
+  '[]'::jsonb,
+  '{}'::jsonb,
   TRUE
 )
 ON CONFLICT (plugin_id_ref, template_version) DO NOTHING;

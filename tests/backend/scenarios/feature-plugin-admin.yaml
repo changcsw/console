@@ -11,12 +11,13 @@
 #     - requiresDB:false 的 S2 用例（受保护接口先过 Authn，未携带/无效令牌即 401）在沙箱内真实执行并断言。
 #     - requiresDB:true 的用例需 PG + 全装配，进程内 harness 跳过，仅校验 manifest 可解析；
 #       SCENARIO_WITH_DB=1 时由连库 harness（tests/fixtures/common/feature-plugin-admin.sql 提供
-#       RBAC 角色 + 固定 id 9001-9003 的分类/插件/模板样本）执行。
+#       RBAC 角色 + 固定 id 9001-9004 的分类/插件/模板样本）执行。
 #   这些维度已由进程内 L3 httptest（feature_plugin_http_test.go，内存仓储 + 真实 JWT/路由/中间件/
 #   审计 spy）逐一硬断言覆盖；本 manifest 的连库用例是对同一套接口在真实 Postgres 上的等价验证。
 #
 # 单次性写用例（幂等边界，务必知悉）：create_category_success / create_plugin_success /
-#   create_template_success / delete_category_success / delete_plugin_success 五个用例会在真实库
+#   create_template_success / delete_category_success / delete_plugin_success /
+#   delete_plugin_cascade_deletes_templates 六个用例会在真实库
 #   产生「一次性」状态迁移（新建行 / 删除固定 fixture 行），二次针对同一持久化 DB 重跑会因
 #   「已存在」或「已删除→404」而失败。这与仓库里其它模块（如 cashier-template.yaml 的
 #   create_template_success/templateId=brand_new）同一约定：SCENARIO_WITH_DB=1 用例假定跑在
@@ -30,9 +31,12 @@
 #   - S8（脱敏）：模板四件套的 secretFieldsJson 只登记「哪些 key 是敏感字段」，不存密文本身
 #     （实际密文落在游戏侧渠道实例配置 game_channel_plugin_configs，属模块 15），故本模块 S8 = N/A。
 #   - S9（分页）：分类字典体量小、全量返回不分页 → N/A；插件主数据 GET /feature-plugins 分页 → 覆盖。
-#   - S10（事务回滚）：本模块所有写路径都是「预检查（读）+ 单条 INSERT/UPDATE/DELETE」在同一
-#     InTx 内，不存在跨多表的多语句写，故没有可观察的「部分写入回滚」现象 → N/A（预检查失败时
-#     单条写从未发生，等价断言见 feature_plugin_http_test.go 的「冲突/校验失败不落库、不写审计」）。
+#   - S10（事务回滚）：除 DELETE /feature-plugins/{pluginId} 外，写路径都是「预检查（读）+ 单条
+#     INSERT/UPDATE/DELETE」在同一 InTx 内，没有可观察的「部分写入回滚」现象（预检查失败时单条写
+#     从未发生，等价断言见 feature_plugin_http_test.go 的「冲突/校验失败不落库、不写审计」）。
+#     插件删除是唯一的多语句写（先级联删模板、再删插件），必须整体回滚才不会留下「模板已清空但
+#     插件还在」的半删状态；连库侧无法在单个 HTTP 请求里注入中途失败，故该断言由进程内
+#     feature_plugin_http_test.go 的 TestDeleteFeaturePluginRollsBackCascade 覆盖 → 本 manifest N/A。
 module: feature-plugin-admin
 cases:
   # ═════════════════ 1) GET /feature-plugin-categories（feature_plugin.read，全量不分页）
@@ -538,18 +542,22 @@ cases:
     expect:
       status: 403
       jsonContains: { error.code: FORBIDDEN }
-  - name: delete_plugin_conflict_has_template
-    dimension: S5
+  - name: delete_plugin_cascade_deletes_templates
+    dimension: S1
     requiresDB: true
     auth: { role: feature_plugin_admin }
     fixture: common/feature-plugin-admin/base
-    note: "qa_template_plugin 仍有模板版本 v1(id=9001) → 409 CONFLICT，且不删除（可重复执行）"
+    note: >-
+      qa_cascade_plugin(9004) 挂着模板版本 v1(id=9002) 但无渠道侧引用 → 204，模板随插件级联删除。
+      模板不再阻断插件删除（否则插件建过模板就永久 409、且模板无独立删除入口）；
+      「渠道绑定/渠道实例配置/渠道包覆盖仍引用 → 409」的阻断口径由 feature_plugin_http_test.go
+      的 TestDeleteFeaturePlugin 硬断言（连库侧造这些引用需要跨模块的渠道/游戏数据，不在本 manifest 内）。
+      一次性用例，见文件头说明。
     request:
       method: DELETE
-      path: /api/admin/feature-plugins/qa_template_plugin
+      path: /api/admin/feature-plugins/qa_cascade_plugin
     expect:
-      status: 409
-      jsonContains: { error.code: CONFLICT }
+      status: 204
   - name: delete_plugin_not_found
     dimension: S4
     requiresDB: true

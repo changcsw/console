@@ -283,28 +283,38 @@ func (s *Service) UpdatePlugin(ctx context.Context, cmd dto.UpdateFeaturePluginC
 }
 
 // DeletePlugin 删除插件主数据（DELETE /feature-plugins/{pluginId}）。
-// 仍有模板版本、渠道绑定策略或游戏侧插件配置引用时拒绝删除（外键会挡住，这里给出可读原因）。
+// 仍有渠道绑定策略或游戏侧插件配置引用时拒绝删除（外键会挡住，这里给出可读原因）；
+// 参数模板则随插件级联删除：模板是插件自身的从属版本数据，没有独立的删除接口，
+// 若也按「阻断」处理，插件一旦建过模板（哪怕已禁用）就永远删不掉，只能连库手删。
+// 模板与插件两步删除必须落在同一事务内，避免中途失败留下「模板已清空但插件还在」的半删状态。
 func (s *Service) DeletePlugin(ctx context.Context, pluginID string) error {
 	pluginID = strings.TrimSpace(pluginID)
 	row, err := s.loadPlugin(ctx, pluginID)
 	if err != nil {
 		return err
 	}
+	deletedTemplates := 0
 	err = s.tx.InTx(ctx, func(repos Repositories) error {
 		refs, err := repos.Plugins.CountReferences(ctx, row.Plugin.ID)
 		if err != nil {
 			return err
 		}
-		if refs.Total() > 0 {
+		if refs.BlockingTotal() > 0 {
 			return conflictErr("该插件仍有关联数据（" + referenceSummary(refs) + "），请先删除关联数据")
 		}
+		// 外键方向是模板 → 插件，故先删模板再删插件。
+		n, err := repos.Templates.DeleteByPlugin(ctx, row.Plugin.ID)
+		if err != nil {
+			return err
+		}
+		deletedTemplates = n
 		return repos.Plugins.Delete(ctx, row.Plugin.ID)
 	})
 	if err != nil {
 		return mapWriteErr(err, "插件删除冲突")
 	}
 	return s.writeAudit(ctx, "feature_plugin.delete", "feature_plugin", pluginID, map[string]any{
-		"pluginId": pluginID, "pluginName": row.Plugin.PluginName,
+		"pluginId": pluginID, "pluginName": row.Plugin.PluginName, "deletedTemplates": deletedTemplates,
 	})
 }
 
@@ -529,12 +539,11 @@ func normalizeCategoryID(in *int64) *int64 {
 	return &v
 }
 
-// referenceSummary 拼出人类可读的引用明细，帮助管理员定位要先清理什么。
+// referenceSummary 拼出人类可读的「阻断删除」引用明细，帮助管理员定位要先清理什么。
+// 只列 BlockingTotal 计入的三项：参数模板随插件级联删除，不属于需要管理员先清理的项。
+// 三项全为 0 时给一句兜底文案，避免调用方拼出「（）」这样的空括号。
 func referenceSummary(refs FeaturePluginReferences) string {
 	parts := []string{}
-	if refs.Templates > 0 {
-		parts = append(parts, "参数模板 "+strconv.Itoa(refs.Templates)+" 个")
-	}
 	if refs.ChannelBindings > 0 {
 		parts = append(parts, "渠道绑定 "+strconv.Itoa(refs.ChannelBindings)+" 条")
 	}
@@ -543,6 +552,9 @@ func referenceSummary(refs FeaturePluginReferences) string {
 	}
 	if refs.PackageOverride > 0 {
 		parts = append(parts, "渠道包覆盖 "+strconv.Itoa(refs.PackageOverride)+" 条")
+	}
+	if len(parts) == 0 {
+		return "渠道侧仍有引用"
 	}
 	return strings.Join(parts, "、")
 }

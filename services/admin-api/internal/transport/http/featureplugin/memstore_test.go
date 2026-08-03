@@ -16,23 +16,26 @@ import (
 // memState 是插件分类字典 + 插件主数据 + 参数模板的内存快照，仅用于进程内 httptest 全链路覆盖
 // （transport -> app -> domain），不依赖真实 PG。InTx 通过克隆/回填实现真实回滚语义。
 // 这些表位于共享 schema platform，与 env 无关，因此本层不建模 env 维度。
-// gameRefs 模拟游戏侧引用（game_channel_plugin_configs 等）：只影响插件能否删除。
+// gameRefs / channelRefs 模拟外部引用（game_channel_plugin_configs、
+// platform.channel_feature_plugins）：只影响插件能否删除（模板不阻断，随插件级联删除）。
 type memState struct {
-	categories map[int64]*domainplugin.FeaturePluginCategory
-	plugins    map[string]*domainplugin.FeaturePlugin
-	templates  map[int64]*domainplugin.FeaturePluginTemplate
-	gameRefs   map[int64]int
-	catSeq     int64
-	pluginSeq  int64
-	tplSeq     int64
+	categories  map[int64]*domainplugin.FeaturePluginCategory
+	plugins     map[string]*domainplugin.FeaturePlugin
+	templates   map[int64]*domainplugin.FeaturePluginTemplate
+	gameRefs    map[int64]int
+	channelRefs map[int64]int
+	catSeq      int64
+	pluginSeq   int64
+	tplSeq      int64
 }
 
 func newMemState() *memState {
 	st := &memState{
-		categories: map[int64]*domainplugin.FeaturePluginCategory{},
-		plugins:    map[string]*domainplugin.FeaturePlugin{},
-		templates:  map[int64]*domainplugin.FeaturePluginTemplate{},
-		gameRefs:   map[int64]int{},
+		categories:  map[int64]*domainplugin.FeaturePluginCategory{},
+		plugins:     map[string]*domainplugin.FeaturePlugin{},
+		templates:   map[int64]*domainplugin.FeaturePluginTemplate{},
+		gameRefs:    map[int64]int{},
+		channelRefs: map[int64]int{},
 	}
 	loginCat := st.seedCategory("login", "登录类", 10, true)
 	payCat := st.seedCategory("payment", "支付类", 20, true)
@@ -85,13 +88,14 @@ var seedTime = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 func (s *memState) clone() *memState {
 	out := &memState{
-		categories: map[int64]*domainplugin.FeaturePluginCategory{},
-		plugins:    map[string]*domainplugin.FeaturePlugin{},
-		templates:  map[int64]*domainplugin.FeaturePluginTemplate{},
-		gameRefs:   map[int64]int{},
-		catSeq:     s.catSeq,
-		pluginSeq:  s.pluginSeq,
-		tplSeq:     s.tplSeq,
+		categories:  map[int64]*domainplugin.FeaturePluginCategory{},
+		plugins:     map[string]*domainplugin.FeaturePlugin{},
+		templates:   map[int64]*domainplugin.FeaturePluginTemplate{},
+		gameRefs:    map[int64]int{},
+		channelRefs: map[int64]int{},
+		catSeq:      s.catSeq,
+		pluginSeq:   s.pluginSeq,
+		tplSeq:      s.tplSeq,
 	}
 	for k, v := range s.categories {
 		cp := *v
@@ -119,6 +123,9 @@ func (s *memState) clone() *memState {
 	for k, v := range s.gameRefs {
 		out.gameRefs[k] = v
 	}
+	for k, v := range s.channelRefs {
+		out.channelRefs[k] = v
+	}
 	return out
 }
 
@@ -127,6 +134,7 @@ func (s *memState) replaceWith(next *memState) {
 	s.plugins = next.plugins
 	s.templates = next.templates
 	s.gameRefs = next.gameRefs
+	s.channelRefs = next.channelRefs
 	s.catSeq = next.catSeq
 	s.pluginSeq = next.pluginSeq
 	s.tplSeq = next.tplSeq
@@ -155,6 +163,33 @@ func (m *memStore) InTx(_ context.Context, fn func(featurepluginapp.Repositories
 	}
 	return nil
 }
+
+// deleteFailingStore 让插件删除恒定失败（模板级联删除已经发生之后），
+// 用于验证 DeletePlugin 的事务边界：失败时模板必须随事务回滚而复原。
+type deleteFailingStore struct{ *memStore }
+
+func (m *deleteFailingStore) failingRepos() featurepluginapp.Repositories {
+	repos := m.memStore.repos()
+	repos.Plugins = &failingDeletePluginRepo{FeaturePluginAdminRepository: repos.Plugins}
+	return repos
+}
+
+func (m *deleteFailingStore) Repositories() featurepluginapp.Repositories { return m.failingRepos() }
+
+func (m *deleteFailingStore) InTx(_ context.Context, fn func(featurepluginapp.Repositories) error) error {
+	snapshot := m.state.clone()
+	if err := fn(m.failingRepos()); err != nil {
+		m.state.replaceWith(snapshot) // 回滚
+		return err
+	}
+	return nil
+}
+
+type failingDeletePluginRepo struct {
+	featurepluginapp.FeaturePluginAdminRepository
+}
+
+func (r *failingDeletePluginRepo) Delete(context.Context, int64) error { return adminapp.ErrNotFound }
 
 type memCategoryRepo struct{ state *memState }
 
@@ -342,7 +377,10 @@ func (r *memPluginRepo) Delete(_ context.Context, id int64) error {
 func (r *memPluginRepo) CountReferences(
 	_ context.Context, pluginIDRef int64,
 ) (featurepluginapp.FeaturePluginReferences, error) {
-	out := featurepluginapp.FeaturePluginReferences{GameConfigs: r.state.gameRefs[pluginIDRef]}
+	out := featurepluginapp.FeaturePluginReferences{
+		ChannelBindings: r.state.channelRefs[pluginIDRef],
+		GameConfigs:     r.state.gameRefs[pluginIDRef],
+	}
 	for _, tpl := range r.state.templates {
 		if tpl.PluginIDRef == pluginIDRef {
 			out.Templates++
@@ -432,6 +470,18 @@ func (r *memTemplateRepo) Replace(_ context.Context, tpl domainplugin.FeaturePlu
 	current.Enabled = tpl.Enabled
 	current.UpdatedAt = time.Now().UTC()
 	return nil
+}
+
+// DeleteByPlugin 随插件级联删除该插件的全部模板版本，返回删除条数。
+func (r *memTemplateRepo) DeleteByPlugin(_ context.Context, pluginIDRef int64) (int, error) {
+	deleted := 0
+	for id, tpl := range r.state.templates {
+		if tpl.PluginIDRef == pluginIDRef {
+			delete(r.state.templates, id)
+			deleted++
+		}
+	}
+	return deleted, nil
 }
 
 // fakeAudit 记录审计调用，供审计断言使用（与 platformchannel httptest 同口径）。

@@ -68,8 +68,12 @@ type FeaturePluginRow struct {
 	TemplateCount int
 }
 
-// FeaturePluginReferences 插件被引用计数，用于删除前的 409 判定。
+// FeaturePluginReferences 插件被引用计数。
 // 模板与渠道绑定在共享 schema platform；后两者在当前 env schema（游戏侧配置）。
+//
+// 「阻断」与「展示」是两个口径：Templates 是插件自身的从属版本数据，删除插件时随之
+// 级联清理（见 Service.DeletePlugin），不阻断删除；其余三项是外部对该插件的引用，
+// 必须由管理员先清理，故只有它们计入 BlockingTotal。
 type FeaturePluginReferences struct {
 	Templates       int
 	ChannelBindings int
@@ -77,9 +81,15 @@ type FeaturePluginReferences struct {
 	PackageOverride int
 }
 
-// Total 引用总数；>0 即不允许删除插件。
+// Total 引用总数（含随插件级联删除的模板），用于展示/诊断。
 func (r FeaturePluginReferences) Total() int {
 	return r.Templates + r.ChannelBindings + r.GameConfigs + r.PackageOverride
+}
+
+// BlockingTotal 阻断插件删除的外部引用总数；>0 即不允许删除插件。
+// 不含 Templates：模板随插件级联删除，否则插件一旦建过模板就永远删不掉。
+func (r FeaturePluginReferences) BlockingTotal() int {
+	return r.ChannelBindings + r.GameConfigs + r.PackageOverride
 }
 
 // CategoryPatch 分类字典列级补丁（nil 不改）。
@@ -145,6 +155,10 @@ type FeaturePluginTemplateAdminRepository interface {
 	Insert(ctx context.Context, tpl domainplugin.FeaturePluginTemplate) (domainplugin.FeaturePluginTemplate, error)
 	// Replace 整体覆盖四件套与 enabled（tpl 为服务层合并校验后的完整状态）。
 	Replace(ctx context.Context, tpl domainplugin.FeaturePluginTemplate) error
+	// DeleteByPlugin 删除该插件下的全部模板版本，返回实际删除行数（供审计明细追溯）。
+	// 语义是「随插件级联删除」：模板没有独立的删除入口，只在删除宿主插件时被一并清理，
+	// 故必须与 Plugins.Delete 在同一事务内先后执行，避免留下半删状态。
+	DeleteByPlugin(ctx context.Context, pluginIDRef int64) (int, error)
 }
 
 // Repositories 一组仓储句柄（绑定到 pool 或某事务连接）。

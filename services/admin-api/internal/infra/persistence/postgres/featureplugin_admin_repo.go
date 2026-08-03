@@ -423,6 +423,18 @@ WHERE id = $1`, tpl.ID, form, secret, file, rules, tpl.Enabled)
 	return nil
 }
 
+// DeleteByPlugin 删除该插件下的全部模板版本，返回删除行数。
+// 随插件级联删除（服务层 DeletePlugin 在同事务内先调本方法再删插件），
+// 不用 FK ON DELETE CASCADE 而显式 DELETE：删除条数要进审计明细，且级联范围显式可读。
+// 0 行不算错误——插件从未建过模板是正常情况。
+func (r *FeaturePluginTemplateAdminRepo) DeleteByPlugin(ctx context.Context, pluginIDRef int64) (int, error) {
+	tag, err := r.db.Exec(ctx, `DELETE FROM platform.feature_plugin_templates WHERE plugin_id_ref = $1`, pluginIDRef)
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 func marshalPluginTemplateJSON(tpl domainplugin.FeaturePluginTemplate) (form, secret, file, rules string, err error) {
 	formSchema := tpl.FormSchema
 	if formSchema == nil {

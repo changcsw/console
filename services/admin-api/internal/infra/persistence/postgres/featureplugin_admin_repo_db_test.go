@@ -262,9 +262,17 @@ func TestFeaturePluginAdminRepo_PluginCRUD_DB(t *testing.T) {
 		}
 	})
 
-	// Delete 前先清掉挂在这个插件上的模板（FK 约束），模拟服务层「引用清零后才允许删除」的前置条件。
-	if _, err := tx.Exec(ctx, `DELETE FROM platform.feature_plugin_templates WHERE plugin_id_ref = $1`, row.Plugin.ID); err != nil {
-		t.Fatalf("cleanup template before delete: %v", err)
+	// Delete 前先级联清掉挂在这个插件上的模板（FK 约束），与服务层 DeletePlugin 同事务的删除顺序一致。
+	deleted, err := tplRepo.DeleteByPlugin(ctx, row.Plugin.ID)
+	if err != nil {
+		t.Fatalf("DeleteByPlugin: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("DeleteByPlugin: want 1 row deleted, got %d", deleted)
+	}
+	// 无模板的插件再删一次应返回 0 行且不报错（插件从未建过模板是正常情况）。
+	if again, err := tplRepo.DeleteByPlugin(ctx, row.Plugin.ID); err != nil || again != 0 {
+		t.Fatalf("DeleteByPlugin on empty set: want (0, nil), got (%d, %v)", again, err)
 	}
 	// Delete 正常路径 + 不存在 id 映射 ErrNotFound。
 	if err := repo.Delete(ctx, row.Plugin.ID); err != nil {
