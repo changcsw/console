@@ -299,12 +299,16 @@ test("删除分类成功路径", async ({ page }) => {
   await gotoPlugins(page);
 
   await page.getByRole("row", { name: /push/ }).getByRole("button", { name: "删除" }).click();
-  await expect(page.locator(".el-message-box")).toContainText("确认删除分类「推送类」？");
+  // 与插件删除确认同口径：中文按钮 + 不可恢复说明
+  const box = page.locator(".el-message-box");
+  await expect(box).toContainText("确认删除分类「推送类」？删除后不可恢复。");
+  await expect(box.getByRole("button", { name: "确认删除" })).toBeVisible();
+  await expect(box.getByRole("button", { name: "取消" })).toBeVisible();
 
   const deletePromise = page.waitForRequest(
     (req) => req.method() === "DELETE" && req.url().endsWith("/api/admin/feature-plugin-categories/2")
   );
-  await page.locator(".el-message-box").getByRole("button", { name: "OK" }).click();
+  await box.getByRole("button", { name: "确认删除" }).click();
   await deletePromise;
   await expect(page.locator(".el-message").getByText("已删除分类")).toBeVisible();
 });
@@ -321,7 +325,7 @@ test("删除被引用分类返回 409 时展示行内可读错误提示", async 
   await gotoPlugins(page);
 
   await page.getByRole("row", { name: /login/ }).getByRole("button", { name: "删除" }).click();
-  await page.locator(".el-message-box").getByRole("button", { name: "OK" }).click();
+  await page.locator(".el-message-box").getByRole("button", { name: "确认删除" }).click();
 
   // 行内报错（role=alert），不用 toast，便于对照当前行；且不出现成功提示
   const alert = page.locator(".panel__error[role=alert]");
@@ -433,7 +437,7 @@ test("编辑插件清空分类后 PATCH 显式下发 categoryId: null", async ({
   await expect(page.locator(".el-message").getByText("已更新插件")).toBeVisible();
 });
 
-test("删除插件成功路径", async ({ page }) => {
+test("删除插件成功路径（无模板版本，确认文案不带模板数）", async ({ page }) => {
   await setup(page);
   await gotoTab(page, "插件主数据");
 
@@ -442,14 +446,109 @@ test("删除插件成功路径", async ({ page }) => {
     .getByRole("row", { name: /admob/ })
     .getByRole("button", { name: "删除" })
     .click();
-  await expect(page.locator(".el-message-box")).toContainText("确认删除插件「AdMob 广告」？");
+  // templateCount=0：文案只说不可恢复，不提模板版本
+  const box = page.locator(".el-message-box");
+  await expect(box).toContainText("确认删除插件「AdMob 广告」？删除后不可恢复。");
+  await expect(box).not.toContainText("参数模板");
 
   const deletePromise = page.waitForRequest(
     (req) => req.method() === "DELETE" && req.url().endsWith("/api/admin/feature-plugins/admob")
   );
-  await page.locator(".el-message-box").getByRole("button", { name: "OK" }).click();
+  await box.getByRole("button", { name: "确认删除" }).click();
   await deletePromise;
   await expect(page.locator(".el-message").getByText("已删除插件")).toBeVisible();
+});
+
+test("删除有模板的插件：确认弹窗说清级联删除的模板版本数，确认后删除并刷新列表", async ({ page }) => {
+  await setup(page);
+  // 列表请求计数：删除成功后面板应重新拉取列表
+  let listCalls = 0;
+  await page.route(/\/api\/admin\/feature-plugins(\?.*)?$/, (route) => {
+    if (route.request().method() === "GET") {
+      listCalls += 1;
+    }
+    return json(route, 200, {
+      data: { items: [PLUGIN_HUAWEI, PLUGIN_ADMOB], page: 1, pageSize: 20, total: 2 }
+    });
+  });
+  await gotoTab(page, "插件主数据");
+  const listCallsBefore = listCalls;
+
+  await page
+    .locator("#pane-plugins")
+    .getByRole("row", { name: /huawei_push/ })
+    .getByRole("button", { name: "删除" })
+    .click();
+  // huawei_push 带 2 个模板版本：确认文案须点明级联删除数量与不可恢复
+  const box = page.locator(".el-message-box");
+  await expect(box).toContainText("确认删除插件「华为推送」？将同时删除其 2 个参数模板版本，删除后不可恢复。");
+
+  const deletePromise = page.waitForRequest(
+    (req) => req.method() === "DELETE" && req.url().endsWith("/api/admin/feature-plugins/huawei_push")
+  );
+  await box.getByRole("button", { name: "确认删除" }).click();
+  await deletePromise;
+  await expect(page.locator(".el-message").getByText("已删除插件")).toBeVisible();
+  // 删除成功后列表重新拉取
+  await expect.poll(() => listCalls).toBe(listCallsBefore + 1);
+});
+
+test("删除被渠道引用的插件返回 409 时行内提示且不弹全局 toast", async ({ page }) => {
+  await setup(page);
+  // 后注册的路由优先匹配：huawei_push 删除被后端 409 拒绝（渠道绑定引用）
+  await page.route(/\/api\/admin\/feature-plugins\/huawei_push$/, (route) => {
+    if (route.request().method() === "DELETE") {
+      return json(route, 409, {
+        error: { code: "CONFLICT", message: "该插件仍有关联数据（渠道绑定 2 条），请先删除关联数据" }
+      });
+    }
+    return json(route, 200, { data: PLUGIN_HUAWEI });
+  });
+  await gotoTab(page, "插件主数据");
+
+  await page
+    .locator("#pane-plugins")
+    .getByRole("row", { name: /huawei_push/ })
+    .getByRole("button", { name: "删除" })
+    .click();
+  await page.locator(".el-message-box").getByRole("button", { name: "确认删除" }).click();
+
+  // 409 行内提示（role=alert），不弹全局 toast，也不出现成功提示
+  const alert = page.locator("#pane-plugins .panel__error[role=alert]");
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText("该插件仍有关联数据（渠道绑定 2 条），请先删除关联数据");
+  await expect(page.locator(".el-message")).toHaveCount(0);
+  // 行数据保持（未刷新删除）
+  await expect(page.locator("#pane-plugins").getByRole("cell", { name: "huawei_push", exact: true })).toBeVisible();
+});
+
+test("新建插件填非法插件 ID 时被即时校验拦截，不发 POST", async ({ page }) => {
+  await setup(page);
+  // 后注册的路由优先匹配：统计 POST 是否发出
+  let postCalls = 0;
+  await page.route(/\/api\/admin\/feature-plugins(\?.*)?$/, (route) => {
+    if (route.request().method() === "POST") {
+      postCalls += 1;
+      return json(route, 201, { data: PLUGIN_ADMOB });
+    }
+    return json(route, 200, {
+      data: { items: [PLUGIN_HUAWEI, PLUGIN_ADMOB], page: 1, pageSize: 20, total: 2 }
+    });
+  });
+  await gotoTab(page, "插件主数据");
+
+  await page.getByRole("button", { name: "新建插件" }).click();
+  const drawer = page.locator(".el-drawer");
+  await drawer.getByPlaceholder(/如 huawei_push/).fill("1abc");
+  await drawer.getByPlaceholder(/如 华为推送/).fill("合法名称");
+  await drawer.getByRole("button", { name: "保存" }).click();
+
+  // 行内校验错误出现（插件 ID 只能小写字母/数字/下划线且字母开头），抽屉不关。
+  // 注意：分类页签的抽屉外壳常驻 DOM，直接断言 .el-drawer 会撞 strict mode，须按标题收窄
+  await expect(drawer.locator(".el-form-item__error").first()).toBeVisible();
+  await expect(page.locator(".el-drawer").filter({ hasText: "新建插件" })).toBeVisible();
+  // 校验拦截：POST 未发出
+  expect(postCalls).toBe(0);
 });
 
 test("插件行「参数模板」直达模板页签并渲染版本列表与生效标记", async ({ page }) => {

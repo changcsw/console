@@ -103,11 +103,17 @@ const form = reactive({
 
 // 与后端 ValidateCategoryCode / ValidateFeaturePluginCategory 同口径，文案对齐后端 message。
 // 编辑态 categoryCode disabled 不可改，回填值本身合法，rules 照常通过。
+// 注意：pattern 与 max 必须拆成两条 rule——async-validator 对带 RegExp pattern 的规则
+// 会把 type 推断为 'pattern'，该校验器只跑正则，同条的 max 会被静默跳过。
 const rules: FormRules = {
   categoryCode: [
     { required: true, message: "请输入分类编码", trigger: "blur" },
     {
       pattern: /^[a-z][a-z0-9_]*$/,
+      message: "分类编码只能用小写字母/数字/下划线，且以字母开头，长度不超过 64",
+      trigger: "blur"
+    },
+    {
       max: 64,
       message: "分类编码只能用小写字母/数字/下划线，且以字母开头，长度不超过 64",
       trigger: "blur"
@@ -211,8 +217,14 @@ async function submitForm() {
 }
 
 async function removeCategory(row: FeaturePluginCategory) {
+  // 按钮文案与插件删除确认弹窗保持一致：项目未配中文 locale，默认按钮是英文 OK/Cancel
   try {
-    await ElMessageBox.confirm(`确认删除分类「${row.categoryName}」？`, "删除分类", { type: "warning" });
+    await ElMessageBox.confirm(`确认删除分类「${row.categoryName}」？删除后不可恢复。`, "删除分类", {
+      type: "warning",
+      confirmButtonText: "确认删除",
+      cancelButtonText: "取消",
+      confirmButtonClass: "el-button--danger"
+    });
   } catch {
     return;
   }

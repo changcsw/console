@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
-import { ElMessageBox } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import permDirective from "@/directives/perm";
 import { usePermissionStore } from "@/stores/permission";
 import { ApiError } from "@/api/http";
@@ -45,6 +45,7 @@ type PanelVm = {
   filterEnabled: string;
   listError: string;
   editing: boolean;
+  saving: boolean;
   formError: string;
   form: Record<string, unknown>;
   drawerVisible: boolean;
@@ -54,6 +55,10 @@ type PanelVm = {
   submitForm: () => Promise<void>;
   removeCategory: (row: FeaturePluginCategory) => Promise<void>;
 };
+
+// EP 2.14 的 form-item 错误展示经 refDebounced(validateState, 100) 防抖：
+// validate settle 后 .el-form-item__error 的出现/消失都要再等 100ms+ 才反映到 DOM
+const waitErrorDebounce = () => new Promise((resolve) => setTimeout(resolve, 150));
 
 async function mountPanel(perms = ["feature_plugin.read", "feature_plugin.write"]) {
   setActivePinia(createPinia());
@@ -175,14 +180,24 @@ describe("PluginCategoriesPanel", () => {
     expect(vm.drawerVisible).toBe(true);
   });
 
-  test("删除成功后刷新列表", async () => {
+  test("删除成功后刷新列表，确认弹窗按钮与插件页签口径一致", async () => {
     vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
     deleteFeaturePluginCategoryApi.mockResolvedValue(undefined);
     const wrapper = await mountPanel();
     const vm = wrapper.vm as unknown as PanelVm;
 
     await vm.removeCategory(category());
-    expect(ElMessageBox.confirm).toHaveBeenCalled();
+    // 与插件删除确认同口径：中文按钮 + danger 确认键 + 不可恢复说明
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      "确认删除分类「登录类」？删除后不可恢复。",
+      "删除分类",
+      expect.objectContaining({
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消",
+        confirmButtonClass: "el-button--danger"
+      })
+    );
     expect(deleteFeaturePluginCategoryApi).toHaveBeenCalledWith(1);
     // 挂载 1 次 + 删除后刷新 1 次
     expect(listFeaturePluginCategoriesApi).toHaveBeenCalledTimes(2);
@@ -214,6 +229,94 @@ describe("PluginCategoriesPanel", () => {
 
     await vm.removeCategory(category());
     expect(deleteFeaturePluginCategoryApi).not.toHaveBeenCalled();
+  });
+
+  test("删除失败为非 409 错误时走 toast 而非行内提示", async () => {
+    vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
+    const errorSpy = vi.spyOn(ElMessage, "error").mockImplementation(() => ({}) as never);
+    deleteFeaturePluginCategoryApi.mockRejectedValue(new ApiError(500, "INTERNAL", "数据库连接失败"));
+    const wrapper = await mountPanel();
+    const vm = wrapper.vm as unknown as PanelVm;
+
+    await vm.removeCategory(category());
+    await flushPromises();
+
+    expect(errorSpy).toHaveBeenCalledWith("数据库连接失败");
+    expect(vm.listError).toBe("");
+    expect(wrapper.find(".panel__error[role=alert]").exists()).toBe(false);
+  });
+
+  test("rules 即时校验：非法分类编码 / 空名称 / 纯空格名称 / 排序越界均拦截提交", async () => {
+    const wrapper = await mountPanel();
+    const vm = wrapper.vm as unknown as PanelVm;
+
+    const cases: Array<Record<string, unknown>> = [
+      { categoryCode: "1abc" }, // 数字开头
+      { categoryCode: "ABC" }, // 含大写
+      { categoryCode: "abc-def" }, // 含横线
+      { categoryCode: `${"a".repeat(65)}` }, // 超 64 字符
+      { categoryName: "" }, // 空名称
+      { categoryName: "   " } // 纯空格名称
+    ];
+    for (const patch of cases) {
+      vm.openCreate();
+      await flushPromises();
+      Object.assign(vm.form, {
+        categoryCode: "good_code",
+        categoryName: "合法名称",
+        sort: 0,
+        enabled: true,
+        ...patch
+      });
+      await flushPromises();
+      await vm.submitForm();
+      await flushPromises();
+
+      // 校验不过：不发请求、不置 saving、抽屉不关
+      expect(createFeaturePluginCategoryApi, JSON.stringify(patch)).not.toHaveBeenCalled();
+      expect(updateFeaturePluginCategoryApi, JSON.stringify(patch)).not.toHaveBeenCalled();
+      expect(vm.saving, JSON.stringify(patch)).toBe(false);
+      expect(vm.drawerVisible, JSON.stringify(patch)).toBe(true);
+    }
+    await waitErrorDebounce();
+    expect(wrapper.find(".el-form-item__error").exists()).toBe(true);
+  });
+
+  test("排序越界值被 el-input-number 钳回界内（组件层兜底，rules 的 0-9999 为双保险）", async () => {
+    createFeaturePluginCategoryApi.mockResolvedValue(category({ id: 2 }));
+    const wrapper = await mountPanel();
+    const vm = wrapper.vm as unknown as PanelVm;
+
+    vm.openCreate();
+    await flushPromises();
+    Object.assign(vm.form, { categoryCode: "good_code", categoryName: "合法名称", enabled: true });
+    // 直接赋越界值：el-input-number 的 :min/:max 将其钳回界内，越界值根本到不了 rules
+    vm.form.sort = 10000;
+    await flushPromises();
+    expect(vm.form.sort).toBe(9999);
+
+    await vm.submitForm();
+    expect(createFeaturePluginCategoryApi).toHaveBeenCalledWith(expect.objectContaining({ sort: 9999 }));
+  });
+
+  test("编辑态回填值合法：rules 不误报，可正常保存", async () => {
+    updateFeaturePluginCategoryApi.mockResolvedValue(category());
+    const wrapper = await mountPanel();
+    const vm = wrapper.vm as unknown as PanelVm;
+
+    // 编辑态 categoryCode 禁用不可改，回填值本身合法，rules 应直接通过
+    vm.openEdit(category());
+    await flushPromises();
+    await vm.submitForm();
+    await flushPromises();
+
+    expect(updateFeaturePluginCategoryApi).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ categoryName: "登录类" })
+    );
+    expect(vm.formError).toBe("");
+    expect(wrapper.find(".el-form-item__error").exists()).toBe(false);
+    expect(vm.drawerVisible).toBe(false);
   });
 
   test("写权限缺失时写操作按钮被 v-perm 置灰", async () => {

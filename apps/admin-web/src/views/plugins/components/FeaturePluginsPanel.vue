@@ -173,11 +173,17 @@ const form = reactive({
 
 // 与后端 ValidatePluginID / ValidateFeaturePluginMaster 同口径，文案对齐后端 message。
 // 编辑态 pluginId / region disabled 不可改，回填值本身合法，rules 照常通过。
+// 注意：pattern 与 max 必须拆成两条 rule——async-validator 对带 RegExp pattern 的规则
+// 会把 type 推断为 'pattern'，该校验器只跑正则，同条的 max 会被静默跳过。
 const rules: FormRules = {
   pluginId: [
     { required: true, message: "请输入插件 ID", trigger: "blur" },
     {
       pattern: /^[a-z][a-z0-9_]*$/,
+      message: "插件 ID 只能用小写字母/数字/下划线，且以字母开头，长度不超过 64",
+      trigger: "blur"
+    },
+    {
       max: 64,
       message: "插件 ID 只能用小写字母/数字/下划线，且以字母开头，长度不超过 64",
       trigger: "blur"
