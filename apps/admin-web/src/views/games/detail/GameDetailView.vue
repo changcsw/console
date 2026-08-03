@@ -150,7 +150,7 @@ function applyTopbarState() {
     },
     {
       key: "game-detail",
-      label: game.value?.alias || game.value?.name || "游戏详情"
+      label: game.value?.name || "游戏详情"
     }
   ]);
   topbar.setActions({
