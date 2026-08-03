@@ -431,7 +431,13 @@ func (s *Service) UpdateTemplate(ctx context.Context, cmd dto.UpdateFeaturePlugi
 	}); err != nil {
 		return zero, err
 	}
-	return s.withEffectiveFlag(ctx, merged)
+	// 回读而非直接回显 merged：Replace 里 updated_at 由 NOW() 落库，merged 持有的是写前时间戳，
+	// 直接回显会让 PATCH 响应的 updatedAt 停在旧值（与 UpdateCategory/UpdatePlugin 的回读口径不一致）。
+	saved, err := s.tx.Repositories().Templates.GetByID(ctx, merged.ID)
+	if err != nil {
+		return zero, mapLoadErr(err, "插件模板不存在")
+	}
+	return s.withEffectiveFlag(ctx, saved)
 }
 
 // ===== helpers =====

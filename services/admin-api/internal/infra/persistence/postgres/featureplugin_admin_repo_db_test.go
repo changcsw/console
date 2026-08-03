@@ -363,6 +363,12 @@ func TestFeaturePluginTemplateAdminRepo_CRUD_DB(t *testing.T) {
 	if afterReplace.TemplateVersion != "v1" || afterReplace.PluginIDRef != plugin.Plugin.ID {
 		t.Fatalf("Replace must not change version/plugin_id_ref, got %+v", afterReplace)
 	}
+	// Replace 会写 updated_at = NOW()，应用层 UpdateTemplate 回读这一行来回显 updatedAt。
+	// 本用例整体跑在单个事务里，PG 的 NOW() 在事务内是常量，故只能断言不回退（同 Category 用例口径）；
+	// 「PATCH 响应的 updatedAt 会推进」由跨事务的真实联调覆盖。
+	if afterReplace.UpdatedAt.Before(created.UpdatedAt) {
+		t.Fatalf("Replace should not regress updated_at: created=%v afterReplace=%v", created.UpdatedAt, afterReplace.UpdatedAt)
+	}
 
 	// (plugin_id_ref, template_version) 唯一：重复插入应映射为 ErrConflict（SAVEPOINT 隔离，见上方注释）。
 	withSavepoint(t, tx, func(sp pgx.Tx) {
