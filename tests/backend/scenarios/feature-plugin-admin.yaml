@@ -1,0 +1,826 @@
+# 模块 feature-plugin-admin（功能插件管理，系统侧基础数据）接口场景矩阵 manifest
+# 维度定义见 docs/architecture/v2/03-testing.md §4。这是「系统管理员维护插件分类字典 /
+# 插件主数据 / 参数模板四件套」的后台接口（权限码 feature_plugin.read / feature_plugin.write，
+# migrations/000020 建表 + seed），与模块 15（游戏侧渠道实例插件配置，plugin.read/plugin.write，
+# tests/backend/scenarios/feature-plugin.yaml）是两套完全独立的权限码与数据表，不可混用。
+# 代码位置：services/admin-api/internal/{domain/plugin/feature_plugin_admin.go,
+#   app/featureplugin, transport/http/featureplugin, infra/persistence/postgres/featureplugin_admin_*}。
+#
+# 运行说明（与 cashier-template.yaml/game.yaml 一致）：
+#   进程内 httptest harness（无 POSTGRES_DSN/ADMIN_JWT_SECRET → ready=false）：
+#     - requiresDB:false 的 S2 用例（受保护接口先过 Authn，未携带/无效令牌即 401）在沙箱内真实执行并断言。
+#     - requiresDB:true 的用例需 PG + 全装配，进程内 harness 跳过，仅校验 manifest 可解析；
+#       SCENARIO_WITH_DB=1 时由连库 harness（tests/fixtures/common/feature-plugin-admin.sql 提供
+#       RBAC 角色 + 固定 id 9001-9003 的分类/插件/模板样本）执行。
+#   这些维度已由进程内 L3 httptest（feature_plugin_http_test.go，内存仓储 + 真实 JWT/路由/中间件/
+#   审计 spy）逐一硬断言覆盖；本 manifest 的连库用例是对同一套接口在真实 Postgres 上的等价验证。
+#
+# 单次性写用例（幂等边界，务必知悉）：create_category_success / create_plugin_success /
+#   create_template_success / delete_category_success / delete_plugin_success 五个用例会在真实库
+#   产生「一次性」状态迁移（新建行 / 删除固定 fixture 行），二次针对同一持久化 DB 重跑会因
+#   「已存在」或「已删除→404」而失败。这与仓库里其它模块（如 cashier-template.yaml 的
+#   create_template_success/templateId=brand_new）同一约定：SCENARIO_WITH_DB=1 用例假定跑在
+#   scripts/regression/run.sh 每次全新启停的 docker postgres 容器上，而非长期复用的开发库。
+#   PATCH 类成功用例改为「绝对值赋值」（而非相对增量），天然可重复执行。
+#
+# 模块维度适用性矩阵（compact + 03-testing §4）：
+#   - S6（跨 env）：本模块 3 张表（feature_plugin_categories/feature_plugins/feature_plugin_templates）
+#     全部位于共享 schema platform，业务行无 env 列；读写恒落 platform，不随前端 env 切换、不跨 schema。
+#     标注在若干只读用例上（复用同一 GET 请求，不额外产生写副作用）。
+#   - S8（脱敏）：模板四件套的 secretFieldsJson 只登记「哪些 key 是敏感字段」，不存密文本身
+#     （实际密文落在游戏侧渠道实例配置 game_channel_plugin_configs，属模块 15），故本模块 S8 = N/A。
+#   - S9（分页）：分类字典体量小、全量返回不分页 → N/A；插件主数据 GET /feature-plugins 分页 → 覆盖。
+#   - S10（事务回滚）：本模块所有写路径都是「预检查（读）+ 单条 INSERT/UPDATE/DELETE」在同一
+#     InTx 内，不存在跨多表的多语句写，故没有可观察的「部分写入回滚」现象 → N/A（预检查失败时
+#     单条写从未发生，等价断言见 feature_plugin_http_test.go 的「冲突/校验失败不落库、不写审计」）。
+module: feature-plugin-admin
+cases:
+  # ═════════════════ 1) GET /feature-plugin-categories（feature_plugin.read，全量不分页）
+  - name: list_categories_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/feature-plugin-categories
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_categories_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    note: "无任何权限 → 403 FORBIDDEN"
+    request:
+      method: GET
+      path: /api/admin/feature-plugin-categories
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_categories_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    fixture: common/feature-plugin-admin/base
+    note: "200 + 统一包络 { items[] }；字典体量小不分页"
+    request:
+      method: GET
+      path: /api/admin/feature-plugin-categories
+    expect:
+      status: 200
+  - name: list_categories_invalid_enabled
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    note: "enabled 非布尔 → 400 VALIDATION_FAILED"
+    request:
+      method: GET
+      path: /api/admin/feature-plugin-categories?enabled=maybe
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: list_categories_platform_schema
+    dimension: S6
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    note: "平台级：读 platform schema（search_path 决定），不随前端 env 切换、不跨 schema"
+    request:
+      method: GET
+      path: /api/admin/feature-plugin-categories
+    expect:
+      status: 200
+
+  # ═════════════════ 2) POST /feature-plugin-categories（feature_plugin.write，审计 feature_plugin_category.create）
+  - name: create_category_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/feature-plugin-categories
+      body: { categoryCode: "qa_x", categoryName: "X" }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: create_category_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    note: "仅 feature_plugin.read 缺写 → 403"
+    request:
+      method: POST
+      path: /api/admin/feature-plugin-categories
+      body: { categoryCode: "qa_x", categoryName: "X" }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: create_category_validation_missing_name
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "categoryName 空 → 400（details 含 field=categoryName）"
+    request:
+      method: POST
+      path: /api/admin/feature-plugin-categories
+      body: { categoryCode: "qa_validation_target", categoryName: "  " }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_category_conflict_duplicate_code
+    dimension: S5
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    fixture: common/feature-plugin-admin/base
+    note: "categoryCode 唯一（platform 全局）→ 409 CONFLICT；qa_sample_cat 由 fixture 固定存在"
+    request:
+      method: POST
+      path: /api/admin/feature-plugin-categories
+      body: { categoryCode: "qa_sample_cat", categoryName: "重复分类" }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: create_category_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "201 + 视图字段齐全（一次性用例，见文件头说明）"
+    request:
+      method: POST
+      path: /api/admin/feature-plugin-categories
+      body: { categoryCode: "qa_scenario_created_cat", categoryName: "QA 场景新建分类", sort: 930 }
+    expect:
+      status: 201
+      jsonContains: { data.categoryCode: "qa_scenario_created_cat", data.enabled: true }
+
+  # ═════════════════ 3) PATCH /feature-plugin-categories/{id}（feature_plugin.write，审计 feature_plugin_category.update）
+  - name: update_category_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugin-categories/9001
+      body: { categoryName: "X" }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: update_category_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugin-categories/9001
+      body: { categoryName: "X" }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: update_category_validation
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    fixture: common/feature-plugin-admin/base
+    note: "categoryName 空白 → 400"
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugin-categories/9001
+      body: { categoryName: "   " }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: update_category_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "id 不存在 → 404 NOT_FOUND"
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugin-categories/9999998
+      body: { categoryName: "X" }
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: update_category_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    fixture: common/feature-plugin-admin/base
+    note: "绝对值赋值（非相对增量）→ 可重复执行；200 + 回显新值"
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugin-categories/9001
+      body: { categoryName: "QA 示例分类", sort: 910, enabled: true }
+    expect:
+      status: 200
+      jsonContains: { data.categoryName: "QA 示例分类", data.sort: 910 }
+
+  # ═════════════════ 4) DELETE /feature-plugin-categories/{id}（feature_plugin.write，审计 feature_plugin_category.delete）
+  - name: delete_category_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: DELETE
+      path: /api/admin/feature-plugin-categories/9002
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: delete_category_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    request:
+      method: DELETE
+      path: /api/admin/feature-plugin-categories/9002
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: delete_category_conflict_has_plugins
+    dimension: S5
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    fixture: common/feature-plugin-admin/base
+    note: "qa_sample_cat(9001) 下仍有 qa_sample_plugin(9001) → 409 CONFLICT，且不删除（可重复执行）"
+    request:
+      method: DELETE
+      path: /api/admin/feature-plugin-categories/9001
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: delete_category_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "id 不存在 → 404 NOT_FOUND"
+    request:
+      method: DELETE
+      path: /api/admin/feature-plugin-categories/9999997
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: delete_category_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "qa_removable_cat(9002) 无插件挂载 → 204（一次性用例，见文件头说明）"
+    request:
+      method: DELETE
+      path: /api/admin/feature-plugin-categories/9002
+    expect:
+      status: 204
+
+  # ═════════════════ 5) GET /feature-plugins（feature_plugin.read，分页）
+  - name: list_plugins_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/feature-plugins
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_plugins_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/feature-plugins
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_plugins_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    fixture: common/feature-plugin-admin/base
+    note: "200 + Page 包络；含分类冗余字段与模板计数"
+    request:
+      method: GET
+      path: /api/admin/feature-plugins?keyword=qa_sample_plugin
+    expect:
+      status: 200
+      jsonContains: { data.items.0.pluginId: "qa_sample_plugin", data.items.0.categoryCode: "qa_sample_cat" }
+  - name: list_plugins_invalid_filter
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    note: "region 非枚举 → 400 VALIDATION_FAILED"
+    request:
+      method: GET
+      path: /api/admin/feature-plugins?region=mars
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: list_plugins_pagination
+    dimension: S9
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    fixture: common/feature-plugin-admin/base
+    note: "page/pageSize 生效；pageSize 越界钳制为 100（00 §7.3）"
+    request:
+      method: GET
+      path: /api/admin/feature-plugins?page=1&pageSize=99999
+    expect:
+      status: 200
+      jsonContains: { data.pageSize: 100, data.page: 1 }
+  - name: list_plugins_platform_schema
+    dimension: S6
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    note: "平台级：读 platform schema，不随前端 env 切换、不跨 schema"
+    request:
+      method: GET
+      path: /api/admin/feature-plugins
+    expect:
+      status: 200
+
+  # ═════════════════ 6) POST /feature-plugins（feature_plugin.write，审计 feature_plugin.create）
+  - name: create_plugin_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/feature-plugins
+      body: { pluginId: "qa_x", pluginName: "X", region: "domestic" }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: create_plugin_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    request:
+      method: POST
+      path: /api/admin/feature-plugins
+      body: { pluginId: "qa_x", pluginName: "X", region: "domestic" }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: create_plugin_validation_bad_region
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "region 非枚举 → 400（details 含 field=region）"
+    request:
+      method: POST
+      path: /api/admin/feature-plugins
+      body: { pluginId: "qa_validation_target", pluginName: "X", region: "CN" }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_plugin_validation_category_not_exists
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "categoryId 指向不存在的分类 → 400（区别于 S5 的唯一键冲突）"
+    request:
+      method: POST
+      path: /api/admin/feature-plugins
+      body: { pluginId: "qa_validation_target2", pluginName: "X", region: "domestic", categoryId: 9999996 }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_plugin_conflict_duplicate_id
+    dimension: S5
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    fixture: common/feature-plugin-admin/base
+    note: "pluginId 唯一（platform 全局）→ 409 CONFLICT；qa_sample_plugin 由 fixture 固定存在"
+    request:
+      method: POST
+      path: /api/admin/feature-plugins
+      body: { pluginId: "qa_sample_plugin", pluginName: "重复插件", region: "domestic" }
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: create_plugin_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "201 + 缺省 enabled=true、未归类（一次性用例，见文件头说明）"
+    request:
+      method: POST
+      path: /api/admin/feature-plugins
+      body: { pluginId: "qa_scenario_created_plugin", pluginName: "QA 场景新建插件", region: "overseas" }
+    expect:
+      status: 201
+      jsonContains: { data.pluginId: "qa_scenario_created_plugin", data.enabled: true, data.templateCount: 0 }
+
+  # ═════════════════ 7) GET /feature-plugins/{pluginId}（feature_plugin.read，详情）
+  - name: get_plugin_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/feature-plugins/qa_sample_plugin
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: get_plugin_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/feature-plugins/qa_sample_plugin
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: get_plugin_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    fixture: common/feature-plugin-admin/base
+    note: "200 + 分类冗余字段（categoryCode/categoryName 随 category_id_ref join 展示）"
+    request:
+      method: GET
+      path: /api/admin/feature-plugins/qa_sample_plugin
+    expect:
+      status: 200
+      jsonContains: { data.pluginId: "qa_sample_plugin", data.categoryCode: "qa_sample_cat" }
+  - name: get_plugin_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    note: "pluginId 不存在 → 404 NOT_FOUND"
+    request:
+      method: GET
+      path: /api/admin/feature-plugins/qa_missing_plugin_xyz
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+
+  # ═════════════════ 8) PATCH /feature-plugins/{pluginId}（feature_plugin.write，审计 feature_plugin.update）
+  - name: update_plugin_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugins/qa_sample_plugin
+      body: { pluginName: "X" }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: update_plugin_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugins/qa_sample_plugin
+      body: { pluginName: "X" }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: update_plugin_validation
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    fixture: common/feature-plugin-admin/base
+    note: "pluginName 空白 → 400"
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugins/qa_sample_plugin
+      body: { pluginName: "  " }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: update_plugin_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugins/qa_missing_plugin_xyz
+      body: { pluginName: "X" }
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: update_plugin_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    fixture: common/feature-plugin-admin/base
+    note: "绝对值赋值（非相对增量，不改 categoryId 归属，保留分类删除保护样本前提）→ 可重复执行"
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugins/qa_sample_plugin
+      body: { pluginName: "QA 示例插件", sort: 910, enabled: true }
+    expect:
+      status: 200
+      jsonContains: { data.pluginName: "QA 示例插件", data.pluginId: "qa_sample_plugin" }
+  - name: update_plugin_platform_schema
+    dimension: S6
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "平台级：写恒落 platform schema，不跨 schema（绝对值赋值，可重复执行）"
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugins/qa_sample_plugin
+      body: { sort: 910 }
+    expect:
+      status: 200
+
+  # ═════════════════ 9) DELETE /feature-plugins/{pluginId}（feature_plugin.write，审计 feature_plugin.delete）
+  - name: delete_plugin_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: DELETE
+      path: /api/admin/feature-plugins/qa_deletable_plugin
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: delete_plugin_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    request:
+      method: DELETE
+      path: /api/admin/feature-plugins/qa_deletable_plugin
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: delete_plugin_conflict_has_template
+    dimension: S5
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    fixture: common/feature-plugin-admin/base
+    note: "qa_template_plugin 仍有模板版本 v1(id=9001) → 409 CONFLICT，且不删除（可重复执行）"
+    request:
+      method: DELETE
+      path: /api/admin/feature-plugins/qa_template_plugin
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: delete_plugin_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    request:
+      method: DELETE
+      path: /api/admin/feature-plugins/qa_missing_plugin_xyz
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: delete_plugin_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "qa_deletable_plugin(9003) 无模板/无引用 → 204（一次性用例，见文件头说明）"
+    request:
+      method: DELETE
+      path: /api/admin/feature-plugins/qa_deletable_plugin
+    expect:
+      status: 204
+
+  # ═════════════════ 10) GET /feature-plugins/{pluginId}/templates（feature_plugin.read）
+  - name: list_templates_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/feature-plugins/qa_template_plugin/templates
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: list_templates_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/feature-plugins/qa_template_plugin/templates
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: list_templates_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    fixture: common/feature-plugin-admin/base
+    note: "200 + items[]；v1 是唯一 enabled 版本 → effective=true"
+    request:
+      method: GET
+      path: /api/admin/feature-plugins/qa_template_plugin/templates
+    expect:
+      status: 200
+      jsonContains: { data.items.0.templateVersion: "v1", data.items.0.effective: true }
+  - name: list_templates_plugin_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    note: "pluginId 不存在 → 404 NOT_FOUND"
+    request:
+      method: GET
+      path: /api/admin/feature-plugins/qa_missing_plugin_xyz/templates
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: list_templates_platform_schema
+    dimension: S6
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    note: "平台级：读 platform schema，不随前端 env 切换、不跨 schema"
+    request:
+      method: GET
+      path: /api/admin/feature-plugins/qa_template_plugin/templates
+    expect:
+      status: 200
+
+  # ═════════════════ 11) POST /feature-plugins/{pluginId}/templates（feature_plugin.write，审计 feature_plugin_template.create）
+  - name: create_template_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: POST
+      path: /api/admin/feature-plugins/qa_template_plugin/templates
+      body: { templateVersion: "v9" }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: create_template_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    request:
+      method: POST
+      path: /api/admin/feature-plugins/qa_template_plugin/templates
+      body: { templateVersion: "v9" }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: create_template_validation_empty_form
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "formSchemaJson 为空 → 400（details 含 field=formSchemaJson）"
+    request:
+      method: POST
+      path: /api/admin/feature-plugins/qa_template_plugin/templates
+      body: { templateVersion: "v_bad", formSchemaJson: [], secretFieldsJson: [], fileFieldsJson: [], validationRulesJson: {} }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: create_template_conflict_duplicate_version
+    dimension: S5
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    fixture: common/feature-plugin-admin/base
+    note: "(pluginIdRef, templateVersion) 唯一；v1 由 fixture 固定存在 → 409 CONFLICT"
+    request:
+      method: POST
+      path: /api/admin/feature-plugins/qa_template_plugin/templates
+      body:
+        templateVersion: "v1"
+        formSchemaJson:
+          - { key: "appId", label: "App ID", component: "input", required: true, order: 10, scope: "both" }
+        secretFieldsJson: []
+        fileFieldsJson: []
+        validationRulesJson: {}
+    expect:
+      status: 409
+      jsonContains: { error.code: CONFLICT }
+  - name: create_template_plugin_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "pluginId 不存在 → 404 NOT_FOUND"
+    request:
+      method: POST
+      path: /api/admin/feature-plugins/qa_missing_plugin_xyz/templates
+      body:
+        templateVersion: "v1"
+        formSchemaJson:
+          - { key: "appId", label: "App ID", component: "input", required: true, order: 10 }
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: create_template_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    note: "作用于 qa_sample_plugin(9001)（当前无模板），不改动 qa_template_plugin 的 effective 版本判定
+      （一次性用例，见文件头说明）"
+    request:
+      method: POST
+      path: /api/admin/feature-plugins/qa_sample_plugin/templates
+      body:
+        templateVersion: "v1"
+        formSchemaJson:
+          - { key: "appId", label: "App ID", component: "input", required: true, order: 10, scope: "both" }
+        secretFieldsJson: []
+        fileFieldsJson: []
+        validationRulesJson: {}
+    expect:
+      status: 201
+      jsonContains: { data.pluginId: "qa_sample_plugin", data.templateVersion: "v1", data.effective: true }
+
+  # ═════════════════ 12) GET /feature-plugin-templates/{templateId}（feature_plugin.read）
+  - name: get_template_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: GET
+      path: /api/admin/feature-plugin-templates/9001
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: get_template_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: no_perm }
+    request:
+      method: GET
+      path: /api/admin/feature-plugin-templates/9001
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: get_template_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    fixture: common/feature-plugin-admin/base
+    note: "200 + 装配出的 pluginId 业务键"
+    request:
+      method: GET
+      path: /api/admin/feature-plugin-templates/9001
+    expect:
+      status: 200
+      jsonContains: { data.templateId: 9001, data.pluginId: "qa_template_plugin", data.templateVersion: "v1" }
+  - name: get_template_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    note: "id 不存在 → 404 NOT_FOUND"
+    request:
+      method: GET
+      path: /api/admin/feature-plugin-templates/9999995
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+
+  # ═════════════════ 13) PATCH /feature-plugin-templates/{templateId}（feature_plugin.write，审计 feature_plugin_template.update）
+  - name: update_template_requires_auth
+    dimension: S2
+    requiresDB: false
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugin-templates/9001
+      body: { enabled: true }
+    expect:
+      status: 401
+      jsonContains: { error.code: UNAUTHENTICATED }
+  - name: update_template_forbidden
+    dimension: S3
+    requiresDB: true
+    auth: { role: feature_plugin_reader }
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugin-templates/9001
+      body: { enabled: true }
+    expect:
+      status: 403
+      jsonContains: { error.code: FORBIDDEN }
+  - name: update_template_validation
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    fixture: common/feature-plugin-admin/base
+    note: "password 组件未登记敏感字段 → 400"
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugin-templates/9001
+      body:
+        formSchemaJson:
+          - { key: "secretKey", label: "密钥", component: "password", required: true, order: 10 }
+    expect:
+      status: 400
+      jsonContains: { error.code: VALIDATION_FAILED }
+  - name: update_template_not_found
+    dimension: S4
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugin-templates/9999994
+      body: { enabled: false }
+    expect:
+      status: 404
+      jsonContains: { error.code: NOT_FOUND }
+  - name: update_template_success
+    dimension: S1
+    requiresDB: true
+    auth: { role: feature_plugin_admin }
+    fixture: common/feature-plugin-admin/base
+    note: "整体替换四件套语义；绝对值赋值回原样 → 可重复执行"
+    request:
+      method: PATCH
+      path: /api/admin/feature-plugin-templates/9001
+      body:
+        formSchemaJson:
+          - { key: "appId", label: "App ID", component: "input", required: true, order: 10, group: "basic", scope: "both" }
+        secretFieldsJson: []
+        fileFieldsJson: []
+        validationRulesJson: { appId: { minLen: 1, maxLen: 64 } }
+        enabled: true
+    expect:
+      status: 200
+      jsonContains: { data.templateVersion: "v1", data.enabled: true, data.effective: true }

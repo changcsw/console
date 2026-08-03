@@ -44,6 +44,12 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: "渠道管理", icon: "Connection", perm: "platform_channel.read" }
       },
       {
+        path: "plugins",
+        name: "plugins",
+        component: () => import("@/views/plugins/PluginsView.vue"),
+        meta: { title: "功能插件管理", icon: "MagicStick", perm: "feature_plugin.read" }
+      },
+      {
         path: "cashier",
         name: "cashier",
         component: () => import("@/views/cashier/CashierView.vue"),

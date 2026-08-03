@@ -130,6 +130,7 @@ import {
   Grid,
   House,
   InfoFilled,
+  MagicStick,
   Menu as MenuIcon,
   Setting,
   Wallet
@@ -195,6 +196,7 @@ const routeIconMap: Record<string, Component> = {
   House,
   Grid,
   Connection,
+  MagicStick,
   CreditCard,
   Wallet,
   Document,

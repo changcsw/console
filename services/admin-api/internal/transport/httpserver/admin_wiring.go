@@ -16,6 +16,7 @@ import (
 	channelapp "github.com/csw/console/services/admin-api/internal/app/channel"
 	channelloginapp "github.com/csw/console/services/admin-api/internal/app/channellogin"
 	"github.com/csw/console/services/admin-api/internal/app/command"
+	featurepluginapp "github.com/csw/console/services/admin-api/internal/app/featureplugin"
 	gameapp "github.com/csw/console/services/admin-api/internal/app/game"
 	paymentapp "github.com/csw/console/services/admin-api/internal/app/payment"
 	platformchannelapp "github.com/csw/console/services/admin-api/internal/app/platformchannel"
@@ -36,6 +37,7 @@ import (
 	cashierhttp "github.com/csw/console/services/admin-api/internal/transport/http/cashier"
 	channelshttp "github.com/csw/console/services/admin-api/internal/transport/http/channels"
 	dashboardhttp "github.com/csw/console/services/admin-api/internal/transport/http/dashboard"
+	featurepluginhttp "github.com/csw/console/services/admin-api/internal/transport/http/featureplugin"
 	gameshttp "github.com/csw/console/services/admin-api/internal/transport/http/games"
 	paymenthttp "github.com/csw/console/services/admin-api/internal/transport/http/payment"
 	platformchannelhttp "github.com/csw/console/services/admin-api/internal/transport/http/platformchannel"
@@ -71,6 +73,7 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 		gameshttp.RegisterRoutes(r, gameshttp.NewHandler(nil, env), iss, env, logger, false, nil)
 		channelshttp.RegisterRoutes(r, channelshttp.NewHandler(nil, env), iss, env, logger, false, nil)
 		platformchannelhttp.RegisterRoutes(r, platformchannelhttp.NewHandler(nil), iss, env, logger, false, nil)
+		featurepluginhttp.RegisterRoutes(r, featurepluginhttp.NewHandler(nil), iss, env, logger, false, nil)
 		cashierhttp.RegisterRoutes(r, cashierhttp.NewHandler(nil), iss, env, logger, false, nil)
 		paymenthttp.RegisterRoutes(r, paymenthttp.NewHandler(nil), iss, env, logger, false, nil)
 		snapshothttp.RegisterRoutes(r, snapshothttp.NewHandler(nil), iss, env, logger, false, nil)
@@ -146,6 +149,9 @@ func buildAdminRouter(cfg config.Config, logger *slog.Logger) chi.Router {
 
 	platformChannelSvc := platformchannelapp.NewService(postgres.NewPlatformChannelStore(pool), auditSink)
 	platformchannelhttp.RegisterRoutes(r, platformchannelhttp.NewHandler(platformChannelSvc), issuer, env, logger, true, auditSvc)
+
+	featurePluginSvc := featurepluginapp.NewService(postgres.NewFeaturePluginAdminStore(pool), auditSink)
+	featurepluginhttp.RegisterRoutes(r, featurepluginhttp.NewHandler(featurePluginSvc), issuer, env, logger, true, auditSvc)
 
 	cashierSvc := cashierapp.NewService(postgres.NewCashierStore(pool), auditSink, time.Now)
 	cashierhttp.RegisterRoutes(r, cashierhttp.NewHandler(cashierSvc), issuer, env, logger, true, auditSvc)

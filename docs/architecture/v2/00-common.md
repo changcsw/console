@@ -339,6 +339,7 @@ EUR  Euro               decimal=2 min=1 rounding=half_up
 | `SYNC_TOKEN_CONSUMED` | 409 | 同步 baseline_token 已被消费（重复 execute），见 `sync` §5.4 |
 | `VERSION_STATE_INVALID` | 409 | 版本状态流转非法 |
 | `ROUTE_CONFLICT` | 409 | 支付路由优先级/选择器冲突 |
+| `ENV_SCHEMA_NOT_READY` | 409 | 当前 env schema 缺业务表结构（迁移未执行），操作暂不可判定 |
 | `INTERNAL` | 500 | 服务端内部错误 |
 
 ### 7.5 鉴权与权限码（D5）
