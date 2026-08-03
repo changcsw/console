@@ -278,9 +278,14 @@ async function openGameDetail(page: Page) {
   await expect(page.locator(".detail-head__title")).toContainText("星际远征", { timeout: 45_000 });
 }
 
+// Sync 入口在 topbar bridge 落地后由 AdminLayout 的 topbar 渲染，文案是「同步到生产」；
+// GameDetailView 里同名按钮只在无 topbar bridge（组件级 vitest）时作为回退渲染，文案仍是
+// 英文。整页 e2e 两种宿主都可能命中，故按两种文案取并集匹配，负向断言也因此更严格。
+const SYNC_ENTRY = /同步到生产|Sync to Production/;
+
 async function openSyncDrawer(page: Page) {
   await openGameDetail(page);
-  await page.getByRole("button", { name: "Sync to Production" }).click();
+  await page.getByRole("button", { name: SYNC_ENTRY }).click();
   await expect(page.locator(".sync-drawer")).toBeVisible();
   await expect(page.locator(".sync-section-card").first()).toBeVisible();
 }
@@ -288,19 +293,19 @@ async function openSyncDrawer(page: Page) {
 test("红线正向：sandbox 详情页渲染 Sync to Production 入口", async ({ page }) => {
   await setup(page);
   await openGameDetail(page);
-  await expect(page.getByRole("button", { name: "Sync to Production" })).toBeVisible();
+  await expect(page.getByRole("button", { name: SYNC_ENTRY })).toBeVisible();
 });
 
 test("红线：production 运行环境绝不渲染 Sync 入口", async ({ page }) => {
   await setup(page, { environment: "production" });
   await openGameDetail(page);
-  await expect(page.getByRole("button", { name: "Sync to Production" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: SYNC_ENTRY })).toHaveCount(0);
 });
 
 test("权限置灰：sandbox 但无 sync.execute 时入口禁用", async ({ page }) => {
   await setup(page, { permissions: ["game.read", "sync.preview"] });
   await openGameDetail(page);
-  await expect(page.getByRole("button", { name: "Sync to Production" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: SYNC_ENTRY })).toBeDisabled();
 });
 
 test("预览抽屉：按 section 分组 + 计数徽标 + 差异行配色（截图基线）", async ({ page }) => {
