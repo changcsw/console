@@ -25,6 +25,8 @@
       <el-button v-perm="'feature_plugin.write'" type="primary" @click="openCreate">新建插件</el-button>
     </div>
 
+    <p v-if="listError" class="panel__error" role="alert">{{ listError }}</p>
+
     <el-table v-loading="loading" :data="rows" border>
       <el-table-column prop="pluginId" label="插件 ID" min-width="140" />
       <el-table-column prop="pluginName" label="插件名" min-width="120" />
@@ -75,16 +77,16 @@
     </div>
 
     <el-drawer v-model="drawerVisible" :title="editing ? '编辑插件' : '新建插件'" size="520px">
-      <el-form label-position="top">
-        <el-form-item label="插件 ID">
+      <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
+        <el-form-item label="插件 ID" prop="pluginId">
           <el-input
             v-model="form.pluginId"
             :disabled="editing"
-            placeholder="小写字母/数字/下划线，字母或数字开头，如 huawei_push"
+            placeholder="小写字母/数字/下划线，字母开头，如 huawei_push"
           />
           <p v-if="editing" class="panel__hint">创建后不可改：插件 ID 是插件实例配置的引用键。</p>
         </el-form-item>
-        <el-form-item label="插件名">
+        <el-form-item label="插件名" prop="pluginName">
           <el-input v-model="form.pluginName" placeholder="1-64 字符，如 华为推送" />
         </el-form-item>
         <el-form-item label="插件分类">
@@ -92,7 +94,7 @@
             <el-option v-for="c in categories" :key="c.id" :label="c.categoryName" :value="c.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="国内/海外">
+        <el-form-item label="国内/海外" prop="region">
           <el-select v-model="form.region" :disabled="editing" class="form-control">
             <el-option v-for="r in PLUGIN_REGION_OPTIONS" :key="r" :label="pluginRegionLabel(r)" :value="r" />
           </el-select>
@@ -100,7 +102,7 @@
             创建后不可改：国内/海外属性决定与市场（market）的兼容性，改动会让既有插件配置集体失配。
           </p>
         </el-form-item>
-        <el-form-item label="排序">
+        <el-form-item label="排序" prop="sort">
           <el-input-number v-model="form.sort" :min="0" :max="9999" />
         </el-form-item>
         <el-form-item label="启用">
@@ -118,7 +120,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
 import PageStatusTag from "@/components/page/PageStatusTag.vue";
 import { ApiError } from "@/api/http";
 import type { PluginRegion } from "@/api/modules/channels";
@@ -136,6 +138,8 @@ import { pluginRegionLabel } from "./labels";
 
 const emit = defineEmits<{
   (e: "view-templates", pluginId: string): void;
+  /** 插件删除（含级联删模板版本）成功后发出：父级据此失效参数模板页签的本地缓存 */
+  (e: "plugin-deleted", pluginId: string): void;
 }>();
 
 const rows = ref<FeaturePlugin[]>([]);
@@ -143,6 +147,7 @@ const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
 const loading = ref(false);
+const listError = ref("");
 
 const categories = ref<FeaturePluginCategory[]>([]);
 
@@ -155,6 +160,7 @@ const drawerVisible = ref(false);
 const editing = ref(false);
 const saving = ref(false);
 const formError = ref("");
+const formRef = ref<FormInstance>();
 
 const form = reactive({
   pluginId: "",
@@ -164,6 +170,26 @@ const form = reactive({
   sort: 0,
   enabled: true
 });
+
+// 与后端 ValidatePluginID / ValidateFeaturePluginMaster 同口径，文案对齐后端 message。
+// 编辑态 pluginId / region disabled 不可改，回填值本身合法，rules 照常通过。
+const rules: FormRules = {
+  pluginId: [
+    { required: true, message: "请输入插件 ID", trigger: "blur" },
+    {
+      pattern: /^[a-z][a-z0-9_]*$/,
+      max: 64,
+      message: "插件 ID 只能用小写字母/数字/下划线，且以字母开头，长度不超过 64",
+      trigger: "blur"
+    }
+  ],
+  pluginName: [
+    { required: true, whitespace: true, message: "插件名称必填且不超过 64 字符", trigger: "blur" },
+    { max: 64, message: "插件名称必填且不超过 64 字符", trigger: "blur" }
+  ],
+  region: [{ required: true, message: "请选择国内/海外", trigger: "change" }],
+  sort: [{ type: "integer", min: 0, max: 9999, message: "排序值需在 0-9999 之间", trigger: "change" }]
+};
 
 function reportError(err: unknown, fallback: string, setInline?: (msg: string) => void) {
   if (err instanceof ApiError) {
@@ -219,6 +245,7 @@ function openCreate() {
     sort: 0,
     enabled: true
   });
+  formRef.value?.clearValidate();
   drawerVisible.value = true;
 }
 
@@ -233,11 +260,18 @@ function openEdit(row: FeaturePlugin) {
     sort: row.sort,
     enabled: row.enabled
   });
+  formRef.value?.clearValidate();
   drawerVisible.value = true;
 }
 
 async function submitForm() {
   formError.value = "";
+  // 先过前端即时校验：不过则不置 saving、不发请求
+  try {
+    await formRef.value?.validate();
+  } catch {
+    return;
+  }
   saving.value = true;
   try {
     if (editing.value) {
@@ -272,16 +306,33 @@ async function submitForm() {
 }
 
 async function removePlugin(row: FeaturePlugin) {
+  // 后端删除插件会级联删除其全部参数模板版本，确认文案须说清级联影响
+  const message =
+    row.templateCount > 0
+      ? `确认删除插件「${row.pluginName}」？将同时删除其 ${row.templateCount} 个参数模板版本，删除后不可恢复。`
+      : `确认删除插件「${row.pluginName}」？删除后不可恢复。`;
   try {
-    await ElMessageBox.confirm(`确认删除插件「${row.pluginName}」？`, "删除插件", { type: "warning" });
+    await ElMessageBox.confirm(message, "删除插件", {
+      type: "warning",
+      confirmButtonText: "确认删除",
+      cancelButtonText: "取消",
+      confirmButtonClass: "el-button--danger"
+    });
   } catch {
     return;
   }
+  listError.value = "";
   try {
     await deleteFeaturePlugin(row.pluginId);
     ElMessage.success("已删除插件");
+    emit("plugin-deleted", row.pluginId);
     await reload();
   } catch (err) {
+    // 插件被渠道绑定/渠道实例配置/渠道包覆盖引用时后端返回 409：行内提示，不用 toast，与分类页一致
+    if (err instanceof ApiError && err.code === "CONFLICT") {
+      listError.value = err.message || "该插件仍被渠道引用，无法删除";
+      return;
+    }
     reportError(err, "删除插件失败");
   }
 }

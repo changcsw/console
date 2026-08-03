@@ -65,6 +65,7 @@ type PanelVm = {
   filterCategoryId: number | "";
   filterRegion: string;
   filterEnabled: string;
+  listError: string;
   editing: boolean;
   formError: string;
   form: Record<string, unknown>;
@@ -256,6 +257,14 @@ describe("FeaturePluginsPanel", () => {
       new ApiError(409, "CONFLICT", "插件 ID 已存在：huawei_push")
     );
     vm.openCreate();
+    // 前端 rules 先跑：赋合法值确保通过即时校验，才轮得到后端返回的错误展示
+    Object.assign(vm.form, {
+      pluginId: "huawei_push",
+      pluginName: "华为推送",
+      region: "domestic",
+      sort: 0,
+      enabled: true
+    });
     await vm.submitForm();
     expect(vm.formError).toBe("插件 ID 已存在：huawei_push");
     expect(vm.drawerVisible).toBe(true);
@@ -283,17 +292,65 @@ describe("FeaturePluginsPanel", () => {
     expect(wrapper.emitted("view-templates")).toEqual([["huawei_push"]]);
   });
 
-  test("删除成功后刷新列表", async () => {
+  test("删除成功后刷新列表，确认弹窗说清级联删除的模板版本数", async () => {
     vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
     deleteFeaturePluginApi.mockResolvedValue(undefined);
     const wrapper = await mountPanel();
     const vm = wrapper.vm as unknown as PanelVm;
 
     await vm.removePlugin(plugin());
-    expect(ElMessageBox.confirm).toHaveBeenCalled();
+    // 级联删除二次确认：templateCount>0 时点明版本数与不可恢复，确认键 danger 样式
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      "确认删除插件「华为推送」？将同时删除其 3 个参数模板版本，删除后不可恢复。",
+      "删除插件",
+      expect.objectContaining({
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消",
+        confirmButtonClass: "el-button--danger"
+      })
+    );
     expect(deleteFeaturePluginApi).toHaveBeenCalledWith("huawei_push");
     // 挂载 1 次 + 删除后刷新 1 次
     expect(listFeaturePluginsApi).toHaveBeenCalledTimes(2);
+    expect(vm.listError).toBe("");
+    // 通知父级失效参数模板页签缓存
+    expect(wrapper.emitted("plugin-deleted")).toEqual([["huawei_push"]]);
+  });
+
+  test("无模板版本的插件删除确认文案不带模板数", async () => {
+    vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
+    deleteFeaturePluginApi.mockResolvedValue(undefined);
+    const wrapper = await mountPanel();
+    const vm = wrapper.vm as unknown as PanelVm;
+
+    await vm.removePlugin(plugin({ templateCount: 0 }));
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(
+      "确认删除插件「华为推送」？删除后不可恢复。",
+      "删除插件",
+      expect.objectContaining({ type: "warning", confirmButtonText: "确认删除" })
+    );
+    expect(deleteFeaturePluginApi).toHaveBeenCalledWith("huawei_push");
+  });
+
+  test("删除被渠道引用的插件返回 409 时行内提示，不刷新也不发 plugin-deleted", async () => {
+    vi.spyOn(ElMessageBox, "confirm").mockResolvedValue("confirm" as never);
+    deleteFeaturePluginApi.mockRejectedValue(
+      new ApiError(409, "CONFLICT", "该插件仍有关联数据（渠道绑定 2 条、渠道实例配置 3 条），请先删除关联数据")
+    );
+    const wrapper = await mountPanel();
+    const vm = wrapper.vm as unknown as PanelVm;
+
+    await vm.removePlugin(plugin());
+    await flushPromises();
+
+    expect(vm.listError).toBe("该插件仍有关联数据（渠道绑定 2 条、渠道实例配置 3 条），请先删除关联数据");
+    // 409 不触发刷新，行数据保持
+    expect(listFeaturePluginsApi).toHaveBeenCalledTimes(1);
+    expect(wrapper.emitted("plugin-deleted")).toBeUndefined();
+    const alert = wrapper.find(".panel__error[role=alert]");
+    expect(alert.exists()).toBe(true);
+    expect(alert.text()).toContain("渠道绑定 2 条");
   });
 
   test("取消删除时不调后端", async () => {

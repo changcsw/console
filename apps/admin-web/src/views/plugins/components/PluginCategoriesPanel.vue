@@ -41,8 +41,8 @@
     </el-table>
 
     <el-drawer v-model="drawerVisible" :title="editing ? '编辑分类' : '新建分类'" size="480px">
-      <el-form label-position="top">
-        <el-form-item label="分类编码">
+      <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
+        <el-form-item label="分类编码" prop="categoryCode">
           <el-input
             v-model="form.categoryCode"
             :disabled="editing"
@@ -50,10 +50,10 @@
           />
           <p v-if="editing" class="panel__hint">创建后不可改：分类编码是分类的引用键。</p>
         </el-form-item>
-        <el-form-item label="分类名">
+        <el-form-item label="分类名" prop="categoryName">
           <el-input v-model="form.categoryName" placeholder="1-64 字符，如 登录类" />
         </el-form-item>
-        <el-form-item label="排序">
+        <el-form-item label="排序" prop="sort">
           <el-input-number v-model="form.sort" :min="0" :max="9999" />
         </el-form-item>
         <el-form-item label="启用">
@@ -71,7 +71,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
 import PageStatusTag from "@/components/page/PageStatusTag.vue";
 import { ApiError } from "@/api/http";
 import {
@@ -92,6 +92,7 @@ const editing = ref(false);
 const editingId = ref<number | null>(null);
 const saving = ref(false);
 const formError = ref("");
+const formRef = ref<FormInstance>();
 
 const form = reactive({
   categoryCode: "",
@@ -99,6 +100,25 @@ const form = reactive({
   sort: 0,
   enabled: true
 });
+
+// 与后端 ValidateCategoryCode / ValidateFeaturePluginCategory 同口径，文案对齐后端 message。
+// 编辑态 categoryCode disabled 不可改，回填值本身合法，rules 照常通过。
+const rules: FormRules = {
+  categoryCode: [
+    { required: true, message: "请输入分类编码", trigger: "blur" },
+    {
+      pattern: /^[a-z][a-z0-9_]*$/,
+      max: 64,
+      message: "分类编码只能用小写字母/数字/下划线，且以字母开头，长度不超过 64",
+      trigger: "blur"
+    }
+  ],
+  categoryName: [
+    { required: true, whitespace: true, message: "分类名称必填且不超过 64 字符", trigger: "blur" },
+    { max: 64, message: "分类名称必填且不超过 64 字符", trigger: "blur" }
+  ],
+  sort: [{ type: "integer", min: 0, max: 9999, message: "排序值需在 0-9999 之间", trigger: "change" }]
+};
 
 function reportError(err: unknown, fallback: string, setInline?: (msg: string) => void) {
   if (err instanceof ApiError) {
@@ -136,6 +156,7 @@ function openCreate() {
     sort: 0,
     enabled: true
   });
+  formRef.value?.clearValidate();
   drawerVisible.value = true;
 }
 
@@ -149,11 +170,18 @@ function openEdit(row: FeaturePluginCategory) {
     sort: row.sort,
     enabled: row.enabled
   });
+  formRef.value?.clearValidate();
   drawerVisible.value = true;
 }
 
 async function submitForm() {
   formError.value = "";
+  // 先过前端即时校验：不过则不置 saving、不发请求
+  try {
+    await formRef.value?.validate();
+  } catch {
+    return;
+  }
   saving.value = true;
   try {
     if (editing.value && editingId.value != null) {

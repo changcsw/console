@@ -161,6 +161,8 @@ describe("PluginCategoriesPanel", () => {
       new ApiError(409, "CONFLICT", "分类编码已存在：login")
     );
     vm.openCreate();
+    // 前端 rules 先跑：赋合法值确保通过即时校验，才轮得到后端返回的错误展示
+    Object.assign(vm.form, { categoryCode: "login", categoryName: "登录类", sort: 0, enabled: true });
     await vm.submitForm();
     expect(vm.formError).toBe("分类编码已存在：login");
     expect(vm.drawerVisible).toBe(true);
