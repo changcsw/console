@@ -258,6 +258,8 @@ func TestFeaturePluginRBACForbidden(t *testing.T) {
 	assertStatus(t, h.do(t, http.MethodPost, "/api/admin/feature-plugins", gameSide, map[string]any{
 		"pluginId": "push_sdk", "pluginName": "推送", "region": "domestic",
 	}), http.StatusForbidden)
+	// 删除同样必须用 feature_plugin.write，游戏侧 plugin.write 不能越权删平台主数据。
+	assertStatus(t, h.do(t, http.MethodDelete, "/api/admin/feature-plugins/customer_service", gameSide, nil), http.StatusForbidden)
 }
 
 // ───────────────────────── 分类字典 ─────────────────────────
@@ -826,6 +828,25 @@ func TestDeleteFeaturePlugin(t *testing.T) {
 		t.Fatalf("blocked delete should not write audit, got %+v", h.audit.entries)
 	}
 	delete(h.store.state.gameRefs, 2)
+
+	// apple_pay 被渠道包覆盖引用 → 409（三项外部引用里此前唯一没有 HTTP 层覆盖的一项）。
+	h.store.state.packageOverrideRefs[2] = 5
+	packageBlocked := h.do(t, http.MethodDelete, "/api/admin/feature-plugins/apple_pay", token, nil)
+	assertStatus(t, packageBlocked, http.StatusConflict)
+	if packageBlocked.errCode() != "CONFLICT" {
+		t.Fatalf("want CONFLICT got %q", packageBlocked.errCode())
+	}
+	if !containsSubstring(packageBlocked.errMessage(), "渠道包覆盖 5 条") {
+		t.Fatalf("message should mention package override refs, got %q", packageBlocked.errMessage())
+	}
+	if containsSubstring(packageBlocked.errMessage(), "参数模板") {
+		t.Fatalf("message must never mention 参数模板 (regression guard), got %q", packageBlocked.errMessage())
+	}
+	assertStatus(t, h.do(t, http.MethodGet, "/api/admin/feature-plugins/apple_pay", token, nil), http.StatusOK)
+	if _, ok := h.audit.byAction("feature_plugin.delete"); ok {
+		t.Fatalf("blocked delete should not write audit, got %+v", h.audit.entries)
+	}
+	delete(h.store.state.packageOverrideRefs, 2)
 
 	// realname 有 2 个模板版本但无渠道侧引用 → 204，模板随插件级联删除，
 	// 且 409 文案不再把「参数模板」列为需要先清理的项（否则建过模板的插件永远删不掉）。

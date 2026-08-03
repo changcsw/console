@@ -16,26 +16,29 @@ import (
 // memState 是插件分类字典 + 插件主数据 + 参数模板的内存快照，仅用于进程内 httptest 全链路覆盖
 // （transport -> app -> domain），不依赖真实 PG。InTx 通过克隆/回填实现真实回滚语义。
 // 这些表位于共享 schema platform，与 env 无关，因此本层不建模 env 维度。
-// gameRefs / channelRefs 模拟外部引用（game_channel_plugin_configs、
-// platform.channel_feature_plugins）：只影响插件能否删除（模板不阻断，随插件级联删除）。
+// gameRefs / channelRefs / packageOverrideRefs 模拟外部引用（game_channel_plugin_configs、
+// platform.channel_feature_plugins、channel_package_plugin_overrides）：只影响插件能否删除
+// （模板不阻断，随插件级联删除）。
 type memState struct {
-	categories  map[int64]*domainplugin.FeaturePluginCategory
-	plugins     map[string]*domainplugin.FeaturePlugin
-	templates   map[int64]*domainplugin.FeaturePluginTemplate
-	gameRefs    map[int64]int
-	channelRefs map[int64]int
-	catSeq      int64
-	pluginSeq   int64
-	tplSeq      int64
+	categories          map[int64]*domainplugin.FeaturePluginCategory
+	plugins             map[string]*domainplugin.FeaturePlugin
+	templates           map[int64]*domainplugin.FeaturePluginTemplate
+	gameRefs            map[int64]int
+	channelRefs         map[int64]int
+	packageOverrideRefs map[int64]int
+	catSeq              int64
+	pluginSeq           int64
+	tplSeq              int64
 }
 
 func newMemState() *memState {
 	st := &memState{
-		categories:  map[int64]*domainplugin.FeaturePluginCategory{},
-		plugins:     map[string]*domainplugin.FeaturePlugin{},
-		templates:   map[int64]*domainplugin.FeaturePluginTemplate{},
-		gameRefs:    map[int64]int{},
-		channelRefs: map[int64]int{},
+		categories:          map[int64]*domainplugin.FeaturePluginCategory{},
+		plugins:             map[string]*domainplugin.FeaturePlugin{},
+		templates:           map[int64]*domainplugin.FeaturePluginTemplate{},
+		gameRefs:            map[int64]int{},
+		channelRefs:         map[int64]int{},
+		packageOverrideRefs: map[int64]int{},
 	}
 	loginCat := st.seedCategory("login", "登录类", 10, true)
 	payCat := st.seedCategory("payment", "支付类", 20, true)
@@ -88,14 +91,15 @@ var seedTime = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 func (s *memState) clone() *memState {
 	out := &memState{
-		categories:  map[int64]*domainplugin.FeaturePluginCategory{},
-		plugins:     map[string]*domainplugin.FeaturePlugin{},
-		templates:   map[int64]*domainplugin.FeaturePluginTemplate{},
-		gameRefs:    map[int64]int{},
-		channelRefs: map[int64]int{},
-		catSeq:      s.catSeq,
-		pluginSeq:   s.pluginSeq,
-		tplSeq:      s.tplSeq,
+		categories:          map[int64]*domainplugin.FeaturePluginCategory{},
+		plugins:             map[string]*domainplugin.FeaturePlugin{},
+		templates:           map[int64]*domainplugin.FeaturePluginTemplate{},
+		gameRefs:            map[int64]int{},
+		channelRefs:         map[int64]int{},
+		packageOverrideRefs: map[int64]int{},
+		catSeq:              s.catSeq,
+		pluginSeq:           s.pluginSeq,
+		tplSeq:              s.tplSeq,
 	}
 	for k, v := range s.categories {
 		cp := *v
@@ -126,6 +130,9 @@ func (s *memState) clone() *memState {
 	for k, v := range s.channelRefs {
 		out.channelRefs[k] = v
 	}
+	for k, v := range s.packageOverrideRefs {
+		out.packageOverrideRefs[k] = v
+	}
 	return out
 }
 
@@ -135,6 +142,7 @@ func (s *memState) replaceWith(next *memState) {
 	s.templates = next.templates
 	s.gameRefs = next.gameRefs
 	s.channelRefs = next.channelRefs
+	s.packageOverrideRefs = next.packageOverrideRefs
 	s.catSeq = next.catSeq
 	s.pluginSeq = next.pluginSeq
 	s.tplSeq = next.tplSeq
@@ -380,6 +388,7 @@ func (r *memPluginRepo) CountReferences(
 	out := featurepluginapp.FeaturePluginReferences{
 		ChannelBindings: r.state.channelRefs[pluginIDRef],
 		GameConfigs:     r.state.gameRefs[pluginIDRef],
+		PackageOverride: r.state.packageOverrideRefs[pluginIDRef],
 	}
 	for _, tpl := range r.state.templates {
 		if tpl.PluginIDRef == pluginIDRef {
