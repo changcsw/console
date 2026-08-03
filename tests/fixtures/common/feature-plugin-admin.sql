@@ -16,9 +16,23 @@
 -- id 显式固定为 9001+（与 tests/fixtures/sandbox/product.sql 的约定一致）：这三张表的主键是
 -- BIGSERIAL 自增列，多模块共享同一批 fixture 灌入顺序不固定、且随其它模块测试活动增长，
 -- 若不显式定 id，scenario yaml 里按数字路径引用（如 /feature-plugin-categories/{id}）会跟着漂移。
--- 幂等：ON CONFLICT DO NOTHING（按业务键去重），可重复灌入。业务键（category_code/plugin_id/
+-- 幂等：先清理上一轮 scenario 创建的实体（见 §0），再 ON CONFLICT DO NOTHING 按业务键补齐基线，
+-- 可重复灌入。业务键（category_code/plugin_id/
 -- template_version）均加 qa_ 前缀，与 migrations/000020 seed（login/payment/push/ad）及模块 15 的
 -- common/feature-plugin.sql（realname/customer_service/…）互不冲突。
+
+-- ───────────────────────── 0) 清理上一轮 scenario 亲手创建的实体（保证连库回归可重复跑）
+-- create_*_success 三个 case 会真建分类/插件/模板，这些行不属于 fixture 基线；若不清掉，第二轮
+-- 连库回归会因唯一键冲突拿到 409 而假失败。删除顺序：模板 → 插件 → 分类（外键依赖自内向外）。
+DELETE FROM platform.feature_plugin_templates
+WHERE plugin_id_ref IN (
+  SELECT id FROM platform.feature_plugins
+  WHERE plugin_id IN ('qa_sample_plugin', 'qa_scenario_created_plugin')
+);
+
+DELETE FROM platform.feature_plugins WHERE plugin_id = 'qa_scenario_created_plugin';
+
+DELETE FROM platform.feature_plugin_categories WHERE category_code = 'qa_scenario_created_cat';
 
 -- ───────────────────────── 1) RBAC：功能插件管理读写角色（幂等）
 INSERT INTO platform.admin_roles (role_code, role_name)
