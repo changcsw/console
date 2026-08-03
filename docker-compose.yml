@@ -8,8 +8,15 @@ services:
       POSTGRES_DB: admin_console
     ports:
       - "55432:5432"
+    volumes:
+      # 持久化本地开发数据：regression/run.sh 结尾的 `down`（不带 -v）不再清库。
+      # 需要干净库时显式 `docker compose down -v`。
+      - console-pg-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin -d admin_console"]
       interval: 2s
       timeout: 3s
       retries: 30
+
+volumes:
+  console-pg-data:
