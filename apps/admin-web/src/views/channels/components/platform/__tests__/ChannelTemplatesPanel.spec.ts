@@ -144,11 +144,9 @@ describe("ChannelTemplatesPanel", () => {
 
     vm.form.templateVersion = " v3 ";
     vm.draft.fields = [
-      { key: "appId", label: "App ID", component: "input", required: true, order: 10, scope: "both" },
-      { key: "appSecret", label: "密钥", component: "password", required: true, order: 20 }
+      { key: "appId", label: "App ID", component: "input", required: true, order: 10, scope: "both", _isSecret: false, _fileAcceptText: "", _rules: { required: true } },
+      { key: "appSecret", label: "密钥", component: "password", required: true, order: 20, _isSecret: true, _fileAcceptText: "", _rules: { required: true } }
     ];
-    vm.draft.secretFields = ["appSecret"];
-    vm.draft.rulesText = '{"appId":{"required":true}}';
     await vm.submitForm();
 
     const [channelId, payload] = createChannelTemplateApi.mock.calls[0] as [string, Record<string, unknown>];
@@ -194,8 +192,7 @@ describe("ChannelTemplatesPanel", () => {
     vm.openCreate();
     vm.form.templateVersion = "v3";
     // password 字段未登记敏感字段：后端会 400，前端先拦下
-    vm.draft.fields = [{ key: "appSecret", label: "密钥", component: "password", required: true, order: 10 }];
-    vm.draft.secretFields = [];
+    vm.draft.fields = [{ key: "appSecret", label: "密钥", component: "password", required: true, order: 10, _isSecret: false, _fileAcceptText: "", _rules: {} }];
     await vm.submitForm();
 
     expect(vm.formError).toContain("必须登记为敏感字段");
@@ -207,7 +204,7 @@ describe("ChannelTemplatesPanel", () => {
     const wrapper = await mountPanel();
     const vm = wrapper.vm as unknown as PanelVm;
     vm.openCreate();
-    vm.draft.fields = [{ key: "appId", label: "App ID", component: "input", order: 10 }];
+    vm.draft.fields = [{ key: "appId", label: "App ID", component: "input", order: 10, _isSecret: false, _fileAcceptText: "", _rules: {} }];
     vm.form.templateVersion = "  ";
     await vm.submitForm();
     expect(vm.formError).toBe("版本号必填");
@@ -223,7 +220,7 @@ describe("ChannelTemplatesPanel", () => {
 
     vm.openCreate();
     vm.form.templateVersion = "v1";
-    vm.draft.fields = [{ key: "appId", label: "App ID", component: "input", order: 10 }];
+    vm.draft.fields = [{ key: "appId", label: "App ID", component: "input", order: 10, _isSecret: false, _fileAcceptText: "", _rules: {} }];
     await vm.submitForm();
 
     expect(vm.formError).toBe("该渠道下模版版本 v1 已存在");

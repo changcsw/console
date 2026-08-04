@@ -119,9 +119,6 @@ func TestValidateFeaturePluginTemplate(t *testing.T) {
 		{"敏感字段未在表单声明", func(tpl *FeaturePluginTemplate) {
 			tpl.SecretFields = append(tpl.SecretFields, "ghost")
 		}, "secretFieldsJson"},
-		{"校验规则字段未在表单声明", func(tpl *FeaturePluginTemplate) {
-			tpl.ValidationRules = map[string]PluginValidationRule{"ghost": {Required: true}}
-		}, "validationRulesJson"},
 		{"正则无法编译", func(tpl *FeaturePluginTemplate) {
 			tpl.ValidationRules = map[string]PluginValidationRule{"appId": {Pattern: "([a-z"}}
 		}, "validationRulesJson.appId.pattern"},
@@ -142,6 +139,18 @@ func TestValidateFeaturePluginTemplate(t *testing.T) {
 				t.Fatalf("want issue on %q, got %+v", tc.field, issues)
 			}
 		})
+	}
+}
+
+// validation_rules 的 key 允许不在 form_schema 中声明：真实模板字段命名不确定（00 §4.4.1 变更）。
+func TestValidateFeaturePluginTemplateAllowsUndeclaredRuleKey(t *testing.T) {
+	valid := FeaturePluginTemplate{
+		TemplateVersion: "v1",
+		FormSchema:      []PluginFormField{{Key: "appId", Label: "App ID", Component: "input", Required: true, Order: 10}},
+		ValidationRules: map[string]PluginValidationRule{"ghost": {Required: true}},
+	}
+	if issues := ValidateFeaturePluginTemplate(valid); len(issues) != 0 {
+		t.Fatalf("expected valid, got %+v", issues)
 	}
 }
 

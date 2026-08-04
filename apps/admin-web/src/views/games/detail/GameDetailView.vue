@@ -32,7 +32,7 @@
         <el-button type="primary" @click="goBack">返回列表</el-button>
       </div>
 
-      <el-tabs v-else-if="game" v-model="activeTab">
+      <el-tabs v-else-if="game" v-model="activeTab" :key="contentKey">
         <el-tab-pane label="市场与法务" name="markets" lazy>
           <MarketsTab :game="game" @updated="onUpdated" />
         </el-tab-pane>
@@ -108,6 +108,7 @@ const game = ref<GameDetail | null>(null);
 const loading = ref(false);
 const notFound = ref(false);
 const activeTab = ref("markets");
+const contentKey = ref(0);
 const syncDrawerOpen = ref(false);
 const syncJobsTabRef = ref<{ reload: (page?: number) => Promise<void> } | null>(null);
 const basicInfoRef = ref<{ openEdit: () => void } | null>(null);
@@ -139,6 +140,15 @@ async function onSyncExecuted(_: SyncExecuteResponse) {
   await syncJobsTabRef.value?.reload(1);
 }
 
+function reloadForEnvironment() {
+  contentKey.value += 1;
+  activeTab.value = "markets";
+  const gameId = route.params.gameId;
+  if (typeof gameId === "string" && gameId) {
+    void load(gameId);
+  }
+}
+
 function applyTopbarState() {
   topbar.setBreadcrumb([
     {
@@ -158,11 +168,8 @@ function applyTopbarState() {
     showSyncButton: app.environment === "sandbox",
     canSyncExecute: canSyncExecute.value && Boolean(game.value),
     onChangeEnvironment(next) {
-      app.setEnvironment(next);
-      const gameId = route.params.gameId;
-      if (typeof gameId === "string" && gameId) {
-        void load(gameId);
-      }
+      app.switchEnvironment(next);
+      reloadForEnvironment();
     },
     onSyncToProduction() {
       openSyncDrawer();

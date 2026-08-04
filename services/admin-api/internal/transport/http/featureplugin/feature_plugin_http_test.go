@@ -1163,12 +1163,6 @@ func TestCreateFeaturePluginTemplateValidation(t *testing.T) {
 			field: "fileFieldsJson",
 		},
 		{
-			name: "校验规则字段未在表单声明",
-			body: withForm([]map[string]any{input("appId")},
-				map[string]any{"validationRulesJson": map[string]any{"ghost": map[string]any{"required": true}}}),
-			field: "validationRulesJson",
-		},
-		{
 			name: "pattern 无法编译",
 			body: withForm([]map[string]any{input("appId")},
 				map[string]any{"validationRulesJson": map[string]any{"appId": map[string]any{"pattern": "([a-z"}}}),

@@ -83,7 +83,7 @@
           <el-input
             v-model="form.templateVersion"
             :disabled="editing"
-            placeholder="字母/数字/点/横线/下划线，如 v1 或 2026.01"
+            placeholder="如 v1"
           />
           <p v-if="editing" class="panel__hint">创建后不可改：要改版本请新建一个版本号。</p>
         </el-form-item>
@@ -202,11 +202,24 @@ async function reload() {
   }
 }
 
+function getNextVersion(): string {
+  const versions = rows.value
+    .map((r) => r.templateVersion)
+    .filter((v) => /^v\d+$/.test(v))
+    .map((v) => parseInt(v.slice(1), 10));
+
+  if (versions.length === 0) {
+    return "v1";
+  }
+  const maxV = Math.max(...versions);
+  return `v${maxV + 1}`;
+}
+
 function openCreate() {
   editing.value = false;
   editingId.value = null;
   formError.value = "";
-  form.templateVersion = "";
+  form.templateVersion = getNextVersion();
   form.enabled = true;
   draft.value = emptyDraft();
   drawerVisible.value = true;

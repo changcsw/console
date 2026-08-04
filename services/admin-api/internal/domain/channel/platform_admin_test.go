@@ -72,13 +72,21 @@ func TestValidateChannelTemplateAcceptsWellFormed(t *testing.T) {
 	}
 }
 
-func TestValidateChannelTemplateRejectsUndeclaredKeys(t *testing.T) {
+func TestValidateChannelTemplateRejectsUndeclaredSecretKey(t *testing.T) {
 	tpl := validTemplate()
 	tpl.SecretFields = append(tpl.SecretFields, "ghost")
-	tpl.ValidationRules["phantom"] = ChannelLoginValidationRule{Required: true}
 	issues := ValidateChannelTemplate(tpl)
-	if len(issues) != 2 {
-		t.Fatalf("expected secret/rule 未声明各 1 条，got %v", issues)
+	if len(issues) != 1 {
+		t.Fatalf("expected secret 未声明 1 条，got %v", issues)
+	}
+}
+
+// validation_rules 的 key 允许不在 form_schema 中声明：真实模版字段命名不确定（00 §4.4.1 变更）。
+func TestValidateChannelTemplateAllowsUndeclaredRuleKey(t *testing.T) {
+	tpl := validTemplate()
+	tpl.ValidationRules["phantom"] = ChannelLoginValidationRule{Required: true}
+	if issues := ValidateChannelTemplate(tpl); len(issues) != 0 {
+		t.Fatalf("expected valid, got %v", issues)
 	}
 }
 

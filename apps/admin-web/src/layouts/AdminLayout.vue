@@ -92,15 +92,28 @@
           >
             同步到生产
           </el-button>
-          <el-dropdown trigger="click" @command="onTopbarEnvironmentCommand">
+          <el-dropdown
+            trigger="click"
+            placement="bottom-start"
+            popper-class="topbar__env-dropdown"
+            :popper-options="envDropdownPopperOptions"
+            @command="onTopbarEnvironmentCommand"
+          >
             <span class="topbar__env-trigger">
               {{ topbar.actions.value.environment }}
               <el-icon><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="sandbox">sandbox</el-dropdown-item>
-                <el-dropdown-item command="production">production</el-dropdown-item>
+                <el-dropdown-item
+                  v-for="env in topbarEnvironments"
+                  :key="env"
+                  :command="env"
+                  :class="{ 'is-active': app.environment === env }"
+                >
+                  <span>{{ env }}</span>
+                  <el-icon v-if="app.environment === env" class="topbar__env-option-check"><Check /></el-icon>
+                </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -122,6 +135,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowRight,
+  Check,
   Connection,
   CreditCard,
   Document,
@@ -148,6 +162,13 @@ const auth = useAuthStore();
 const permission = usePermissionStore();
 const sidebarCollapsed = ref(false);
 const topbar = useTopbarBridge();
+
+const topbarEnvironments = ["develop", "sandbox", "production"] as const;
+
+/** 下拉左移 12px（等于选项左 padding），让选项文字与选中显示文字左对齐 */
+const envDropdownPopperOptions = {
+  modifiers: [{ name: "offset", options: { offset: [-12, 6] } }]
+};
 
 /** 无上传头像时的默认图（图二风格：圆形风景默认头像） */
 const defaultAvatarUrl =
@@ -218,7 +239,7 @@ async function onUserCommand(command: string) {
 }
 
 function onTopbarEnvironmentCommand(command: string) {
-  if (command === "sandbox" || command === "production") {
+  if (command === "develop" || command === "sandbox" || command === "production") {
     topbar.actions.value?.onChangeEnvironment(command);
   }
 }
@@ -423,7 +444,7 @@ function onTopbarEnvironmentCommand(command: string) {
   gap: 4px;
   cursor: pointer;
   color: #9a6700;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
   text-transform: uppercase;
 }

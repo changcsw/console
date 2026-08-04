@@ -88,7 +88,7 @@
           <el-input :model-value="selectedChannelLabel" disabled />
         </el-form-item>
         <el-form-item label="模版种类">
-          <el-select v-model="form.kind" :disabled="editing" class="form-control">
+          <el-select v-model="form.kind" :disabled="editing" class="form-control" @change="onKindChange">
             <el-option label="渠道登录" value="login" />
             <el-option label="渠道 IAP" value="iap" />
           </el-select>
@@ -98,7 +98,7 @@
           <el-input
             v-model="form.templateVersion"
             :disabled="editing"
-            placeholder="字母/数字/点/横线/下划线，如 v1 或 2026.01"
+            placeholder="如 v1"
           />
           <p v-if="editing" class="panel__hint">创建后不可改：要改版本请新建一个版本号。</p>
         </el-form-item>
@@ -221,12 +221,32 @@ async function reload() {
   }
 }
 
+function getNextVersion(kind: string): string {
+  const versions = rows.value
+    .filter((r) => r.kind === kind)
+    .map((r) => r.templateVersion)
+    .filter((v) => /^v\d+$/.test(v))
+    .map((v) => parseInt(v.slice(1), 10));
+
+  if (versions.length === 0) {
+    return "v1";
+  }
+  const maxV = Math.max(...versions);
+  return `v${maxV + 1}`;
+}
+
+function onKindChange() {
+  if (!editing.value) {
+    form.templateVersion = getNextVersion(form.kind);
+  }
+}
+
 function openCreate() {
   editing.value = false;
   editingId.value = null;
   formError.value = "";
   form.kind = filterKind.value || "login";
-  form.templateVersion = "";
+  form.templateVersion = getNextVersion(form.kind);
   form.enabled = true;
   draft.value = emptyDraft();
   drawerVisible.value = true;

@@ -206,7 +206,7 @@ async function reloadSummary() {
       withTopItems: withTopItems.value,
       topN: 5
     });
-    app.setEnvironment(summary.value.environment);
+    app.syncServerEnvironment(summary.value.environment);
   } catch (err) {
     const message = err instanceof ApiError ? err.message : "请求失败";
     errorMessage.value = message;

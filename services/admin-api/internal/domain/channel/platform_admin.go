@@ -52,7 +52,8 @@ var (
 // 模版字段组件取值集合（与前端表单渲染器一致）。
 var templateComponents = []string{"input", "password", "textarea", "number", "select", "switch", "file", "json"}
 
-// 模版字段作用域取值集合（空串表示不区分）。
+// 模版字段作用域取值集合。"" 表示不区分（语义等价于双端）；"both" 是历史遗留取值，语义与 ""
+// 完全相同，仅为兼容旧数据保留在允许集合里，新数据统一走 ""（前端编辑器已不再提供 "both" 选项）。
 var templateScopes = []string{"", "client", "server", "both"}
 
 // ValidateChannelMaster 校验平台渠道主数据（创建/编辑共用，无 IO）。
@@ -104,10 +105,10 @@ func ValidateChannelPolicy(p ChannelPolicy) []ValidationIssue {
 
 // ValidateChannelTemplate 校验渠道模版四件套自洽性（无 IO）：
 //   - template_version 格式；form_schema 非空、key 唯一合法、component/scope 枚举
-//   - secret_fields / file_fields / validation_rules 的 key 必须在 form_schema 中声明
+//   - secret_fields / file_fields 的 key 必须在 form_schema 中声明
 //   - component=file ⇔ 出现在 file_fields；component=password ⇒ 必须声明为 secret_fields
 //     （避免管理员建出「口令字段明文入库」的模版）
-//   - validation_rules 的 pattern 必须可编译
+//   - validation_rules 的 key 不要求在 form_schema 中声明（字段命名不确定），但 pattern 必须可编译
 func ValidateChannelTemplate(tpl ChannelTemplate) []ValidationIssue {
 	issues := []ValidationIssue{}
 	if !templateVersionPattern.MatchString(tpl.TemplateVersion) || len(tpl.TemplateVersion) > 32 {
@@ -136,7 +137,7 @@ func ValidateChannelTemplate(tpl ChannelTemplate) []ValidationIssue {
 			issues = append(issues, ValidationIssue{Field: field + ".component", Rule: "enum", Message: "组件类型非法：" + f.Component})
 		}
 		if !slices.Contains(templateScopes, f.Scope) {
-			issues = append(issues, ValidationIssue{Field: field + ".scope", Rule: "enum", Message: "scope 只能为 client/server/both"})
+			issues = append(issues, ValidationIssue{Field: field + ".scope", Rule: "enum", Message: "scope 只能为 空串(不区分)/client/server"})
 		}
 		if f.Component == "select" && len(f.Options) == 0 {
 			issues = append(issues, ValidationIssue{Field: field + ".options", Rule: "required", Message: "下拉字段必须配置选项"})
@@ -185,11 +186,10 @@ func ValidateChannelTemplate(tpl ChannelTemplate) []ValidationIssue {
 		}
 	}
 
+	// validation_rules 的 key 不要求必须在 form_schema 中声明：真实模版字段命名多变（如 appId 也可能叫
+	// clientId），管理员按需为任意字段登记规则即可；运行时 ValidateLoginConfigAgainstTemplate 已将
+	// validation_rules 的 key 一并纳入 allowed 集合，不依赖 form_schema 是否声明同名字段。
 	for key, rule := range tpl.ValidationRules {
-		if _, ok := keys[key]; !ok {
-			issues = append(issues, ValidationIssue{Field: "validationRulesJson", Rule: "unknown", Message: "校验规则字段未在表单中声明：" + key})
-			continue
-		}
 		if rule.Pattern == "" {
 			continue
 		}

@@ -6,29 +6,35 @@ import {
   draftToPayload,
   emptyDraft,
   fieldKeys,
-  parseRules,
   textToAccept,
-  type TemplateDraft
+  type TemplateDraft,
+  type EditorField
 } from "../templateDraft";
 
-function draft(overrides: Partial<TemplateDraft> = {}): TemplateDraft {
+function draft(overrides: { fields?: Partial<EditorField>[] } = {}): TemplateDraft {
+  const defaultField: EditorField = {
+    key: "appId",
+    label: "App ID",
+    component: "input",
+    required: true,
+    order: 10,
+    group: "",
+    scope: "both",
+    _isSecret: false,
+    _fileAcceptText: "",
+    _rules: {}
+  };
   return {
-    fields: [
-      { key: "appId", label: "App ID", component: "input", required: true, order: 10, group: "", scope: "both" }
-    ],
-    secretFields: [],
-    fileFields: [],
-    rulesText: "{}",
-    ...overrides
+    fields: (overrides.fields ?? [defaultField]).map((f) => ({ ...defaultField, ...f })) as EditorField[]
   };
 }
 
 describe("templateDraft", () => {
-  test("emptyDraft 以一个空字段起步，规则文本为空对象", () => {
+  test("emptyDraft 以一个空字段起步", () => {
     const d = emptyDraft();
     expect(d.fields).toHaveLength(1);
     expect(d.fields[0].component).toBe("input");
-    expect(d.rulesText).toBe("{}");
+    expect(d.fields[0]._rules).toEqual({ required: false, minLen: undefined, maxLen: undefined, min: undefined, max: undefined, pattern: undefined, format: undefined });
   });
 
   test("fieldKeys 剔除空白 key", () => {
@@ -45,13 +51,10 @@ describe("templateDraft", () => {
     const result = draftToPayload(
       draft({
         fields: [
-          { key: " appId ", label: " App ID ", component: "input", required: true, order: 10, placeholder: "  " },
-          { key: "appSecret", label: "密钥", component: "password", order: 20 },
-          { key: "keystore", label: "签名文件", component: "file", order: 30 }
-        ],
-        secretFields: ["appSecret"],
-        fileFields: [{ key: "keystore", accept: [" .jks ", ""], maxSizeKB: 2048 }],
-        rulesText: '{"appId":{"required":true,"maxLen":32}}'
+          { key: " appId ", label: " App ID ", component: "input", required: true, order: 10, placeholder: "  ", _rules: { maxLen: 32 } },
+          { key: "appSecret", label: "密钥", component: "password", order: 20, _isSecret: true },
+          { key: "keystore", label: "签名文件", component: "file", order: 30, _fileAcceptText: " .jks ", _fileMaxSizeKB: 2048 }
+        ]
       })
     );
     expect("payload" in result).toBe(true);
@@ -65,7 +68,11 @@ describe("templateDraft", () => {
     expect(payload.formSchemaJson[0].placeholder).toBeUndefined();
     expect(payload.secretFieldsJson).toEqual(["appSecret"]);
     expect(payload.fileFieldsJson).toEqual([{ key: "keystore", accept: [".jks"], maxSizeKB: 2048 }]);
-    expect(payload.validationRulesJson).toEqual({ appId: { required: true, maxLen: 32 } });
+    expect(payload.validationRulesJson).toEqual({
+      appId: { required: true, maxLen: 32 },
+      appSecret: { required: true },
+      keystore: { required: true }
+    });
   });
 
   test("select 字段下发候选项，非 select 字段不带 options", () => {
@@ -108,37 +115,15 @@ describe("templateDraft", () => {
     ["select 无候选项", draft({ fields: [{ key: "mode", label: "模式", component: "select" }] }), "必须配置候选项"],
     [
       "password 未登记敏感字段",
-      draft({ fields: [{ key: "appSecret", label: "密钥", component: "password" }] }),
+      draft({ fields: [{ key: "appSecret", label: "密钥", component: "password", _isSecret: false }] }),
       "必须登记为敏感字段"
-    ],
-    [
-      "file 未登记文件字段",
-      draft({ fields: [{ key: "keystore", label: "签名", component: "file" }] }),
-      "必须登记到文件字段列表"
-    ],
-    ["规则不是 JSON", draft({ rulesText: "{oops" }), "不是合法 JSON"],
-    ["规则不是对象", draft({ rulesText: "[1,2]" }), "必须是 JSON 对象"],
-    ["规则字段未声明", draft({ rulesText: '{"ghost":{"required":true}}' }), "校验规则字段未在表单中声明：ghost"]
+    ]
   ])("前置校验拦截：%s", (_name, input, expected) => {
     const result = draftToPayload(input);
     expect("error" in result).toBe(true);
     if ("error" in result) {
       expect(result.error).toContain(expected);
     }
-  });
-
-  test("敏感字段/文件字段里的悬空 key 被剔除而不是报错", () => {
-    const result = draftToPayload(
-      draft({
-        secretFields: ["ghost"],
-        fileFields: [{ key: "ghost" }]
-      })
-    );
-    if (!("payload" in result)) {
-      throw new Error(result.error);
-    }
-    expect(result.payload.secretFieldsJson).toEqual([]);
-    expect(result.payload.fileFieldsJson).toEqual([]);
   });
 
   test("draftFromTemplate 回填并深拷贝，编辑不污染原响应", () => {
@@ -148,11 +133,13 @@ describe("templateDraft", () => {
       channelId: "huawei_cn",
       templateVersion: "v1",
       formSchemaJson: [
-        { key: "mode", label: "模式", component: "select", options: [{ label: "静默", value: "silent" }] }
+        { key: "mode", label: "模式", component: "select", options: [{ label: "静默", value: "silent" }] },
+        { key: "appSecret", label: "密钥", component: "password" },
+        { key: "keystore", label: "签名", component: "file" }
       ],
       secretFieldsJson: ["appSecret"],
       fileFieldsJson: [{ key: "keystore", accept: [".jks"] }],
-      validationRulesJson: { mode: { required: true } },
+      validationRulesJson: { mode: { required: true, maxLen: 10 } },
       enabled: true,
       effective: true,
       createdAt: "2026-01-01T00:00:00Z",
@@ -160,19 +147,18 @@ describe("templateDraft", () => {
     };
     const d = draftFromTemplate(tpl);
     expect(d.fields[0].options).toEqual([{ label: "静默", value: "silent" }]);
-    expect(d.secretFields).toEqual(["appSecret"]);
-    expect(JSON.parse(d.rulesText)).toEqual({ mode: { required: true } });
+    expect(d.fields[0]._rules).toEqual({ required: true, maxLen: 10, minLen: undefined, min: undefined, max: undefined, pattern: undefined, format: undefined });
+    expect(d.fields[1]._isSecret).toBe(true);
+    expect(d.fields[2]._fileAcceptText).toBe(".jks");
 
     d.fields[0].options![0].label = "改了";
-    d.secretFields.push("x");
-    d.fileFields[0].accept!.push(".p12");
+    d.fields[0]._rules.maxLen = 20;
+    d.fields[1]._isSecret = false;
+    d.fields[2]._fileAcceptText = ".p12";
     expect(tpl.formSchemaJson[0].options![0].label).toBe("静默");
     expect(tpl.secretFieldsJson).toEqual(["appSecret"]);
     expect(tpl.fileFieldsJson[0].accept).toEqual([".jks"]);
-  });
-
-  test("parseRules 把空文本视为空对象", () => {
-    expect(parseRules("   ")).toEqual({ value: {} });
+    expect(tpl.validationRulesJson["mode"].maxLen).toBe(10);
   });
 
   test("accept 数组与逗号文本互转", () => {

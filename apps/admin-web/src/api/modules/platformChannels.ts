@@ -14,7 +14,11 @@ import type {
 
 export type { ChannelRegion, ChannelType, LoginMode, PaymentMode, TemplateFieldOption };
 
-/** 模版字段作用域，空串表示不区分 */
+/**
+ * 模版字段作用域，空串表示不区分。
+ * "both" 是历史遗留取值，语义与 "" 完全等价（详见 build_runtime_config.go 里 "" 会被当作 "both" 处理）；
+ * 编辑器不再提供 "both" 选项，仅保留在类型里以兼容旧数据的读取/展示，新数据统一落 ""。
+ */
 export type TemplateFieldScope = "" | "client" | "server" | "both";
 
 export const CHANNEL_TYPE_OPTIONS: ChannelType[] = ["store", "domestic", "mini_game"];
@@ -32,7 +36,8 @@ export const TEMPLATE_COMPONENT_OPTIONS: FormFieldComponent[] = [
   "file",
   "json"
 ];
-export const TEMPLATE_SCOPE_OPTIONS: TemplateFieldScope[] = ["", "client", "server", "both"];
+// 编辑器可选项去掉了 "both"："不区分"（""）语义上就是双端，两者同时保留会让人以为是两种不同行为。
+export const TEMPLATE_SCOPE_OPTIONS: TemplateFieldScope[] = ["", "client", "server"];
 
 /** 渠道模版种类：登录模版与 IAP 模版分表存储，同渠道下版本号互不冲突 */
 export type ChannelTemplateKind = "login" | "iap";

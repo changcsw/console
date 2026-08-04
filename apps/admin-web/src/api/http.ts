@@ -90,7 +90,7 @@ async function doRequest<T>(path: string, options: RequestOptions | undefined, a
 
   const environment = response.headers.get("X-Environment");
   if (environment) {
-    useAppStore().setEnvironment(environment);
+    useAppStore().syncServerEnvironment(environment);
   }
 
   let body: unknown = null;

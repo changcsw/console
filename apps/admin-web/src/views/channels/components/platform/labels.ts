@@ -31,11 +31,12 @@ const TEMPLATE_KIND_LABELS: Record<ChannelTemplateKind, string> = {
   iap: "渠道 IAP"
 };
 
+// "both" 不再是可选项（语义等价于 ""），只保留映射用于兼容展示尚未被回填成 "" 的历史数据。
 const SCOPE_LABELS: Record<TemplateFieldScope, string> = {
   "": "不区分",
   client: "客户端",
   server: "服务端",
-  both: "双端"
+  both: "不区分"
 };
 
 export function channelTypeLabel(value: string): string {

@@ -1,4 +1,5 @@
 import { ref } from "vue";
+import type { EnvironmentName } from "@/stores/app";
 
 export type TopbarBreadcrumbItem = {
   key: string;
@@ -10,7 +11,7 @@ export type TopbarActions = {
   environment: string;
   showSyncButton: boolean;
   canSyncExecute: boolean;
-  onChangeEnvironment: (next: "sandbox" | "production") => void;
+  onChangeEnvironment: (next: EnvironmentName) => void;
   onSyncToProduction: () => void;
 };
 

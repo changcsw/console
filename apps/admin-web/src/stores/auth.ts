@@ -160,7 +160,7 @@ export const useAuthStore = defineStore("auth", {
       };
       usePermissionStore().setFromUser({ roles: me.roles, permissions: me.permissions });
       if (me.environment) {
-        useAppStore().setEnvironment(me.environment);
+        useAppStore().syncServerEnvironment(me.environment);
       }
       this.persist();
       return me;

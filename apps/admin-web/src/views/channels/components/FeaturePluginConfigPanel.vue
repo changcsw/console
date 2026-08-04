@@ -79,6 +79,7 @@
                   <div class="field-label">
                     <span>{{ field.label || field.key }}</span>
                     <el-tag v-if="field.scope === 'server'" size="small" type="warning">仅服务端，不下发客户端</el-tag>
+                    <el-tag v-else-if="field.scope === 'client'" size="small" type="info">仅客户端使用</el-tag>
                   </div>
                 </template>
 
