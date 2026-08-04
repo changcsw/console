@@ -83,25 +83,43 @@
     </template>
 
     <el-drawer v-model="drawerVisible" :title="drawerTitle" size="760px">
-      <el-form label-position="top">
+      <div v-if="editing" class="edit-readonly-info">
+        <div class="info-item">
+          <b>渠道</b>
+          <span>{{ selectedChannelLabel }}</span>
+        </div>
+        <div class="info-item">
+          <b>模版种类</b>
+          <el-tooltip content="创建后不可改。" placement="top">
+            <span class="info-value-with-tooltip">{{ templateKindLabel(form.kind) }}</span>
+          </el-tooltip>
+        </div>
+        <div class="info-item">
+          <b>版本号</b>
+          <el-tooltip content="创建后不可改：要改版本请新建一个版本号。" placement="top">
+            <span class="info-value-with-tooltip">{{ form.templateVersion }}</span>
+          </el-tooltip>
+        </div>
+      </div>
+      <el-form v-else label-position="top">
         <el-form-item label="渠道">
           <el-input :model-value="selectedChannelLabel" disabled />
         </el-form-item>
         <el-form-item label="模版种类">
-          <el-select v-model="form.kind" :disabled="editing" class="form-control" @change="onKindChange">
+          <el-select v-model="form.kind" class="form-control" @change="onKindChange">
             <el-option label="渠道登录" value="login" />
             <el-option label="渠道 IAP" value="iap" />
           </el-select>
-          <p v-if="editing" class="panel__hint">创建后不可改。</p>
         </el-form-item>
         <el-form-item label="版本号">
           <el-input
             v-model="form.templateVersion"
-            :disabled="editing"
             placeholder="如 v1"
           />
-          <p v-if="editing" class="panel__hint">创建后不可改：要改版本请新建一个版本号。</p>
         </el-form-item>
+      </el-form>
+
+      <el-form label-position="top" :class="{ 'mt-4': editing }">
         <el-form-item label="启用">
           <el-switch v-model="form.enabled" />
         </el-form-item>
@@ -391,5 +409,36 @@ onMounted(() => {
 
 .text-muted {
   color: var(--text-subtle);
+}
+
+.edit-readonly-info {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  margin-bottom: 24px;
+  padding: 16px;
+  background-color: var(--el-fill-color-light, #f5f7fa);
+  border-radius: 4px;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.info-item b {
+  font-weight: 600;
+  color: var(--el-text-color-regular, #606266);
+}
+
+.info-value-with-tooltip {
+  cursor: help;
+  border-bottom: 1px dashed var(--el-border-color, #dcdfe6);
+}
+
+.mt-4 {
+  margin-top: 16px;
 }
 </style>
